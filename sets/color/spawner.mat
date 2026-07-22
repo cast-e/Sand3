@@ -1,9 +1,10 @@
 {
-    "name": "void",
+    "name": "spawner",
+    "id": 5,
     "color": [
-        0,
-        0,
-        0
+        255,
+        255,
+        255
     ],
     "rules": [
         {
@@ -41,19 +42,19 @@
                 "",
                 "",
                 "",
-                "air",
-                "air",
-                "air",
+                "red",
+                "red",
+                "red",
                 "",
                 "",
-                "air",
+                "red",
                 "",
-                "air",
+                "red",
                 "",
                 "",
-                "air",
-                "air",
-                "air",
+                "red",
+                "red",
+                "red",
                 "",
                 "",
                 "",

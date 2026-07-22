@@ -33,12 +33,12 @@ private:
 	void render_modals(Grid& grid);
 
 	char save_file_name_buf[128] = "";
-	char new_set_name_tab_buf[64] = "";
 	char save_as_buf[64] = "";
 	char new_set_name_buf[64] = "";
+	char rename_set_buf[64] = "";
 
-	int selected_save_idx = -1;
-	int selected_idx = -1;
+	int selected_save_id = -1;
+	int selected_id = -1;
 	int mouse_size = 5;
 
 	bool open_switch_popup = false;

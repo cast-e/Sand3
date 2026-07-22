@@ -4,7 +4,8 @@
 #include <imgui_impl_sdl3.h>
 
 #include "grid.hpp"
-#include "material.hpp"
+#include "material_manager.hpp"
+#include "set_manager.hpp"
 #include "ui.hpp"
 #include "window.hpp"
 
@@ -12,19 +13,7 @@ int main() {
 	Window window(1280, 720);
 	Grid grid;
 
-	auto sets = MaterialManager::get_sets();
-	std::string start_set = "default";
-	bool default_found = false;
-	for (const auto& s : sets) {
-		if (s == "default") {
-			default_found = true;
-			break;
-		}
-	}
-	if (!default_found && !sets.empty()) {
-		start_set = sets[0];
-	}
-	MaterialManager::set_current_set(start_set, grid);
+	SetManager::set_current_set(SetManager::get_sets()[0], grid);
 
 	UI ui(window);
 

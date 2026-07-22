@@ -8,15 +8,15 @@
 #include <vector>
 
 #include "const.hpp"
-#include "material.hpp"
+#include "material_manager.hpp"
 #include "window.hpp"
 
 inline constexpr std::array<int, NEIGHBOR_COUNT> compute_neighbor_offsets() {
 	std::array<int, NEIGHBOR_COUNT> offsets{};
-	unsigned int idx = 0;
+	unsigned int id = 0;
 	for (int dy = -2; dy <= 2; ++dy) {
 		for (int dx = -2; dx <= 2; ++dx) {
-			offsets[idx++] = dy * SIM_WIDTH + dx;
+			offsets[id++] = dy * SIM_WIDTH + dx;
 		}
 	}
 	return offsets;
@@ -38,7 +38,7 @@ private:
 	void update_sequential();
 
 public:
-	bool try_apply_rule_fast(const Rule& rule, const unsigned int center_idx, unsigned int& local_changed);
+	bool try_apply_rule_fast(const Rule& rule, const unsigned int center_id, unsigned int& local_changed);
 	bool try_apply_rule_safe(const Rule& rule, const unsigned int x, const unsigned int y, unsigned int& local_changed);
 
 	void update();
@@ -48,9 +48,6 @@ public:
 	unsigned char get_cell(const unsigned int x, const unsigned int y) const;
 	void set_cell(const unsigned int x, const unsigned int y, const unsigned char material);
 	void clear();
-
-	bool save_to_file(const std::string& name, const std::string& current_set) const;
-	bool load_from_file(const std::string& path_or_name, const std::string& current_set, std::string& loaded_set);
 
 	QualityPreset get_quality_preset() const { return quality_preset; }
 	void set_quality_preset(QualityPreset preset) { quality_preset = preset; }

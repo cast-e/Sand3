@@ -13,8 +13,14 @@ set(SOURCES
     window.hpp
     window.cpp
 
-    material.hpp
-    material.cpp
+    material_manager.hpp
+    material_manager.cpp
+
+    set_manager.hpp
+    set_manager.cpp
+
+    save_manager.hpp
+    save_manager.cpp
 
     grid.hpp
     grid.cpp
