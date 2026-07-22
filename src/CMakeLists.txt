@@ -25,11 +25,18 @@ set(SOURCES
     main.cpp
 )
 
-find_package(fmt REQUIRED)
 find_package(Threads REQUIRED)
 
-add_executable(sand3 ${SOURCES})
+if (WIN32)
+    add_executable(sand3 ${SOURCES} "../assets/sand3.rc")
+else()
+    add_executable(sand3 ${SOURCES})
+endif()
 
 target_link_libraries(sand3 PRIVATE fmt::fmt SDL3::SDL3-static Threads::Threads imgui nlohmann_json::nlohmann_json)
+
+if(MINGW)
+    target_link_options(sand3 PRIVATE -static)
+endif()
 
 set_property(TARGET sand3 PROPERTY CXX_STANDARD 20)

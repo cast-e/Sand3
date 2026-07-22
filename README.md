@@ -43,5 +43,7 @@ cd ./bin
 
 All dependencies are included as a submodule in the "third-party/" directory.
 
-- [SDL3](https://github.com/libsdl-org/SDL)
-- [ImGui](https://github.com/ocornut/imgui)
+- [fmt](https://github.com/fmtlib/fmt) - Fast formatting library.
+- [nlohmann_json](https://github.com/nlohmann/json) - Modern JSON for C++.
+- [SDL3](https://github.com/libsdl-org/SDL) - Simple DirectMedia Layer.
+- [imgui](https://github.com/ocornut/imgui) - Dear ImGui.

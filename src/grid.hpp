@@ -64,8 +64,8 @@ private:
 	static constexpr std::array<int, NEIGHBOR_COUNT> neighbor_offsets = compute_neighbor_offsets();
 
 	QualityPreset quality_preset = QualityPreset::Fast;
-	std::array<std::pair<unsigned char, bool>, SIM_SIZE> cells{};
-	std::array<std::pair<unsigned char, bool>, SIM_SIZE> next_cells{};
+	std::vector<std::pair<unsigned char, bool>> cells;
+	std::vector<std::pair<unsigned char, bool>> next_cells;
 
 	unsigned int num_active_threads;
 	std::unique_ptr<std::barrier<>> start_barrier;

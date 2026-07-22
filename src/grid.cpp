@@ -24,6 +24,9 @@ static unsigned int get_concurrency_threads(unsigned int total_cells) {
 }
 
 Grid::Grid() : num_active_threads(get_concurrency_threads(SIM_SIZE)) {
+	cells.resize(SIM_SIZE);
+	next_cells.resize(SIM_SIZE);
+
 	clear();
 
 	start_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
@@ -383,7 +386,7 @@ void Grid::remap_materials(const std::vector<unsigned char>& old_to_new) {
 	}
 }
 
-void Grid::clear() { cells.fill({0, true}); }
+void Grid::clear() { std::fill(cells.begin(), cells.end(), std::pair<unsigned char, bool>{0, true}); }
 
 bool Grid::save_to_file(const std::string& name, const std::string& current_set) const {
 	std::string filepath = "../sets/" + current_set + "/" + name;
