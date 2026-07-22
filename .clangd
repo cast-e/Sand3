@@ -1,0 +1,4 @@
+CompileFlags:
+  Remove:
+    - -include-pch
+    - "*.pch"
