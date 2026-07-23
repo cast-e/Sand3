@@ -34,7 +34,7 @@ set(SOURCES
 find_package(Threads REQUIRED)
 
 if (WIN32)
-    add_executable(sand3 ${SOURCES} "../assets/sand3.rc")
+    add_executable(sand3 ${SOURCES} "sand3.rc")
 else()
     add_executable(sand3 ${SOURCES})
 endif()

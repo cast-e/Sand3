@@ -3,8 +3,6 @@
 #include <string>
 #include <vector>
 
-class Grid;
-
 struct SetMetadata {
 	std::string name;
 	std::string author;
@@ -22,13 +20,13 @@ public:
 	static std::string get_current_set();
 	static const SetMetadata& get_current_metadata();
 
-	static void set_current_set(const std::string& set_name, Grid& grid);
-	static void create_new_empty_set(const std::string& set_name, Grid& grid);
-	static void copy_set(const std::string& source_set_name, const std::string& new_set_name, Grid& grid);
-	static bool rename_set(const std::string& old_set_name, const std::string& new_set_name, Grid& grid);
-	static void delete_set(const std::string& set_name, Grid& grid);
+	static void set_current_set(const std::string& set_name);
+	static void create_new_empty_set(const std::string& set_name);
+	static void copy_set(const std::string& source_set_name, const std::string& new_set_name);
+	static bool rename_set(const std::string& old_set_name, const std::string& new_set_name);
+	static void delete_set(const std::string& set_name);
 
-	static void update_current_metadata(const SetMetadata& metadata, Grid& grid);
+	static void update_current_metadata(const SetMetadata& metadata);
 
 private:
 	static std::string current_set_name;

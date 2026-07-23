@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "const.hpp"
-#include "set_manager.hpp"
 
 struct Rule {
 	std::array<unsigned char, NEIGHBOR_COUNT> when;
@@ -38,8 +37,6 @@ struct Material {
 	std::vector<CompiledUserRule> compiled_rules;
 };
 
-class Grid;
-
 class MaterialManager {
 public:
 	MaterialManager() = delete;
@@ -47,9 +44,9 @@ public:
 	static void load_all_materials(std::string_view directory_path);
 	static void save_all_materials(std::string_view directory_path);
 
-	static void add_material(const Material& mat, Grid& grid);
-	static void edit_material(unsigned char id, const Material& mat, Grid& grid);
-	static void remove_material(unsigned char id, Grid& grid);
+	static void add_material(const Material& mat);
+	static void edit_material(unsigned char id, const Material& mat);
+	static void remove_material(unsigned char id);
 
 	static void rebuild_compiled_rules();
 	static unsigned char get_unused_id();

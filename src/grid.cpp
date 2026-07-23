@@ -5,7 +5,7 @@
 
 #include "const.hpp"
 #include "material_manager.hpp"
-#include "save_manager.hpp"
+#include "window.hpp"
 
 thread_local uint32_t xorshift32_state = 123456789;
 
@@ -16,18 +16,28 @@ inline static uint32_t xorshift32() {
 	return xorshift32_state;
 }
 
-static unsigned int get_concurrency_threads(unsigned int total_cells) {
-	unsigned int n = std::thread::hardware_concurrency();
-	if (n == 0)
-		n = 8;
-	return std::max(1u, std::min(n, total_cells));
-}
+QualityPreset Grid::quality_preset = QualityPreset::Fast;
+std::vector<std::pair<unsigned char, bool>> Grid::cells;
+std::vector<std::pair<unsigned char, bool>> Grid::next_cells;
+unsigned int Grid::num_active_threads = 0;
+std::unique_ptr<std::barrier<>> Grid::start_barrier;
+std::unique_ptr<std::barrier<>> Grid::done_barrier;
+std::unique_ptr<std::barrier<>> Grid::phase_barrier;
+std::vector<std::thread> Grid::workers;
+std::atomic<bool> Grid::shutdown_flag{false};
+std::atomic<unsigned int> Grid::frame_changed{0};
+unsigned int Grid::frame_count = 0;
 
-Grid::Grid() : num_active_threads(get_concurrency_threads(SIM_SIZE)) {
+void Grid::init() {
+	num_active_threads = NUM_STRIPS_Y / 2;
 	cells.resize(SIM_SIZE);
 	next_cells.resize(SIM_SIZE);
 
 	clear();
+
+	shutdown_flag = false;
+	frame_changed = 0;
+	frame_count = 0;
 
 	start_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
 	done_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
@@ -35,12 +45,12 @@ Grid::Grid() : num_active_threads(get_concurrency_threads(SIM_SIZE)) {
 
 	workers.reserve(num_active_threads);
 	for (unsigned int t = 0; t < num_active_threads; ++t) {
-		workers.emplace_back(&Grid::worker_thread, this, t);
+		workers.emplace_back(&Grid::worker_thread, t);
 	}
 }
 
-Grid::~Grid() {
-	shutdown = true;
+void Grid::shutdown() {
+	shutdown_flag = true;
 	if (start_barrier) {
 		start_barrier->arrive_and_wait();
 	}
@@ -49,10 +59,14 @@ Grid::~Grid() {
 			worker.join();
 		}
 	}
+	workers.clear();
+	start_barrier.reset();
+	done_barrier.reset();
+	phase_barrier.reset();
 }
 
 void Grid::configure_threads(unsigned int thread_count) {
-	shutdown = true;
+	shutdown_flag = true;
 	if (start_barrier) {
 		start_barrier->arrive_and_wait();
 	}
@@ -63,7 +77,7 @@ void Grid::configure_threads(unsigned int thread_count) {
 	}
 	workers.clear();
 
-	shutdown = false;
+	shutdown_flag = false;
 	num_active_threads = thread_count;
 
 	if (num_active_threads > 0) {
@@ -73,7 +87,7 @@ void Grid::configure_threads(unsigned int thread_count) {
 
 		workers.reserve(num_active_threads);
 		for (unsigned int t = 0; t < num_active_threads; ++t) {
-			workers.emplace_back(&Grid::worker_thread, this, t);
+			workers.emplace_back(&Grid::worker_thread, t);
 		}
 	} else {
 		start_barrier.reset();
@@ -85,7 +99,7 @@ void Grid::configure_threads(unsigned int thread_count) {
 void Grid::worker_thread(const unsigned int thread_id) {
 	while (true) {
 		start_barrier->arrive_and_wait();
-		if (shutdown) {
+		if (shutdown_flag) {
 			break;
 		}
 
@@ -103,17 +117,17 @@ void Grid::worker_thread(const unsigned int thread_id) {
 			for (unsigned int p_id = 0; p_id < 2; ++p_id) {
 				const unsigned int target_sy_mod = swap_phases ? (1 - p_id) : p_id;
 
+				unsigned int strip_idx_in_phase = 0;
 				for (int sy_id = 0; sy_id < NUM_STRIPS_Y; ++sy_id) {
 					const unsigned int sy = reverse_y ? (NUM_STRIPS_Y - 1 - sy_id) : sy_id;
 					if (sy % 2 != target_sy_mod) {
 						continue;
 					}
 
-					if (sy % num_active_threads != thread_id) {
-						continue;
+					if (strip_idx_in_phase % num_active_threads == thread_id) {
+						update_strip_1d(sy, reverse_x, reverse_y, local_changed);
 					}
-
-					update_strip_1d(sy, reverse_x, reverse_y, local_changed);
+					strip_idx_in_phase++;
 				}
 				phase_barrier->arrive_and_wait();
 			}
@@ -125,8 +139,7 @@ void Grid::worker_thread(const unsigned int thread_id) {
 }
 
 inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rules, const unsigned int cx,
-										const unsigned cy, const bool is_fast_path, unsigned int& local_changed,
-										Grid& grid) {
+										const unsigned cy, const bool is_fast_path, unsigned int& local_changed) {
 	for (const CompiledUserRule& cur : rules) {
 		if (cur.chance > 1 && (xorshift32() % cur.chance) != 0)
 			continue;
@@ -137,21 +150,21 @@ inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rul
 		if (num_variants == 1) {
 			const Rule& rule = cur.variants[0];
 			if (is_fast_path) {
-				match_found = grid.try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed);
+				match_found = Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed);
 			} else {
-				match_found = grid.try_apply_rule_safe(rule, cx, cy, local_changed);
+				match_found = Grid::try_apply_rule_safe(rule, cx, cy, local_changed);
 			}
 		} else if (num_variants == 2) {
 			const unsigned int start_id = xorshift32() & 1;
 			for (unsigned int step = 0; step < 2; ++step) {
 				const Rule& rule = cur.variants[(start_id + step) & 1];
 				if (is_fast_path) {
-					if (grid.try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
+					if (Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
 						match_found = true;
 						break;
 					}
 				} else {
-					if (grid.try_apply_rule_safe(rule, cx, cy, local_changed)) {
+					if (Grid::try_apply_rule_safe(rule, cx, cy, local_changed)) {
 						match_found = true;
 						break;
 					}
@@ -167,12 +180,12 @@ inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rul
 			for (unsigned int step = 0; step < 4; ++step) {
 				const Rule& rule = cur.variants[perms[perm_id][step]];
 				if (is_fast_path) {
-					if (grid.try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
+					if (Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
 						match_found = true;
 						break;
 					}
 				} else {
-					if (grid.try_apply_rule_safe(rule, cx, cy, local_changed)) {
+					if (Grid::try_apply_rule_safe(rule, cx, cy, local_changed)) {
 						match_found = true;
 						break;
 					}
@@ -196,7 +209,7 @@ void Grid::update_strip_1d(const unsigned int sy, const bool reverse_x, const bo
 			const unsigned int cx = reverse_x ? (SIM_WIDTH - 1 - x) : x;
 			const unsigned int cy = reverse_y ? (y_end - 1 - y) : (y_start + y);
 
-			if (cells[cy * SIM_WIDTH + cx].first == 0 || next_cells[cy * SIM_WIDTH + cx].second)
+			if (next_cells[cy * SIM_WIDTH + cx].second)
 				continue;
 
 			const auto& rules = MaterialManager::get_material(cells[cy * SIM_WIDTH + cx].first).compiled_rules;
@@ -205,7 +218,7 @@ void Grid::update_strip_1d(const unsigned int sy, const bool reverse_x, const bo
 
 			const bool is_fast_path = (cx >= 2 && cx < SIM_WIDTH - 2 && cy >= 2 && cy < SIM_HEIGHT - 2);
 
-			apply_compiled_rules(rules, cx, cy, is_fast_path, local_changed, *this);
+			apply_compiled_rules(rules, cx, cy, is_fast_path, local_changed);
 		}
 	}
 }
@@ -222,7 +235,7 @@ void Grid::update_sequential() {
 
 			const unsigned int center_id = cy * SIM_WIDTH + cx;
 
-			if (cells[center_id].first == 0 || next_cells[center_id].second) {
+			if (next_cells[center_id].second) {
 				continue;
 			}
 
@@ -235,7 +248,7 @@ void Grid::update_sequential() {
 
 			xorshift32_state = (cx + 123456789ULL) * (cy + 123456789ULL) * (frame_count + 123456789ULL);
 
-			apply_compiled_rules(rules, cx, cy, is_fast_path, local_changed, *this);
+			apply_compiled_rules(rules, cx, cy, is_fast_path, local_changed);
 		}
 	}
 	frame_changed = local_changed;
@@ -349,32 +362,37 @@ void Grid::update() {
 	cells = next_cells;
 }
 
-void Grid::draw(Window& window) {
-	uint32_t* buffer = window.get_buffer();
+void Grid::draw() {
+	uint32_t* buffer = Window::get_buffer();
 
 	for (unsigned int id = 0; id < SIM_SIZE; ++id) {
 		if (!cells[id].second) {
 			continue;
 		}
 		unsigned char cell = cells[id].first;
-		if (cell != 0) {
-			buffer[id] = MaterialManager::get_material(cell).packed_color;
-		} else {
-			buffer[id] = BG_COLOR;
+		buffer[id] = MaterialManager::get_material(cell).packed_color;
+	}
+}
+
+void Grid::draw_material(unsigned int id) {
+	uint32_t* buffer = Window::get_buffer();
+
+	for (unsigned int id = 0; id < SIM_SIZE; ++id) {
+		if (cells[id].first == id) {
+			continue;
 		}
+		unsigned char cell = cells[id].first;
+		buffer[id] = MaterialManager::get_material(cell).packed_color;
 	}
 }
 
 unsigned char& Grid::get_cell(const unsigned int x, const unsigned int y) { return cells[y * SIM_WIDTH + x].first; }
-unsigned char Grid::get_cell(const unsigned int x, const unsigned int y) const {
-	return cells[y * SIM_WIDTH + x].first;
-}
 void Grid::set_cell(const unsigned int x, const unsigned int y, unsigned char cell) {
 	cells[y * SIM_WIDTH + x].first = cell;
 	cells[y * SIM_WIDTH + x].second = true;
 }
 
-unsigned int Grid::get_changed_cells() const { return frame_changed.load(); }
+unsigned int Grid::get_changed_cells() { return frame_changed.load(); }
 
 void Grid::remap_materials(const std::vector<unsigned char>& old_to_new) {
 	for (auto& cell : cells) {

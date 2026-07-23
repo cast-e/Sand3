@@ -9,7 +9,7 @@
 
 namespace fs = std::filesystem;
 
-std::string SetManager::current_set_name = "new_set";
+std::string SetManager::current_set_name = "";
 SetMetadata SetManager::current_metadata{};
 
 static std::string trim(const std::string& str) {
@@ -32,12 +32,12 @@ std::vector<std::string> SetManager::get_sets() {
 	}
 
 	if (sets.empty()) {
-		std::string default_set_path = base_dir + "/new_set";
-		fs::create_directories(default_set_path);
+		create_new_empty_set("new_set");
 		sets.push_back("new_set");
 	}
 
 	std::sort(sets.begin(), sets.end());
+
 	return sets;
 }
 
@@ -97,14 +97,14 @@ std::string SetManager::get_current_set() { return current_set_name; }
 
 const SetMetadata& SetManager::get_current_metadata() { return current_metadata; }
 
-void SetManager::set_current_set(const std::string& set_name, Grid& grid) {
+void SetManager::set_current_set(const std::string& set_name) {
 	current_set_name = set_name;
 	current_metadata = load_set_metadata(set_name);
 	MaterialManager::load_all_materials("../sets/" + set_name);
-	grid.clear();
+	Grid::clear();
 }
 
-void SetManager::create_new_empty_set(const std::string& set_name, Grid& grid) {
+void SetManager::create_new_empty_set(const std::string& set_name) {
 	std::string set_path = "../sets/" + set_name;
 	fs::create_directories(set_path);
 
@@ -116,10 +116,10 @@ void SetManager::create_new_empty_set(const std::string& set_name, Grid& grid) {
 	current_metadata = meta;
 	MaterialManager::get_materials().clear();
 	MaterialManager::rebuild_compiled_rules();
-	grid.clear();
+	Grid::clear();
 }
 
-void SetManager::copy_set(const std::string& source_set_name, const std::string& new_set_name, Grid& grid) {
+void SetManager::copy_set(const std::string& source_set_name, const std::string& new_set_name) {
 	std::string src_path = "../sets/" + source_set_name;
 	std::string dst_path = "../sets/" + new_set_name;
 
@@ -135,10 +135,10 @@ void SetManager::copy_set(const std::string& source_set_name, const std::string&
 	meta.name = new_set_name;
 	save_set_metadata(new_set_name, meta);
 
-	set_current_set(new_set_name, grid);
+	set_current_set(new_set_name);
 }
 
-bool SetManager::rename_set(const std::string& old_set_name, const std::string& new_set_name, Grid& grid) {
+bool SetManager::rename_set(const std::string& old_set_name, const std::string& new_set_name) {
 	if (old_set_name.empty() || new_set_name.empty() || old_set_name == new_set_name) {
 		return false;
 	}
@@ -170,7 +170,7 @@ bool SetManager::rename_set(const std::string& old_set_name, const std::string& 
 	return true;
 }
 
-void SetManager::delete_set(const std::string& set_name, Grid& grid) {
+void SetManager::delete_set(const std::string& set_name) {
 	std::string set_path = "../sets/" + set_name;
 	if (fs::exists(set_path)) {
 		try {
@@ -180,13 +180,13 @@ void SetManager::delete_set(const std::string& set_name, Grid& grid) {
 
 	auto remaining_sets = get_sets();
 	if (!remaining_sets.empty()) {
-		set_current_set(remaining_sets[0], grid);
+		set_current_set(remaining_sets[0]);
 	} else {
-		create_new_empty_set("new_set", grid);
+		create_new_empty_set("new_set");
 	}
 }
 
-void SetManager::update_current_metadata(const SetMetadata& metadata, Grid& grid) {
+void SetManager::update_current_metadata(const SetMetadata& metadata) {
 	current_metadata = metadata;
 	save_set_metadata(current_set_name, current_metadata);
 }

@@ -1,10 +1,10 @@
 {
-    "name": "sierpinski2",
-    "id": 2,
+    "name": "sierpinski",
+    "id": 1,
     "color": [
-        204,
-        251,
-        102
+        95,
+        205,
+        255
     ],
     "rules": [
         {
@@ -20,13 +20,13 @@
                 "",
                 "",
                 "",
-                "sierpinski2",
+                "empty",
                 "",
                 "",
                 "",
                 "",
-                "",
-                "",
+                "empty",
+                "empty",
                 "",
                 "",
                 "",
@@ -47,13 +47,13 @@
                 "",
                 "",
                 "",
+                "sierpinski",
                 "",
                 "",
                 "",
                 "",
-                "",
-                "",
-                "sierpinski2",
+                "sierpinski",
+                "sierpinski",
                 "",
                 "",
                 "",
@@ -61,7 +61,8 @@
                 "",
                 "",
                 ""
-            ]
+            ],
+            "sym_x": true
         }
     ]
 }

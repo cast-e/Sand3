@@ -9,7 +9,6 @@
 
 #include "const.hpp"
 #include "material_manager.hpp"
-#include "window.hpp"
 
 inline constexpr std::array<int, NEIGHBOR_COUNT> compute_neighbor_offsets() {
 	std::array<int, NEIGHBOR_COUNT> offsets{};
@@ -26,53 +25,57 @@ enum class QualityPreset : int { Slow = 0, Fast = 1 };
 
 class Grid {
 public:
-	Grid();
-	~Grid();
+	Grid() = delete;
 
-	void configure_threads(unsigned int thread_count);
+	static void init();
+	static void shutdown();
+
+	static void configure_threads(unsigned int thread_count);
 
 private:
-	void worker_thread(const unsigned int thread_id);
-	void update_strip_1d(const unsigned int sy, const bool reverse_x, const bool reverse_y,
-						 unsigned int& local_changed);
-	void update_sequential();
+	static void worker_thread(const unsigned int thread_id);
+	static void update_strip_1d(const unsigned int sy, const bool reverse_x, const bool reverse_y,
+								unsigned int& local_changed);
+	static void update_sequential();
 
 public:
-	bool try_apply_rule_fast(const Rule& rule, const unsigned int center_id, unsigned int& local_changed);
-	bool try_apply_rule_safe(const Rule& rule, const unsigned int x, const unsigned int y, unsigned int& local_changed);
+	static bool try_apply_rule_fast(const Rule& rule, const unsigned int center_id, unsigned int& local_changed);
+	static bool try_apply_rule_safe(const Rule& rule, const unsigned int x, const unsigned int y,
+									unsigned int& local_changed);
 
-	void update();
-	void draw(Window& window);
+	static void update();
+	static void draw();
 
-	unsigned char& get_cell(const unsigned int x, const unsigned int y);
-	unsigned char get_cell(const unsigned int x, const unsigned int y) const;
-	void set_cell(const unsigned int x, const unsigned int y, const unsigned char material);
-	void clear();
+	static void draw_material(unsigned int id);
 
-	QualityPreset get_quality_preset() const { return quality_preset; }
-	void set_quality_preset(QualityPreset preset) { quality_preset = preset; }
+	static unsigned char& get_cell(const unsigned int x, const unsigned int y);
+	static void set_cell(const unsigned int x, const unsigned int y, const unsigned char material);
+	static void clear();
 
-	unsigned int get_thread_count() const { return num_active_threads; }
+	static QualityPreset get_quality_preset() { return quality_preset; }
+	static void set_quality_preset(QualityPreset preset) { quality_preset = preset; }
 
-	unsigned int get_changed_cells() const;
-	void remap_materials(const std::vector<unsigned char>& old_to_new);
+	static unsigned int get_thread_count() { return num_active_threads; }
+
+	static unsigned int get_changed_cells();
+	static void remap_materials(const std::vector<unsigned char>& old_to_new);
 
 private:
 	static constexpr std::array<int, NEIGHBOR_COUNT> neighbor_offsets = compute_neighbor_offsets();
 
-	QualityPreset quality_preset = QualityPreset::Fast;
-	std::vector<std::pair<unsigned char, bool>> cells;
-	std::vector<std::pair<unsigned char, bool>> next_cells;
+	static QualityPreset quality_preset;
+	static std::vector<std::pair<unsigned char, bool>> cells;
+	static std::vector<std::pair<unsigned char, bool>> next_cells;
 
-	unsigned int num_active_threads;
-	std::unique_ptr<std::barrier<>> start_barrier;
-	std::unique_ptr<std::barrier<>> done_barrier;
-	std::unique_ptr<std::barrier<>> phase_barrier;
-	std::vector<std::thread> workers;
-	std::atomic<bool> shutdown{false};
-	std::atomic<unsigned int> frame_changed{0};
+	static unsigned int num_active_threads;
+	static std::unique_ptr<std::barrier<>> start_barrier;
+	static std::unique_ptr<std::barrier<>> done_barrier;
+	static std::unique_ptr<std::barrier<>> phase_barrier;
+	static std::vector<std::thread> workers;
+	static std::atomic<bool> shutdown_flag;
+	static std::atomic<unsigned int> frame_changed;
 
-	unsigned int frame_count = 0;
+	static unsigned int frame_count;
 
 	static constexpr uint32_t BG_COLOR = (255u << 24) | (64u << 16) | (64u << 8) | 64u;
 };

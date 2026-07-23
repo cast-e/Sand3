@@ -7,7 +7,6 @@
 
 #include "const.hpp"
 #include "grid.hpp"
-#include "material_manager.hpp"
 #include "set_manager.hpp"
 
 void SaveManager::bwt_encode(const uint8_t* in_data, size_t N, std::vector<uint8_t>& out_L, uint16_t& out_primary_id) {
@@ -106,7 +105,7 @@ std::vector<uint8_t> SaveManager::rle_decode(const uint8_t* data, size_t compres
 	return decompressed;
 }
 
-bool SaveManager::save_to_file(const std::string& name, const std::string& current_set, const Grid& grid) {
+bool SaveManager::save_to_file(const std::string& name, const std::string& current_set) {
 	std::string filepath = "../sets/" + current_set + "/" + name;
 	if (filepath.length() < 5 || filepath.substr(filepath.length() - 5) != ".save") {
 		filepath += ".save";
@@ -126,7 +125,7 @@ bool SaveManager::save_to_file(const std::string& name, const std::string& curre
 	std::vector<uint8_t> grid_bytes(SIM_SIZE);
 	for (unsigned int y = 0; y < SIM_HEIGHT; ++y) {
 		for (unsigned int x = 0; x < SIM_WIDTH; ++x) {
-			grid_bytes[y * SIM_WIDTH + x] = grid.get_cell(x, y);
+			grid_bytes[y * SIM_WIDTH + x] = Grid::get_cell(x, y);
 		}
 	}
 
@@ -154,7 +153,7 @@ bool SaveManager::save_to_file(const std::string& name, const std::string& curre
 }
 
 bool SaveManager::load_from_file(const std::string& path_or_name, const std::string& current_set,
-								 std::string& loaded_set, Grid& grid) {
+								 std::string& loaded_set) {
 	std::string filepath = path_or_name;
 	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
 		filepath = "../sets/" + current_set + "/" + path_or_name;
@@ -174,14 +173,14 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 		set_line.pop_back();
 	}
 	loaded_set = set_line;
-	SetManager::set_current_set(loaded_set, grid);
+	SetManager::set_current_set(loaded_set);
 
 	uint32_t width = 0, height = 0, num_blocks = 0;
 	file.read(reinterpret_cast<char*>(&width), sizeof(width));
 	file.read(reinterpret_cast<char*>(&height), sizeof(height));
 	file.read(reinterpret_cast<char*>(&num_blocks), sizeof(num_blocks));
 
-	grid.clear();
+	Grid::clear();
 
 	constexpr size_t BLOCK_SIZE_BWT = 4096;
 	std::vector<uint8_t> block_raw(BLOCK_SIZE_BWT);
@@ -205,7 +204,7 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 			size_t id = block_start + k;
 			unsigned int x = static_cast<unsigned int>(id % SIM_WIDTH);
 			unsigned int y = static_cast<unsigned int>(id / SIM_WIDTH);
-			grid.set_cell(x, y, block_raw[k]);
+			Grid::set_cell(x, y, block_raw[k]);
 		}
 	}
 	return true;

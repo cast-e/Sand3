@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.15)
 
+if(POLICY CMP0219)
+    cmake_policy(SET CMP0219 NEW)
+endif()
+set(CMAKE_POLICY_DEFAULT_CMP0219 NEW)
+
 project(Sand3 LANGUAGES CXX C)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/bin")

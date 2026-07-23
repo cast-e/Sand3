@@ -4,43 +4,45 @@
 #include <imgui_impl_sdl3.h>
 
 #include "grid.hpp"
-#include "material_manager.hpp"
 #include "set_manager.hpp"
 #include "ui.hpp"
 #include "window.hpp"
 
 int main() {
-	Window window(1280, 720);
-	Grid grid;
+	Window::init(1600, 900);
+	Grid::init();
+	UI::init();
 
-	SetManager::set_current_set(SetManager::get_sets()[0], grid);
-
-	UI ui(window);
+	SetManager::set_current_set(SetManager::get_sets()[0]);
 
 	while (true) {
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {
 			ImGui_ImplSDL3_ProcessEvent(&event);
 			if (event.type == SDL_EVENT_QUIT) {
-				ui.trigger_exit();
+				UI::trigger_exit();
 			}
 		}
 
-		ui.new_frame();
-		ui.render(window, grid);
+		UI::new_frame();
+		UI::render();
 
-		ui.handle_interaction(window, grid);
+		UI::handle_interaction();
 
-		grid.draw(window);
+		Grid::draw();
 
-		if (ui.should_update() || ui.should_step()) {
-			grid.update();
-			ui.reset_step();
+		if (UI::should_update() || UI::should_step()) {
+			Grid::update();
+			UI::reset_step();
 		}
 
 		ImGui::Render();
-		window.present();
+		Window::present();
 	}
+
+	UI::shutdown();
+	Grid::shutdown();
+	Window::shutdown();
 
 	return 0;
 }
