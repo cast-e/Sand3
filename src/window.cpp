@@ -22,7 +22,7 @@ void Window::init(unsigned int t_width, unsigned int t_height) {
 	if (window == NULL) {
 		fmt::print("SDL_CreateWindow failed: {}\n", SDL_GetError());
 	}
-	SDL_SetWindowIcon(window, SDL_LoadPNG("../sand3.png"));
+	SDL_SetWindowIcon(window, SDL_LoadPNG("./sand3.png"));
 
 	renderer = SDL_CreateRenderer(window, nullptr);
 	if (renderer == NULL) {

@@ -477,7 +477,7 @@ void UI::render_material_editor() {
 				new_mat.name = "new_material_" + std::to_string(materials.size());
 				new_mat.color = {255, 255, 255};
 				MaterialManager::add_material(new_mat);
-				selected_id = materials.size() - 1;
+				selected_id = materials.size() - 2;
 				unsaved_changes = true;
 			}
 			if (ImGui::IsItemHovered()) {
@@ -494,7 +494,7 @@ void UI::render_material_editor() {
 					Material duplicated_mat = materials[selected_id];
 					duplicated_mat.name = duplicated_mat.name + "_copy";
 					MaterialManager::add_material(duplicated_mat);
-					selected_id = materials.size() - 1;
+					selected_id = materials.size() - 2;
 					unsaved_changes = true;
 				}
 				if (is_empty_mat) {
@@ -974,7 +974,7 @@ void UI::render_manage_sets() {
 		ImGui::Spacing();
 		if (ImGui::Button("Save Current Set", ImVec2(-1, 30))) {
 			SetManager::update_current_metadata(meta);
-			MaterialManager::save_all_materials("../sets/" + current_set);
+			MaterialManager::save_all_materials(SETS_DIRECTORY + current_set);
 			unsaved_changes = false;
 		}
 		if (ImGui::IsItemHovered()) {
@@ -1013,7 +1013,7 @@ void UI::render_save_load() {
 		ImGui::Text("Available Saves in current set folder:");
 
 		std::vector<std::string> save_files;
-		std::string set_dir = "../sets/" + current_set;
+		std::string set_dir = SETS_DIRECTORY + current_set;
 		if (fs::exists(set_dir) && fs::is_directory(set_dir)) {
 			for (const auto& entry : fs::directory_iterator(set_dir)) {
 				if (entry.is_regular_file() && entry.path().extension() == ".save") {
@@ -1074,8 +1074,8 @@ void UI::render_save_load() {
 				} else {
 					new_name += "_copy";
 				}
-				std::string old_path = "../sets/" + current_set + "/" + old_name;
-				std::string new_path = "../sets/" + current_set + "/" + new_name;
+				std::string old_path = SETS_DIRECTORY + current_set + "/" + old_name;
+				std::string new_path = SETS_DIRECTORY + current_set + "/" + new_name;
 				try {
 					fs::copy(old_path, new_path);
 				} catch (...) {}
@@ -1090,7 +1090,7 @@ void UI::render_save_load() {
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 			if (ImGui::Button("Delete", ImVec2(80, 25))) {
-				std::string filepath = "../sets/" + current_set + "/" + save_files[selected_save_id];
+				std::string filepath = SETS_DIRECTORY + current_set + "/" + save_files[selected_save_id];
 				try {
 					fs::remove(filepath);
 				} catch (...) {}
@@ -1385,7 +1385,7 @@ void UI::render_modals() {
 
 			std::string save_btn_lbl = "Save & Exit (" + current_set + ")";
 			if (ImGui::Button(save_btn_lbl.c_str(), ImVec2(190, 30))) {
-				MaterialManager::save_all_materials("../sets/" + current_set);
+				MaterialManager::save_all_materials(SETS_DIRECTORY + current_set);
 				UI::shutdown();
 				Grid::shutdown();
 				Window::shutdown();
@@ -1465,7 +1465,7 @@ void UI::render_modals() {
 		ImGui::Spacing();
 
 		if (ImGui::Button("Save & Switch", ImVec2(120, 30))) {
-			MaterialManager::save_all_materials("../sets/" + current_set);
+			MaterialManager::save_all_materials(SETS_DIRECTORY + current_set);
 			should_proceed_switch = true;
 			ImGui::CloseCurrentPopup();
 		}

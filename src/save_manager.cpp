@@ -106,7 +106,7 @@ std::vector<uint8_t> SaveManager::rle_decode(const uint8_t* data, size_t compres
 }
 
 bool SaveManager::save_to_file(const std::string& name, const std::string& current_set) {
-	std::string filepath = "../sets/" + current_set + "/" + name;
+	std::string filepath = SETS_DIRECTORY + current_set + "/" + name;
 	if (filepath.length() < 5 || filepath.substr(filepath.length() - 5) != ".save") {
 		filepath += ".save";
 	}
@@ -156,7 +156,7 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 								 std::string& loaded_set) {
 	std::string filepath = path_or_name;
 	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
-		filepath = "../sets/" + current_set + "/" + path_or_name;
+		filepath = SETS_DIRECTORY + current_set + "/" + path_or_name;
 	}
 	if (filepath.length() < 5 || filepath.substr(filepath.length() - 5) != ".save") {
 		filepath += ".save";

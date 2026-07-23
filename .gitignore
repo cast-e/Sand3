@@ -1,3 +1,6 @@
-bin
 .cache
-build
+build*
+win64
+linux
+imgui.ini
+todo.txt

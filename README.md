@@ -1,7 +1,7 @@
 # Sand3
  Fast celullar automaton with fully customizable materials and rules.
 
-![Sand3](./assets/sand3.png)
+![Sand3](./bin/sand3.png)
 
 ## Features
 
@@ -11,10 +11,22 @@
 - Optimized multithreaded and single-threaded simulation for best performance on any device.
 - Multiplatform support (Windows, Linux).
 - Step-by-step simulation for debugging rules.
+- Helpful tooltips and shortcuts in the GUI.
+- Standalone executable for easy portability.
 
 ## Building
 
-Use CMake for building the project.
+### Prerequisites
+
+Install a C++20 compatible compiler (GCC recommended) and CMake.
+
+Make sure to update all submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+### Using CMake
 
 To build as a Release (default):
 

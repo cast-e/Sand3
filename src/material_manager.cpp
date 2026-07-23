@@ -208,6 +208,8 @@ void MaterialManager::add_material(const Material& mat) {
 	m.packed_color = (255u << 24) | (m.color[2] << 16) | (m.color[1] << 8) | m.color[0];
 	materials.push_back(m);
 	rebuild_compiled_rules();
+
+	std::swap(materials[materials.size() - 2], materials[materials.size() - 1]);
 }
 
 void MaterialManager::edit_material(unsigned char id, const Material& mat) {

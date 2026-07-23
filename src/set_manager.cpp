@@ -22,10 +22,9 @@ static std::string trim(const std::string& str) {
 
 std::vector<std::string> SetManager::get_sets() {
 	std::vector<std::string> sets;
-	std::string base_dir = "../sets";
-	fs::create_directories(base_dir);
+	fs::create_directories(SETS_DIRECTORY);
 
-	for (const auto& entry : fs::directory_iterator(base_dir)) {
+	for (const auto& entry : fs::directory_iterator(SETS_DIRECTORY)) {
 		if (entry.is_directory()) {
 			sets.push_back(entry.path().filename().string());
 		}
@@ -47,7 +46,7 @@ SetMetadata SetManager::load_set_metadata(const std::string& set_name) {
 	meta.author = "";
 	meta.description = "";
 
-	std::string cfg_path = "../sets/" + set_name + "/set.cfg";
+	std::string cfg_path = SETS_DIRECTORY + set_name + "/set.cfg";
 	std::ifstream file(cfg_path);
 	if (!file.is_open()) {
 		return meta;
@@ -76,7 +75,7 @@ SetMetadata SetManager::load_set_metadata(const std::string& set_name) {
 }
 
 void SetManager::save_set_metadata(const std::string& set_name, const SetMetadata& metadata) {
-	std::string set_dir = "../sets/" + set_name;
+	std::string set_dir = SETS_DIRECTORY + set_name;
 	fs::create_directories(set_dir);
 	std::string cfg_path = set_dir + "/set.cfg";
 
@@ -100,12 +99,12 @@ const SetMetadata& SetManager::get_current_metadata() { return current_metadata;
 void SetManager::set_current_set(const std::string& set_name) {
 	current_set_name = set_name;
 	current_metadata = load_set_metadata(set_name);
-	MaterialManager::load_all_materials("../sets/" + set_name);
+	MaterialManager::load_all_materials(SETS_DIRECTORY + set_name);
 	Grid::clear();
 }
 
 void SetManager::create_new_empty_set(const std::string& set_name) {
-	std::string set_path = "../sets/" + set_name;
+	std::string set_path = SETS_DIRECTORY + set_name;
 	fs::create_directories(set_path);
 
 	SetMetadata meta;
@@ -120,8 +119,8 @@ void SetManager::create_new_empty_set(const std::string& set_name) {
 }
 
 void SetManager::copy_set(const std::string& source_set_name, const std::string& new_set_name) {
-	std::string src_path = "../sets/" + source_set_name;
-	std::string dst_path = "../sets/" + new_set_name;
+	std::string src_path = SETS_DIRECTORY + source_set_name;
+	std::string dst_path = SETS_DIRECTORY + new_set_name;
 
 	if (fs::exists(src_path)) {
 		try {
@@ -143,8 +142,8 @@ bool SetManager::rename_set(const std::string& old_set_name, const std::string& 
 		return false;
 	}
 
-	std::string old_path = "../sets/" + old_set_name;
-	std::string new_path = "../sets/" + new_set_name;
+	std::string old_path = SETS_DIRECTORY + old_set_name;
+	std::string new_path = SETS_DIRECTORY + new_set_name;
 
 	if (!fs::exists(old_path) || fs::exists(new_path)) {
 		return false;
@@ -160,7 +159,7 @@ bool SetManager::rename_set(const std::string& old_set_name, const std::string& 
 		current_set_name = new_set_name;
 		current_metadata.name = new_set_name;
 		save_set_metadata(new_set_name, current_metadata);
-		MaterialManager::load_all_materials("../sets/" + new_set_name);
+		MaterialManager::load_all_materials(SETS_DIRECTORY + new_set_name);
 	} else {
 		SetMetadata meta = load_set_metadata(new_set_name);
 		meta.name = new_set_name;
@@ -171,7 +170,7 @@ bool SetManager::rename_set(const std::string& old_set_name, const std::string& 
 }
 
 void SetManager::delete_set(const std::string& set_name) {
-	std::string set_path = "../sets/" + set_name;
+	std::string set_path = SETS_DIRECTORY + set_name;
 	if (fs::exists(set_path)) {
 		try {
 			fs::remove_all(set_path);
