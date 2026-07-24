@@ -1,5 +1,6 @@
 #include "material_manager.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -9,6 +10,13 @@
 namespace fs = std::filesystem;
 
 std::vector<Material> MaterialManager::materials{};
+Material MaterialManager::default_empty{"empty", 0, {64, 64, 64}, (255u << 24) | (64u << 16) | (64u << 8) | 64u,
+										{},		 {}};
+std::array<const Material*, 256> MaterialManager::material_by_id{};
+
+uint32_t MaterialManager::pack_color(const std::array<unsigned char, 3>& color) {
+	return (255u << 24) | (color[2] << 16) | (color[1] << 8) | color[0];
+}
 
 unsigned char MaterialManager::get_unused_id() {
 	std::array<bool, 256> used{};
@@ -30,6 +38,48 @@ unsigned char MaterialManager::get_unused_id() {
 	return 254;
 }
 
+bool MaterialManager::is_valid_name(std::string_view name) {
+	if (name.empty()) {
+		return false;
+	}
+	for (const auto& m : materials) {
+		if (m.name == name) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static Material parse_material_from_json(const nlohmann::ordered_json& j, const std::string& default_name,
+										 unsigned char fallback_id) {
+	Material mat;
+	mat.name = j.value("name", default_name);
+	mat.id = j.value("id", fallback_id);
+
+	if (j.contains("color")) {
+		mat.color = j["color"].get<std::array<unsigned char, 3>>();
+	} else {
+		mat.color = {64, 64, 64};
+	}
+	mat.packed_color = MaterialManager::pack_color(mat.color);
+
+	if (j.contains("rules")) {
+		for (const auto& r_j : j["rules"]) {
+			UserRule r;
+			r.when = r_j["when"].get<std::array<std::string, NEIGHBOR_COUNT>>();
+			r.then = r_j["then"].get<std::array<std::string, NEIGHBOR_COUNT>>();
+			r.sym_x = r_j.contains("sym_x") && r_j["sym_x"].get<bool>();
+			r.sym_y = r_j.contains("sym_y") && r_j["sym_y"].get<bool>();
+			r.sym_rot = r_j.contains("sym_rot") && r_j["sym_rot"].get<bool>();
+			r.chance = r_j.contains("chance") ? r_j["chance"].get<unsigned char>() : 1;
+			r.when[12] = mat.name;
+			mat.user_rules.push_back(r);
+		}
+	}
+
+	return mat;
+}
+
 void MaterialManager::load_all_materials(std::string_view directory_path) {
 	materials.clear();
 
@@ -37,137 +87,74 @@ void MaterialManager::load_all_materials(std::string_view directory_path) {
 	empty_mat.name = "empty";
 	empty_mat.id = 0;
 	empty_mat.color = {64, 64, 64};
-	empty_mat.packed_color = (255u << 24) | (64u << 16) | (64u << 8) | 64u;
+	empty_mat.packed_color = pack_color(empty_mat.color);
 
-	std::vector<fs::path> mat_files;
+	std::vector<Material> loaded_mats;
+
 	if (fs::exists(directory_path.data()) && fs::is_directory(directory_path.data())) {
 		for (const auto& entry : fs::directory_iterator(directory_path.data())) {
-			if (entry.is_regular_file()) {
-				std::string ext = entry.path().extension().string();
-				if (ext == ".mat" || ext == ".json") {
-					mat_files.push_back(entry.path());
-				}
+			if (entry.is_regular_file() && entry.path().extension().string() == ".mat") {
+				std::ifstream file(entry.path());
+				if (!file.is_open())
+					continue;
+
+				try {
+					nlohmann::ordered_json j = nlohmann::ordered_json::parse(file);
+					Material mat = parse_material_from_json(j, entry.path().stem().string(), 255);
+
+					if (mat.id == 0) {
+						empty_mat = mat;
+					} else {
+						loaded_mats.push_back(mat);
+					}
+				} catch (...) {}
 			}
 		}
 	}
 
-	std::vector<Material> other_mats;
+	materials.push_back(empty_mat);
 
-	for (const auto& filepath : mat_files) {
-		std::ifstream file(filepath);
-		if (!file.is_open())
-			continue;
+	std::sort(loaded_mats.begin(), loaded_mats.end(), [](const Material& a, const Material& b) { return a.id < b.id; });
 
-		try {
-			nlohmann::ordered_json j = nlohmann::ordered_json::parse(file);
-			Material mat;
-			mat.name = j.value("name", "");
-
-			if (mat.name == "empty" || (j.contains("id") && j["id"].is_number() && j["id"].get<int>() == 0)) {
-				mat.name = "empty";
-				mat.id = 0;
-				if (j.contains("color")) {
-					mat.color = j["color"].get<std::array<unsigned char, 3>>();
-				} else {
-					mat.color = {64, 64, 64};
-				}
-				mat.packed_color = (255u << 24) | (mat.color[2] << 16) | (mat.color[1] << 8) | mat.color[0];
-
-				if (j.contains("rules")) {
-					for (auto& r_j : j["rules"]) {
-						UserRule r;
-						r.when = r_j["when"].get<std::array<std::string, NEIGHBOR_COUNT>>();
-						r.then = r_j["then"].get<std::array<std::string, NEIGHBOR_COUNT>>();
-						r.sym_x = r_j.contains("sym_x") && r_j["sym_x"].get<bool>();
-						r.sym_y = r_j.contains("sym_y") && r_j["sym_y"].get<bool>();
-						r.sym_rot = r_j.contains("sym_rot") && r_j["sym_rot"].get<bool>();
-						r.chance = r_j.contains("chance") ? r_j["chance"].get<unsigned char>() : 1;
-						r.when[12] = mat.name;
-						mat.user_rules.push_back(r);
-					}
-				}
-				empty_mat = mat;
-				continue;
-			}
-
-			if (j.contains("id") && j["id"].is_number()) {
-				mat.id = static_cast<unsigned char>(j["id"].get<int>());
-			} else {
-				mat.id = 0;
-			}
-
-			if (j.contains("color")) {
-				mat.color = j["color"].get<std::array<unsigned char, 3>>();
-			}
-			mat.packed_color = (255u << 24) | (mat.color[2] << 16) | (mat.color[1] << 8) | mat.color[0];
-
-			if (j.contains("rules")) {
-				for (auto& r_j : j["rules"]) {
-					UserRule r;
-					r.when = r_j["when"].get<std::array<std::string, NEIGHBOR_COUNT>>();
-					r.then = r_j["then"].get<std::array<std::string, NEIGHBOR_COUNT>>();
-					r.sym_x = r_j.contains("sym_x") && r_j["sym_x"].get<bool>();
-					r.sym_y = r_j.contains("sym_y") && r_j["sym_y"].get<bool>();
-					r.sym_rot = r_j.contains("sym_rot") && r_j["sym_rot"].get<bool>();
-					r.chance = r_j.contains("chance") ? r_j["chance"].get<unsigned char>() : 1;
-					r.when[12] = mat.name;
-					mat.user_rules.push_back(r);
-				}
-			}
-
-			other_mats.push_back(mat);
-		} catch (...) {}
-	}
-
-	std::sort(other_mats.begin(), other_mats.end(), [](const Material& a, const Material& b) { return a.id < b.id; });
-
-	for (auto& mat : other_mats) {
-		if (mat.id == 0) {
+	for (auto& mat : loaded_mats) {
+		if (mat.id == 255) {
 			mat.id = get_unused_id();
 		}
 		materials.push_back(mat);
 	}
-
-	materials.push_back(empty_mat);
 
 	rebuild_compiled_rules();
 }
 
 void MaterialManager::save_all_materials(std::string_view directory_path) {
 	fs::create_directories(directory_path.data());
+
 	for (const auto& entry : fs::directory_iterator(directory_path.data())) {
-		if (entry.is_regular_file()) {
-			std::string ext = entry.path().extension().string();
-			if (ext == ".mat" || ext == ".json") {
-				std::string stem = entry.path().stem().string();
-				bool found = false;
-				for (const auto& m : materials) {
-					if (m.name == stem) {
-						if (m.id == 0 || m.name == "empty") {
-							bool is_changed =
-								(m.color[0] != 64 || m.color[1] != 64 || m.color[2] != 64 || !m.user_rules.empty());
-							if (!is_changed) {
-								break;
-							}
+		if (entry.is_regular_file() && entry.path().extension().string() == ".mat") {
+			std::string stem = entry.path().stem().string();
+			bool found = false;
+			for (const auto& m : materials) {
+				if (m.name == stem) {
+					if (m.id == 0) {
+						bool is_default =
+							(m.color[0] == 64 && m.color[1] == 64 && m.color[2] == 64 && m.user_rules.empty());
+						if (is_default) {
+							break;
 						}
-						found = true;
-						break;
 					}
+					found = true;
+					break;
 				}
-				if (!found) {
-					fs::remove(entry.path());
-				}
+			}
+			if (!found) {
+				fs::remove(entry.path());
 			}
 		}
 	}
 
 	for (const auto& mat : materials) {
-		if (mat.id == 0 || mat.name == "empty") {
-			bool is_changed =
-				(mat.color[0] != 64 || mat.color[1] != 64 || mat.color[2] != 64 || !mat.user_rules.empty());
-			if (!is_changed) {
-				continue;
-			}
+		if (mat.id == 0 && mat.color[0] == 64 && mat.color[1] == 64 && mat.color[2] == 64 && mat.user_rules.empty()) {
+			continue;
 		}
 
 		nlohmann::ordered_json j;
@@ -204,46 +191,31 @@ void MaterialManager::save_all_materials(std::string_view directory_path) {
 void MaterialManager::add_material(const Material& mat) {
 	Material m = mat;
 	m.id = get_unused_id();
-
-	m.packed_color = (255u << 24) | (m.color[2] << 16) | (m.color[1] << 8) | m.color[0];
+	m.packed_color = pack_color(m.color);
 	materials.push_back(m);
 	rebuild_compiled_rules();
-
-	std::swap(materials[materials.size() - 2], materials[materials.size() - 1]);
 }
 
-void MaterialManager::edit_material(unsigned char id, const Material& mat) {
-	if (id >= materials.size()) {
+void MaterialManager::edit_material(size_t index, const Material& mat) {
+	if (index >= materials.size()) {
 		return;
 	}
 
-	if (materials[id].id == 0 || materials[id].name == "empty") {
-		Material updated = mat;
-		updated.name = "empty";
-		updated.id = 0;
-		materials[id] = updated;
-		materials[id].packed_color =
-			(255u << 24) | (updated.color[2] << 16) | (updated.color[1] << 8) | updated.color[0];
-		rebuild_compiled_rules();
-		return;
-	}
+	const std::string old_name = materials[index].name;
 
-	std::string old_name = materials[id].name;
-	std::string new_name = mat.name;
+	materials[index] = mat;
+	materials[index].packed_color = pack_color(mat.color);
 
-	materials[id] = mat;
-	materials[id].packed_color = (255u << 24) | (mat.color[2] << 16) | (mat.color[1] << 8) | mat.color[0];
-
-	if (old_name != new_name) {
+	if (old_name != mat.name && !old_name.empty() && !mat.name.empty()) {
 		for (auto& m : materials) {
 			for (auto& r : m.user_rules) {
 				for (auto& name : r.when) {
 					if (name == old_name)
-						name = new_name;
+						name = mat.name;
 				}
 				for (auto& name : r.then) {
 					if (name == old_name)
-						name = new_name;
+						name = mat.name;
 				}
 			}
 		}
@@ -252,13 +224,13 @@ void MaterialManager::edit_material(unsigned char id, const Material& mat) {
 	rebuild_compiled_rules();
 }
 
-void MaterialManager::remove_material(unsigned char id) {
-	if (id >= materials.size() || materials[id].id == 0 || materials[id].name == "empty") {
+void MaterialManager::remove_material(size_t index) {
+	if (index >= materials.size() || materials[index].id == 0) {
 		return;
 	}
 
-	std::string name = materials[id].name;
-	unsigned char removed_id = materials[id].id;
+	std::string name = materials[index].name;
+	unsigned char removed_id = materials[index].id;
 
 	std::vector<unsigned char> old_to_new(256);
 	for (int i = 0; i < 256; ++i) {
@@ -268,7 +240,7 @@ void MaterialManager::remove_material(unsigned char id) {
 
 	Grid::remap_materials(old_to_new);
 
-	materials.erase(materials.begin() + id);
+	materials.erase(materials.begin() + index);
 
 	for (auto& m : materials) {
 		for (auto& r : m.user_rules) {
@@ -287,21 +259,23 @@ void MaterialManager::remove_material(unsigned char id) {
 }
 
 void MaterialManager::rebuild_compiled_rules() {
+	material_by_id.fill(&default_empty);
+	for (const auto& m : materials) {
+		material_by_id[m.id] = &m;
+	}
+
 	auto resolve_name_to_id = [](const std::string& name) -> unsigned char {
 		if (name.empty())
 			return 255;
-		if (name == "empty")
-			return 0;
-		for (size_t id = 0; id < materials.size(); ++id) {
-			if (materials[id].name == name) {
-				return materials[id].id;
+		for (const auto& m : materials) {
+			if (m.name == name) {
+				return m.id;
 			}
 		}
 		return 255;
 	};
 
-	auto flip_x_array =
-		[](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) -> std::array<unsigned char, NEIGHBOR_COUNT> {
+	auto flip_x_array = [](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) {
 		std::array<unsigned char, NEIGHBOR_COUNT> result{};
 		for (unsigned char x = 0; x < NEIGHBOR_SIZE; x++) {
 			for (unsigned char y = 0; y < NEIGHBOR_SIZE; y++) {
@@ -311,8 +285,7 @@ void MaterialManager::rebuild_compiled_rules() {
 		return result;
 	};
 
-	auto flip_y_array =
-		[](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) -> std::array<unsigned char, NEIGHBOR_COUNT> {
+	auto flip_y_array = [](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) {
 		std::array<unsigned char, NEIGHBOR_COUNT> result{};
 		for (unsigned char x = 0; x < NEIGHBOR_SIZE; x++) {
 			for (unsigned char y = 0; y < NEIGHBOR_SIZE; y++) {
@@ -322,8 +295,7 @@ void MaterialManager::rebuild_compiled_rules() {
 		return result;
 	};
 
-	auto rotate_90_array =
-		[](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) -> std::array<unsigned char, NEIGHBOR_COUNT> {
+	auto rotate_90_array = [](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) {
 		std::array<unsigned char, NEIGHBOR_COUNT> result{};
 		for (unsigned char x = 0; x < NEIGHBOR_SIZE; x++) {
 			for (unsigned char y = 0; y < NEIGHBOR_SIZE; y++) {
@@ -405,15 +377,7 @@ void MaterialManager::rebuild_compiled_rules() {
 	}
 }
 
-const Material& MaterialManager::get_material(unsigned char id) {
-	for (const auto& m : materials) {
-		if (m.id == id) {
-			return m;
-		}
-	}
-	static Material default_empty{"empty", 0, {64, 64, 64}, (255u << 24) | (64u << 16) | (64u << 8) | 64u, {}, {}};
-	return default_empty;
-}
+const Material& MaterialManager::get_material(unsigned char id) { return *material_by_id[id]; }
 
 unsigned char MaterialManager::get_material_count() { return static_cast<unsigned char>(materials.size()); }
 

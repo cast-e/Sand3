@@ -16,6 +16,8 @@ set(SOURCES
     material_manager.hpp
     material_manager.cpp
 
+    sanitize.hpp
+
     set_manager.hpp
     set_manager.cpp
 

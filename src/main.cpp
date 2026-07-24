@@ -24,7 +24,6 @@ int main() {
 			}
 		}
 
-		UI::new_frame();
 		UI::render();
 
 		UI::handle_interaction();

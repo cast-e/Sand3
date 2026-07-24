@@ -6,19 +6,12 @@
 
 #include "grid.hpp"
 #include "material_manager.hpp"
+#include "sanitize.hpp"
 
 namespace fs = std::filesystem;
 
 std::string SetManager::current_set_name = "";
 SetMetadata SetManager::current_metadata{};
-
-static std::string trim(const std::string& str) {
-	size_t first = str.find_first_not_of(" \t\r\n");
-	if (first == std::string::npos)
-		return "";
-	size_t last = str.find_last_not_of(" \t\r\n");
-	return str.substr(first, (last - first + 1));
-}
 
 std::vector<std::string> SetManager::get_sets() {
 	std::vector<std::string> sets;
@@ -40,13 +33,13 @@ std::vector<std::string> SetManager::get_sets() {
 	return sets;
 }
 
-SetMetadata SetManager::load_set_metadata(const std::string& set_name) {
+SetMetadata SetManager::load_set_metadata(const std::string& name) {
 	SetMetadata meta;
-	meta.name = set_name;
+	meta.name = name;
 	meta.author = "";
 	meta.description = "";
 
-	std::string cfg_path = SETS_DIRECTORY + set_name + "/set.cfg";
+	std::string cfg_path = SETS_DIRECTORY + name + "/set.cfg";
 	std::ifstream file(cfg_path);
 	if (!file.is_open()) {
 		return meta;
@@ -74,8 +67,8 @@ SetMetadata SetManager::load_set_metadata(const std::string& set_name) {
 	return meta;
 }
 
-void SetManager::save_set_metadata(const std::string& set_name, const SetMetadata& metadata) {
-	std::string set_dir = SETS_DIRECTORY + set_name;
+void SetManager::save_set_metadata(const std::string& name, const SetMetadata& metadata) {
+	std::string set_dir = SETS_DIRECTORY + name;
 	fs::create_directories(set_dir);
 	std::string cfg_path = set_dir + "/set.cfg";
 
@@ -96,31 +89,41 @@ std::string SetManager::get_current_set() { return current_set_name; }
 
 const SetMetadata& SetManager::get_current_metadata() { return current_metadata; }
 
-void SetManager::set_current_set(const std::string& set_name) {
-	current_set_name = set_name;
-	current_metadata = load_set_metadata(set_name);
-	MaterialManager::load_all_materials(SETS_DIRECTORY + set_name);
+void SetManager::set_current_set(const std::string& name) {
+	current_set_name = name;
+	current_metadata = load_set_metadata(name);
+	fs::create_directories(SETS_DIRECTORY + name);
+	MaterialManager::load_all_materials(SETS_DIRECTORY + name);
 	Grid::clear();
 }
 
-void SetManager::create_new_empty_set(const std::string& set_name) {
-	std::string set_path = SETS_DIRECTORY + set_name;
+void SetManager::create_new_empty_set(const std::string& name) {
+	std::string set_path = SETS_DIRECTORY + name;
 	fs::create_directories(set_path);
 
 	SetMetadata meta;
-	meta.name = set_name;
-	save_set_metadata(set_name, meta);
+	meta.name = name;
+	save_set_metadata(name, meta);
 
-	current_set_name = set_name;
+	current_set_name = name;
 	current_metadata = meta;
-	MaterialManager::get_materials().clear();
-	MaterialManager::rebuild_compiled_rules();
+	MaterialManager::load_all_materials(set_path);
 	Grid::clear();
 }
 
-void SetManager::copy_set(const std::string& source_set_name, const std::string& new_set_name) {
-	std::string src_path = SETS_DIRECTORY + source_set_name;
-	std::string dst_path = SETS_DIRECTORY + new_set_name;
+void SetManager::copy_set(const std::string& source_name, const std::string& new_name) {
+	std::string src_path = SETS_DIRECTORY + source_name;
+	std::string dst_path = SETS_DIRECTORY + new_name;
+
+	if (fs::exists(dst_path)) {
+		return;
+	}
+
+	// If duplicating the active set, ensure all in-memory edits are saved to src_path first
+	if (source_name == current_set_name) {
+		save_set_metadata(source_name, current_metadata);
+		MaterialManager::save_all_materials(src_path);
+	}
 
 	if (fs::exists(src_path)) {
 		try {
@@ -130,20 +133,16 @@ void SetManager::copy_set(const std::string& source_set_name, const std::string&
 		fs::create_directories(dst_path);
 	}
 
-	SetMetadata meta = load_set_metadata(source_set_name);
-	meta.name = new_set_name;
-	save_set_metadata(new_set_name, meta);
+	SetMetadata meta = load_set_metadata(source_name);
+	meta.name = new_name;
+	save_set_metadata(new_name, meta);
 
-	set_current_set(new_set_name);
+	set_current_set(new_name);
 }
 
-bool SetManager::rename_set(const std::string& old_set_name, const std::string& new_set_name) {
-	if (old_set_name.empty() || new_set_name.empty() || old_set_name == new_set_name) {
-		return false;
-	}
-
-	std::string old_path = SETS_DIRECTORY + old_set_name;
-	std::string new_path = SETS_DIRECTORY + new_set_name;
+bool SetManager::rename_set(const std::string& old_name, const std::string& new_name) {
+	std::string old_path = SETS_DIRECTORY + old_name;
+	std::string new_path = SETS_DIRECTORY + new_name;
 
 	if (!fs::exists(old_path) || fs::exists(new_path)) {
 		return false;
@@ -155,33 +154,35 @@ bool SetManager::rename_set(const std::string& old_set_name, const std::string& 
 		return false;
 	}
 
-	if (current_set_name == old_set_name) {
-		current_set_name = new_set_name;
-		current_metadata.name = new_set_name;
-		save_set_metadata(new_set_name, current_metadata);
-		MaterialManager::load_all_materials(SETS_DIRECTORY + new_set_name);
+	if (current_set_name == old_name) {
+		current_set_name = new_name;
+		current_metadata.name = new_name;
+		save_set_metadata(new_name, current_metadata);
+		MaterialManager::save_all_materials(SETS_DIRECTORY + new_name);
 	} else {
-		SetMetadata meta = load_set_metadata(new_set_name);
-		meta.name = new_set_name;
-		save_set_metadata(new_set_name, meta);
+		SetMetadata meta = load_set_metadata(new_name);
+		meta.name = new_name;
+		save_set_metadata(new_name, meta);
 	}
 
 	return true;
 }
 
-void SetManager::delete_set(const std::string& set_name) {
-	std::string set_path = SETS_DIRECTORY + set_name;
+void SetManager::delete_set(const std::string& name) {
+	std::string set_path = SETS_DIRECTORY + name;
 	if (fs::exists(set_path)) {
 		try {
 			fs::remove_all(set_path);
 		} catch (...) {}
 	}
 
-	auto remaining_sets = get_sets();
-	if (!remaining_sets.empty()) {
-		set_current_set(remaining_sets[0]);
-	} else {
-		create_new_empty_set("new_set");
+	if (current_set_name == name) {
+		auto remaining_sets = get_sets();
+		if (!remaining_sets.empty()) {
+			set_current_set(remaining_sets[0]);
+		} else {
+			create_new_empty_set("new_set");
+		}
 	}
 }
 

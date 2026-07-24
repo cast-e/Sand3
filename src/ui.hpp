@@ -12,7 +12,6 @@ public:
 	static void init();
 	static void shutdown();
 
-	static void new_frame();
 	static void render();
 	static void handle_interaction();
 
@@ -34,7 +33,6 @@ private:
 	static char save_file_name_buf[128];
 	static char save_as_buf[64];
 	static char new_set_name_buf[64];
-	static char rename_set_buf[64];
 
 	static int selected_save_id;
 	static int selected_id;

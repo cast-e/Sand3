@@ -13,6 +13,7 @@
 - Step-by-step simulation for debugging rules.
 - Helpful tooltips and shortcuts in the GUI.
 - Standalone executable for easy portability.
+- Compressed save files using a BWT + RLE compression algorithm.
 
 ## Building
 

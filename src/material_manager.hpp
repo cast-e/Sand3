@@ -45,11 +45,14 @@ public:
 	static void save_all_materials(std::string_view directory_path);
 
 	static void add_material(const Material& mat);
-	static void edit_material(unsigned char id, const Material& mat);
-	static void remove_material(unsigned char id);
+	static void edit_material(size_t index, const Material& mat);
+	static void remove_material(size_t index);
 
 	static void rebuild_compiled_rules();
 	static unsigned char get_unused_id();
+
+	static bool is_valid_name(std::string_view name);
+	static uint32_t pack_color(const std::array<unsigned char, 3>& color);
 
 	static const Material& get_material(unsigned char id);
 	static unsigned char get_material_count();
@@ -57,4 +60,6 @@ public:
 
 private:
 	static std::vector<Material> materials;
+	static std::array<const Material*, 256> material_by_id;
+	static Material default_empty;
 };
