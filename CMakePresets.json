@@ -2,8 +2,8 @@
   "version": 3,
   "configurePresets": [
     {
-      "name": "windows-gcc",
-      "displayName": "Windows (GCC)",
+      "name": "windows-mingw",
+      "displayName": "Windows (MinGW-w64)",
       "binaryDir": "${sourceDir}/build-win64",
       "toolchainFile": "${sourceDir}/cmake/mingw-w64-x86_64.cmake",
       "cacheVariables": {

@@ -27,19 +27,32 @@ Make sure to update all submodules:
 git submodule update --init --recursive
 ```
 
-### Using CMake
+## Using CMake
+
+### Linux Building
+
+#### Native compilation using GCC
 
 To build as a Release (default):
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -B build --preset linux-gcc
 cmake --build build
 ```
 
-To build as a Debug (performance may be significantly worse):
+#### Windows cross-compilation using MinGW-w64
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake -B build --preset windows-mingw
+cmake --build build
+```
+
+### Windows Building
+
+#### Native compilation using MSYS2 MinGW-w64
+
+```bash
+cmake -B build --preset windows-mingw
 cmake --build build
 ```
 

@@ -33,17 +33,22 @@ set(SOURCES
     main.cpp
 )
 
+set(RESOURCES
+    roboto.h
+    icon.h
+)
+
 find_package(Threads REQUIRED)
 
 if (WIN32)
-    add_executable(sand3 ${SOURCES} "sand3.rc")
-else()
-    add_executable(sand3 ${SOURCES})
+    set(RESOURCES ${RESOURCES} "sand3.rc")
 endif()
+
+add_executable(sand3 ${SOURCES} ${RESOURCES})
 
 target_link_libraries(sand3 PRIVATE fmt::fmt SDL3::SDL3-static Threads::Threads imgui nlohmann_json::nlohmann_json)
 
-if(MINGW)
+if(WIN32)
     target_link_options(sand3 PRIVATE -static)
 endif()
 

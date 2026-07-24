@@ -157,29 +157,29 @@ void UI::render() {
 	ImGuiIO& io = ImGui::GetIO();
 
 	if (ui_compact) {
+		ImGui::SetNextWindowPos(ImVec2(2.0f, 2.0f), ImGuiCond_FirstUseEver);
 		ImGui::SetNextWindowSize(ImVec2(280.0f, 400.0f), ImGuiCond_FirstUseEver);
 		if (ImGui::Begin("Simulation Controls")) {
 			render_sim_content();
 		}
 		ImGui::End();
 	} else {
-		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
-		ImGui::SetNextWindowSize(ImVec2(570.0f, 600.0f), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowPos(ImVec2(2.0f, 2.0f), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize(ImVec2(570.0f, Window::get_size().second - 4.0f), ImGuiCond_FirstUseEver);
+		if (ImGui::Begin("Simulation Editor", nullptr)) {
+			render_header(io);
 
-		ImGui::Begin("Simulation Editor", nullptr);
+			if (ImGui::BeginTabBar("SidebarTabs")) {
+				render_material_editor();
+				render_manage_sets();
+				render_save_load();
+				render_shortcuts();
+				render_advanced_options();
+				ImGui::EndTabBar();
+			}
 
-		render_header(io);
-
-		if (ImGui::BeginTabBar("SidebarTabs")) {
-			render_material_editor();
-			render_manage_sets();
-			render_save_load();
-			render_shortcuts();
-			render_advanced_options();
-			ImGui::EndTabBar();
+			ImGui::End();
 		}
-
-		ImGui::End();
 	}
 
 	SDL_FRect dst_rect = Window::get_dst_rect();
