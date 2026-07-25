@@ -1,7 +1,7 @@
 # Sand3
  Fast celullar automaton with fully customizable materials and rules.
 
-![Sand3](./bin/sand3.png)
+![Sand3](./sand3.png)
 
 ## Features
 
@@ -58,11 +58,22 @@ cmake --build build
 
 ## Running
 
-Just run it from the "./bin" folder.
+### Linux
+
+Run it from the "./bin/linux" folder.
 
 ```bash
-cd ./bin
-./Sand3
+cd ./bin/linux
+./sand3
+```
+
+### Windows
+
+Just run it from the "./bin/win64" folder.
+
+```powershell
+cd .\bin\w64
+.\sand3.exe
 ```
 
 ## Dependencies
