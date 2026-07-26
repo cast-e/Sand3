@@ -288,7 +288,7 @@
                 ""
             ],
             "sym_x": true,
-            "chance": 2
+            "chance": 50.0
         },
         {
             "when": [

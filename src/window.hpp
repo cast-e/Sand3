@@ -19,6 +19,11 @@ public:
 	static SDL_Renderer* get_renderer();
 	static uint32_t* get_buffer();
 
+	static unsigned long get_frame_count();
+
+	static unsigned int get_target_fps();
+	static void set_target_fps(unsigned int target);
+
 	static std::pair<int, int> get_size();
 
 	static void set_dst_rect(const SDL_FRect& rect);
@@ -31,4 +36,8 @@ private:
 
 	static std::vector<uint32_t> buffer;
 	static SDL_FRect dst_rect;
+
+	static unsigned long frame_count;
+	static unsigned long last_frame;
+	static unsigned int target_fps;
 };

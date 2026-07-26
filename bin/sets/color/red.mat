@@ -176,64 +176,7 @@
                 ""
             ],
             "sym_rot": true,
-            "chance": 20
-        },
-        {
-            "when": [
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red",
-                "red"
-            ],
-            "then": [
-                "green",
-                "green",
-                "blue",
-                "blue",
-                "blue",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                "",
-                ""
-            ],
-            "chance": 255
+            "chance": 20.0
         }
     ]
 }

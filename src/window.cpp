@@ -14,6 +14,9 @@ SDL_Renderer* Window::renderer = nullptr;
 SDL_Texture* Window::texture = nullptr;
 std::vector<uint32_t> Window::buffer;
 SDL_FRect Window::dst_rect{0.0f, 0.0f, 0.0f, 0.0f};
+unsigned long Window::frame_count = 0;
+unsigned long Window::last_frame = 0;
+unsigned int Window::target_fps = 120;
 
 void Window::init(unsigned int t_width, unsigned int t_height) {
 	dst_rect = {0.0f, 0.0f, static_cast<float>(t_width), static_cast<float>(t_height)};
@@ -77,11 +80,23 @@ void Window::present() {
 	}
 
 	SDL_RenderPresent(renderer);
+
+	unsigned long now = SDL_GetTicks();
+	if (target_fps != 500 && now - last_frame < 1000 / target_fps) {
+		SDL_Delay(1000 / target_fps - static_cast<unsigned int>(now - last_frame));
+	}
+	last_frame = SDL_GetTicks();
+	frame_count++;
 }
 
 SDL_Window* Window::get_window() { return window; }
 SDL_Renderer* Window::get_renderer() { return renderer; }
 uint32_t* Window::get_buffer() { return buffer.data(); }
+
+unsigned long Window::get_frame_count() { return frame_count; }
+
+unsigned int Window::get_target_fps() { return target_fps; }
+void Window::set_target_fps(unsigned int target) { target_fps = target; }
 
 std::pair<int, int> Window::get_size() {
 	int w = 0, h = 0;

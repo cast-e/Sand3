@@ -16,7 +16,7 @@ struct Rule {
 
 struct CompiledUserRule {
 	std::vector<Rule> variants;
-	unsigned char chance = 100;
+	float chance;
 };
 
 struct UserRule {
@@ -25,7 +25,7 @@ struct UserRule {
 	bool sym_x = false;
 	bool sym_y = false;
 	bool sym_rot = false;
-	unsigned char chance = 100;
+	float chance;
 };
 
 struct Material {

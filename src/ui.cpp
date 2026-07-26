@@ -577,7 +577,7 @@ void UI::render_material_editor() {
 					new_rule.when.fill("");
 					new_rule.when[12] = mat.name;
 					new_rule.then.fill("");
-					new_rule.chance = 1;
+					new_rule.chance = 100.0f;
 					mat.user_rules.push_back(new_rule);
 					rebuild_needed = true;
 					unsaved_changes = true;
@@ -660,22 +660,19 @@ void UI::render_material_editor() {
 					ImGui::SetTooltip("Delete this rule.");
 				}
 
-				const unsigned char step = 1;
-				const unsigned char step_fast = 10;
 				ImGui::SetNextItemWidth(150.0f);
-				if (ImGui::InputScalar("##chance_input", ImGuiDataType_U8, &rule.chance, &step, &step_fast,
-									   "1 in %d")) {
-					if (rule.chance == 0) {
-						rule.chance = 1;
+				if (ImGui::InputFloat("##chance_input", &rule.chance, 1.0f, 10.0f, "%.03f%%")) {
+					if (rule.chance < 0.001f) {
+						rule.chance = 0.001f;
+					} else if (rule.chance > 100.0f) {
+						rule.chance = 100.0f;
 					}
 					rebuild_needed = true;
 					unsaved_changes = true;
 				}
 				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Controls rule probability. Higher = lower probability.");
+					ImGui::SetTooltip("Controls rule probability.");
 				}
-				float pct = 100.0f / rule.chance;
-				ImGui::Text("Probability: %.3f%%", pct);
 
 				if (ImGui::Checkbox("X Symmetry", &rule.sym_x)) {
 					rebuild_needed = true;
@@ -1113,7 +1110,21 @@ void UI::render_advanced_options() {
 			SDL_SetRenderVSync(Window::get_renderer(), vsync_enabled ? 1 : 0);
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Synchronizes the frame rate with the monitor's refresh rate to prevent screen tearing.");
+			ImGui::SetTooltip("Synchronizes the frame rate with the monitor's refresh rate.");
+		}
+
+		if (vsync_enabled) {
+			ImGui::BeginDisabled();
+		}
+		int target_fps = Window::get_target_fps();
+		if (ImGui::SliderInt("Target FPS", &target_fps, 10, 500, target_fps < 500 ? "%d FPS" : "Unlimited")) {
+			Window::set_target_fps(target_fps);
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Sets the target frame rate.");
+		}
+		if (vsync_enabled) {
+			ImGui::EndDisabled();
 		}
 
 		ImGui::Spacing();
@@ -1239,7 +1250,7 @@ void UI::render_modals() {
 					new_rule.when.fill("");
 					new_rule.when[12] = m.name;
 					new_rule.then.fill("");
-					new_rule.chance = 1;
+					new_rule.chance = 100.0f;
 					m.user_rules.push_back(new_rule);
 					MaterialManager::rebuild_compiled_rules();
 					unsaved_changes = true;

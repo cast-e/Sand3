@@ -10,6 +10,11 @@
 #include "const.hpp"
 #include "material_manager.hpp"
 
+struct Cell {
+	unsigned char material = 0;
+	bool updated = false;
+};
+
 inline constexpr std::array<int, NEIGHBOR_COUNT> compute_neighbor_offsets() {
 	std::array<int, NEIGHBOR_COUNT> offsets{};
 	unsigned int id = 0;
@@ -64,8 +69,8 @@ private:
 	static constexpr std::array<int, NEIGHBOR_COUNT> neighbor_offsets = compute_neighbor_offsets();
 
 	static QualityPreset quality_preset;
-	static std::vector<std::pair<unsigned char, bool>> cells;
-	static std::vector<std::pair<unsigned char, bool>> next_cells;
+	static std::vector<Cell> cells;
+	static std::vector<Cell> next_cells;
 
 	static unsigned int num_active_threads;
 	static std::unique_ptr<std::barrier<>> start_barrier;
@@ -74,8 +79,6 @@ private:
 	static std::vector<std::thread> workers;
 	static std::atomic<bool> shutdown_flag;
 	static std::atomic<unsigned int> frame_changed;
-
-	static unsigned int frame_count;
 
 	static constexpr uint32_t BG_COLOR = (255u << 24) | (64u << 16) | (64u << 8) | 64u;
 };

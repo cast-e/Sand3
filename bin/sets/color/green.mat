@@ -176,7 +176,7 @@
                 ""
             ],
             "sym_rot": true,
-            "chance": 20
+            "chance": 20.0
         }
     ]
 }

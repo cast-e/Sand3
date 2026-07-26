@@ -71,7 +71,7 @@ static Material parse_material_from_json(const nlohmann::ordered_json& j, const 
 			r.sym_x = r_j.contains("sym_x") && r_j["sym_x"].get<bool>();
 			r.sym_y = r_j.contains("sym_y") && r_j["sym_y"].get<bool>();
 			r.sym_rot = r_j.contains("sym_rot") && r_j["sym_rot"].get<bool>();
-			r.chance = r_j.contains("chance") ? r_j["chance"].get<unsigned char>() : 1;
+			r.chance = r_j.contains("chance") ? r_j["chance"].get<float>() : 100.0f;
 			r.when[12] = mat.name;
 			mat.user_rules.push_back(r);
 		}
@@ -174,7 +174,7 @@ void MaterialManager::save_all_materials(std::string_view directory_path) {
 				r["sym_y"] = rule.sym_y;
 			if (rule.sym_rot)
 				r["sym_rot"] = rule.sym_rot;
-			if (rule.chance != 1)
+			if (rule.chance != 100.0f)
 				r["chance"] = rule.chance;
 			rules_arr.push_back(r);
 		}

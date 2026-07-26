@@ -120,7 +120,7 @@
                 ""
             ],
             "sym_rot": true,
-            "chance": 3
+            "chance": 30.0
         },
         {
             "when": [
@@ -235,7 +235,7 @@
                 ""
             ],
             "sym_x": true,
-            "chance": 2
+            "chance": 50.0
         },
         {
             "when": [
@@ -348,7 +348,7 @@
                 "",
                 ""
             ],
-            "chance": 50
+            "chance": 2.0
         }
     ]
 }

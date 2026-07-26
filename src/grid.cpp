@@ -17,8 +17,8 @@ inline static uint32_t xorshift32() {
 }
 
 QualityPreset Grid::quality_preset = QualityPreset::Fast;
-std::vector<std::pair<unsigned char, bool>> Grid::cells;
-std::vector<std::pair<unsigned char, bool>> Grid::next_cells;
+std::vector<Cell> Grid::cells;
+std::vector<Cell> Grid::next_cells;
 unsigned int Grid::num_active_threads = 0;
 std::unique_ptr<std::barrier<>> Grid::start_barrier;
 std::unique_ptr<std::barrier<>> Grid::done_barrier;
@@ -26,7 +26,6 @@ std::unique_ptr<std::barrier<>> Grid::phase_barrier;
 std::vector<std::thread> Grid::workers;
 std::atomic<bool> Grid::shutdown_flag{false};
 std::atomic<unsigned int> Grid::frame_changed{0};
-unsigned int Grid::frame_count = 0;
 
 void Grid::init() {
 	num_active_threads = NUM_STRIPS_Y / 2;
@@ -37,7 +36,6 @@ void Grid::init() {
 
 	shutdown_flag = false;
 	frame_changed = 0;
-	frame_count = 0;
 
 	start_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
 	done_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
@@ -109,11 +107,11 @@ void Grid::worker_thread(const unsigned int thread_id) {
 		}
 
 		unsigned int local_changed = 0;
-		const bool reverse_x = (frame_count % 2 == 0);
-		const bool reverse_y = (frame_count % 2 == 1);
+		const bool reverse_x = (Window::get_frame_count() % 2 == 0);
+		const bool reverse_y = (Window::get_frame_count() % 2 == 1);
 
 		if (quality_preset == QualityPreset::Fast) {
-			const bool swap_phases = (frame_count % 2 == 1);
+			const bool swap_phases = (Window::get_frame_count() % 2 == 1);
 			for (unsigned int p_id = 0; p_id < 2; ++p_id) {
 				const unsigned int target_sy_mod = swap_phases ? (1 - p_id) : p_id;
 
@@ -141,7 +139,7 @@ void Grid::worker_thread(const unsigned int thread_id) {
 inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rules, const unsigned int cx,
 										const unsigned cy, const bool is_fast_path, unsigned int& local_changed) {
 	for (const CompiledUserRule& cur : rules) {
-		if (cur.chance > 1 && (xorshift32() % cur.chance) != 0)
+		if (xorshift32() % (100 * 1000) >= static_cast<uint32_t>(cur.chance * 1000))
 			continue;
 
 		const size_t num_variants = cur.variants.size();
@@ -209,10 +207,10 @@ void Grid::update_strip_1d(const unsigned int sy, const bool reverse_x, const bo
 			const unsigned int cx = reverse_x ? (SIM_WIDTH - 1 - x) : x;
 			const unsigned int cy = reverse_y ? (y_end - 1 - y) : (y_start + y);
 
-			if (next_cells[cy * SIM_WIDTH + cx].second)
+			if (next_cells[cy * SIM_WIDTH + cx].updated)
 				continue;
 
-			const auto& rules = MaterialManager::get_material(cells[cy * SIM_WIDTH + cx].first).compiled_rules;
+			const auto& rules = MaterialManager::get_material(cells[cy * SIM_WIDTH + cx].material).compiled_rules;
 			if (rules.empty())
 				continue;
 
@@ -225,8 +223,8 @@ void Grid::update_strip_1d(const unsigned int sy, const bool reverse_x, const bo
 
 void Grid::update_sequential() {
 	unsigned int local_changed = 0;
-	const bool reverse_x = (frame_count % 2 == 0);
-	const bool reverse_y = (frame_count % 2 == 1);
+	const bool reverse_x = (Window::get_frame_count() % 2 == 0);
+	const bool reverse_y = (Window::get_frame_count() % 2 == 1);
 
 	for (int y = 0; y < SIM_HEIGHT; ++y) {
 		for (unsigned int x = 0; x < SIM_WIDTH; ++x) {
@@ -235,18 +233,18 @@ void Grid::update_sequential() {
 
 			const unsigned int center_id = cy * SIM_WIDTH + cx;
 
-			if (next_cells[center_id].second) {
+			if (next_cells[center_id].updated) {
 				continue;
 			}
 
-			const auto& rules = MaterialManager::get_material(cells[center_id].first).compiled_rules;
+			const auto& rules = MaterialManager::get_material(cells[center_id].material).compiled_rules;
 			if (rules.empty()) {
 				continue;
 			}
 
 			bool is_fast_path = (cx >= 2 && cx < SIM_WIDTH - 2 && cy >= 2 && cy < SIM_HEIGHT - 2);
 
-			xorshift32_state = (cx + 123456789ULL) * (cy + 123456789ULL) * (frame_count + 123456789ULL);
+			xorshift32_state = (cx + 123456789ULL) * (cy + 123456789ULL) * (Window::get_frame_count() + 123456789ULL);
 
 			apply_compiled_rules(rules, cx, cy, is_fast_path, local_changed);
 		}
@@ -259,7 +257,7 @@ bool Grid::try_apply_rule_fast(const Rule& rule, const unsigned int center_id, u
 		if (rule.when[n_id] == 255) {
 			continue;
 		}
-		if (cells[center_id + neighbor_offsets[n_id]].first != rule.when[n_id]) {
+		if (cells[center_id + neighbor_offsets[n_id]].material != rule.when[n_id]) {
 			return false;
 		}
 	}
@@ -267,18 +265,18 @@ bool Grid::try_apply_rule_fast(const Rule& rule, const unsigned int center_id, u
 	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
 			unsigned int target_id = center_id + neighbor_offsets[n_id];
-			if (next_cells[target_id].second) {
+			if (next_cells[target_id].updated) {
 				return false;
 			}
 		}
 	}
 
-	next_cells[center_id].second = true;
+	next_cells[center_id].updated = true;
 	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
 			unsigned int target_id = center_id + neighbor_offsets[n_id];
-			next_cells[target_id].first = rule.then[n_id];
-			next_cells[target_id].second = true;
+			next_cells[target_id].material = rule.then[n_id];
+			next_cells[target_id].updated = true;
 			if (target_id != center_id) {
 				local_changed++;
 			}
@@ -303,7 +301,7 @@ bool Grid::try_apply_rule_safe(const Rule& rule, const unsigned int x, const uns
 			return false;
 		}
 
-		if (cells[ty * SIM_WIDTH + tx].first != rule.when[n_id]) {
+		if (cells[ty * SIM_WIDTH + tx].material != rule.when[n_id]) {
 			return false;
 		}
 	}
@@ -319,13 +317,13 @@ bool Grid::try_apply_rule_safe(const Rule& rule, const unsigned int x, const uns
 				return false;
 			}
 
-			if (next_cells[ty * SIM_WIDTH + tx].second) {
+			if (next_cells[ty * SIM_WIDTH + tx].updated) {
 				return false;
 			}
 		}
 	}
 
-	next_cells[y * SIM_WIDTH + x].second = true;
+	next_cells[y * SIM_WIDTH + x].updated = true;
 	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
 			const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
@@ -333,8 +331,8 @@ bool Grid::try_apply_rule_safe(const Rule& rule, const unsigned int x, const uns
 			const unsigned int tx = x + dx;
 			const unsigned int ty = y + dy;
 
-			next_cells[ty * SIM_WIDTH + tx].first = rule.then[n_id];
-			next_cells[ty * SIM_WIDTH + tx].second = true;
+			next_cells[ty * SIM_WIDTH + tx].material = rule.then[n_id];
+			next_cells[ty * SIM_WIDTH + tx].updated = true;
 			if (tx != x || ty != y) {
 				local_changed++;
 			}
@@ -345,11 +343,10 @@ bool Grid::try_apply_rule_safe(const Rule& rule, const unsigned int x, const uns
 
 void Grid::update() {
 	frame_changed = 0;
-	frame_count++;
 
 	next_cells = cells;
 	for (auto& cell : next_cells) {
-		cell.second = false;
+		cell.updated = false;
 	}
 
 	if (quality_preset == QualityPreset::Slow || num_active_threads == 0) {
@@ -366,10 +363,10 @@ void Grid::draw() {
 	uint32_t* buffer = Window::get_buffer();
 
 	for (unsigned int id = 0; id < SIM_SIZE; ++id) {
-		if (!cells[id].second) {
+		if (!cells[id].updated) {
 			continue;
 		}
-		unsigned char cell = cells[id].first;
+		unsigned char cell = cells[id].material;
 		buffer[id] = MaterialManager::get_material(cell).packed_color;
 	}
 }
@@ -378,30 +375,35 @@ void Grid::draw_material(unsigned int id) {
 	uint32_t* buffer = Window::get_buffer();
 
 	for (unsigned int id = 0; id < SIM_SIZE; ++id) {
-		if (cells[id].first == id) {
+		if (cells[id].material == id) {
 			continue;
 		}
-		unsigned char cell = cells[id].first;
+		unsigned char cell = cells[id].material;
 		buffer[id] = MaterialManager::get_material(cell).packed_color;
 	}
 }
 
-unsigned char& Grid::get_cell(const unsigned int x, const unsigned int y) { return cells[y * SIM_WIDTH + x].first; }
+unsigned char& Grid::get_cell(const unsigned int x, const unsigned int y) { return cells[y * SIM_WIDTH + x].material; }
 void Grid::set_cell(const unsigned int x, const unsigned int y, unsigned char cell) {
-	cells[y * SIM_WIDTH + x].first = cell;
-	cells[y * SIM_WIDTH + x].second = true;
+	cells[y * SIM_WIDTH + x].material = cell;
+	cells[y * SIM_WIDTH + x].updated = true;
 }
 
 unsigned int Grid::get_changed_cells() { return frame_changed.load(); }
 
 void Grid::remap_materials(const std::vector<unsigned char>& old_to_new) {
 	for (auto& cell : cells) {
-		if (cell.first < old_to_new.size()) {
-			cell.first = old_to_new[cell.first];
+		if (cell.material < old_to_new.size()) {
+			cell.material = old_to_new[cell.material];
 		} else {
-			cell.first = 0;
+			cell.material = 0;
 		}
 	}
 }
 
-void Grid::clear() { std::fill(cells.begin(), cells.end(), std::pair<unsigned char, bool>{0, true}); }
+void Grid::clear() {
+	for (auto& cell : cells) {
+		cell.material = 0;
+		cell.updated = true;
+	}
+}
