@@ -123,8 +123,8 @@ bool SaveManager::save_to_file(const std::string& name, const std::string& curre
 	file.write(reinterpret_cast<const char*>(&height), sizeof(height));
 
 	std::vector<uint8_t> grid_bytes(SIM_SIZE);
-	for (unsigned int y = 0; y < SIM_HEIGHT; ++y) {
-		for (unsigned int x = 0; x < SIM_WIDTH; ++x) {
+	for (uint32_t y = 0; y < SIM_HEIGHT; ++y) {
+		for (uint32_t x = 0; x < SIM_WIDTH; ++x) {
 			grid_bytes[y * SIM_WIDTH + x] = Grid::get_cell(x, y);
 		}
 	}
@@ -202,8 +202,8 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 
 		for (size_t k = 0; k < block_len; ++k) {
 			size_t id = block_start + k;
-			unsigned int x = static_cast<unsigned int>(id % SIM_WIDTH);
-			unsigned int y = static_cast<unsigned int>(id / SIM_WIDTH);
+			uint32_t x = static_cast<uint32_t>(id % SIM_WIDTH);
+			uint32_t y = static_cast<uint32_t>(id / SIM_WIDTH);
 			Grid::set_cell(x, y, block_raw[k]);
 		}
 	}

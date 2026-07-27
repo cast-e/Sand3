@@ -10,7 +10,7 @@ class Window {
 public:
 	Window() = delete;
 
-	static void init(unsigned int t_width = 1280, unsigned int t_height = 720);
+	static void init(uint32_t t_width = 1280, uint32_t t_height = 720);
 	static void shutdown();
 
 	static void present();
@@ -19,10 +19,14 @@ public:
 	static SDL_Renderer* get_renderer();
 	static uint32_t* get_buffer();
 
-	static unsigned long get_frame_count();
+	static uint64_t get_frame_count();
 
-	static unsigned int get_target_fps();
-	static void set_target_fps(unsigned int target);
+	static uint32_t get_target_fps();
+	static void set_target_fps(uint32_t target);
+
+	static bool get_vsync();
+	static void set_vsync(bool enabled);
+	static void update_vsync_for_pause(bool paused);
 
 	static std::pair<int, int> get_size();
 
@@ -37,7 +41,9 @@ private:
 	static std::vector<uint32_t> buffer;
 	static SDL_FRect dst_rect;
 
-	static unsigned long frame_count;
-	static unsigned long last_frame;
-	static unsigned int target_fps;
+	static uint64_t frame_count;
+	static uint64_t next_frame_counter;
+	static uint32_t target_fps;
+
+	static bool vsync_enabled;
 };

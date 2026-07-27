@@ -132,8 +132,8 @@ void UI::init() {
 
 	ImFontConfig font_cfg;
 	font_cfg.FontDataOwnedByAtlas = false;
-	io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(___assets_Roboto_Regular_ttf),
-								   ___assets_Roboto_Regular_ttf_len, 16.0f, &font_cfg);
+	io.Fonts->AddFontFromMemoryTTF(const_cast<uint8_t*>(___assets_Roboto_Regular_ttf), ___assets_Roboto_Regular_ttf_len,
+								   16.0f, &font_cfg);
 
 	init_style();
 
@@ -277,7 +277,7 @@ void UI::handle_interaction() {
 		if (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) {
 			target_zoom /= 1.2f;
 		}
-		unsigned char material_count = MaterialManager::get_material_count();
+		uint8_t material_count = MaterialManager::get_material_count();
 		if (ImGui::IsKeyPressed(ImGuiKey_1) && material_count > 1) {
 			selected_id = 1;
 		}
@@ -322,14 +322,14 @@ void UI::handle_interaction() {
 		float norm_y = (my - dst_rect.y) / dst_rect.h;
 		float fx = norm_x * SIM_WIDTH;
 		float fy = norm_y * SIM_HEIGHT;
-		unsigned int x_cell = static_cast<unsigned int>(fx);
-		unsigned int y_cell = static_cast<unsigned int>(fy);
+		uint32_t x_cell = static_cast<uint32_t>(fx);
+		uint32_t y_cell = static_cast<uint32_t>(fy);
 
 		if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
 			ImVec2 drag_delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
 			if (drag_delta.x * drag_delta.x + drag_delta.y * drag_delta.y < 25.0f) {
 				if (x_cell < SIM_WIDTH && y_cell < SIM_HEIGHT) {
-					unsigned char cell = Grid::get_cell(x_cell, y_cell);
+					uint8_t cell = Grid::get_cell(x_cell, y_cell);
 					selected_id = MaterialManager::get_material(cell).id;
 				}
 			}
@@ -344,9 +344,9 @@ void UI::handle_interaction() {
 				int cy = y_start + dy;
 				if (cx >= 0 && cx < static_cast<int>(SIM_WIDTH) && cy >= 0 && cy < static_cast<int>(SIM_HEIGHT)) {
 					if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-						Grid::set_cell(static_cast<unsigned int>(cx), static_cast<unsigned int>(cy), selected_id);
+						Grid::set_cell(static_cast<uint32_t>(cx), static_cast<uint32_t>(cy), selected_id);
 					} else if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-						Grid::set_cell(static_cast<unsigned int>(cx), static_cast<unsigned int>(cy), 0);
+						Grid::set_cell(static_cast<uint32_t>(cx), static_cast<uint32_t>(cy), 0);
 					}
 				}
 			}
@@ -408,7 +408,7 @@ void UI::render_sim_content() {
 		ImGui::SetTooltip("Adjust brush width.");
 	}
 
-	std::vector<Material>& materials = MaterialManager::get_materials();
+	std::vector<MaterialDefinition>& materials = MaterialManager::get_materials();
 
 	ImGui::Separator();
 	ImGui::Text("Select Material:");
@@ -433,7 +433,7 @@ void UI::render_sim_content() {
 }
 
 void UI::render_material_editor() {
-	std::vector<Material>& materials = MaterialManager::get_materials();
+	std::vector<MaterialDefinition>& materials = MaterialManager::get_materials();
 
 	if (ImGui::BeginTabItem("Materials")) {
 		ImGui::Spacing();
@@ -455,12 +455,11 @@ void UI::render_material_editor() {
 					selected_id = static_cast<int>(i);
 				}
 				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Has %zu rule%s", materials[i].user_rules.size(),
-									  (materials[i].user_rules.size() == 1 ? "" : "s"));
+					ImGui::SetTooltip("Has %zu rule%s", materials[i].rules.size(),
+									  (materials[i].rules.size() == 1 ? "" : "s"));
 				}
 			}
 
-			// Always end with the 0th material.
 			ImVec4 color = ImVec4(materials[0].color[0] / 255.f, materials[0].color[1] / 255.f,
 								  materials[0].color[2] / 255.f, 1.f);
 			ImGui::ColorButton("##color_0", color, ImGuiColorEditFlags_NoTooltip, ImVec2(15, 15));
@@ -470,19 +469,22 @@ void UI::render_material_editor() {
 				selected_id = 0;
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Has %zu rule%s", materials[0].user_rules.size(),
-								  (materials[0].user_rules.size() == 1 ? "" : "s"));
+				ImGui::SetTooltip("Has %zu rule%s", materials[0].rules.size(),
+								  (materials[0].rules.size() == 1 ? "" : "s"));
 			}
 
 			ImGui::EndChild();
 
 			ImGui::Spacing();
 			if (ImGui::Button("New", ImVec2(80, 25))) {
-				Material new_mat;
-				new_mat.name = "new_material_" + std::to_string(materials.size());
+				MaterialDefinition new_mat;
+				new_mat.name = "material_" + std::to_string(materials.size());
 				new_mat.color = {255, 255, 255};
-				MaterialManager::add_material(new_mat);
-				selected_id = static_cast<int>(materials.size() - 1);
+				const uint8_t id = MaterialManager::add_material(new_mat);
+				for (auto& r : materials[id].rules) {
+					r.when[12] = {id};
+				}
+				selected_id = static_cast<int>(id);
 				unsaved_changes = true;
 			}
 			if (ImGui::IsItemHovered()) {
@@ -492,10 +494,13 @@ void UI::render_material_editor() {
 			ImGui::SameLine();
 			if (selected_id >= 0 && selected_id < (int)materials.size()) {
 				if (ImGui::Button("Copy", ImVec2(80, 25))) {
-					Material duplicated_mat = materials[selected_id];
+					MaterialDefinition duplicated_mat = materials[selected_id];
 					duplicated_mat.name = duplicated_mat.name + "_copy";
-					MaterialManager::add_material(duplicated_mat);
-					selected_id = static_cast<int>(materials.size() - 1);
+					const uint8_t id = MaterialManager::add_material(duplicated_mat);
+					for (auto& r : materials[id].rules) {
+						r.when[12] = {id};
+					}
+					selected_id = static_cast<int>(id);
 					unsaved_changes = true;
 				}
 				if (ImGui::IsItemHovered()) {
@@ -518,7 +523,7 @@ void UI::render_material_editor() {
 				if (is_empty_mat) {
 					ImGui::EndDisabled();
 					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-						ImGui::SetTooltip("The default material (ID 0) cannot be deleted.");
+						ImGui::SetTooltip("The default material cannot be deleted.");
 					}
 				} else if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Remove the selected material.");
@@ -531,7 +536,7 @@ void UI::render_material_editor() {
 		ImGui::Separator();
 
 		if (selected_id >= 0 && selected_id < (int)materials.size()) {
-			Material& mat = materials[selected_id];
+			MaterialDefinition& mat = materials[selected_id];
 			bool is_empty_mat = (mat.id == 0);
 
 			ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "Editing: %s", mat.name.c_str());
@@ -543,9 +548,7 @@ void UI::render_material_editor() {
 				std::string new_name = name_buf;
 				new_name = sanitize_name(new_name);
 				if (MaterialManager::is_valid_name(new_name) && new_name != mat.name) {
-					Material temp = mat;
-					temp.name = sanitize_name(new_name);
-					MaterialManager::edit_material(selected_id, temp);
+					MaterialManager::update_material_name(mat.id, new_name);
 					unsaved_changes = true;
 				}
 			}
@@ -555,12 +558,11 @@ void UI::render_material_editor() {
 
 			float col[3] = {mat.color[0] / 255.f, mat.color[1] / 255.f, mat.color[2] / 255.f};
 			if (ImGui::ColorEdit3("Color", col)) {
-				mat.color[0] = static_cast<unsigned char>(col[0] * 255.f);
-				mat.color[1] = static_cast<unsigned char>(col[1] * 255.f);
-				mat.color[2] = static_cast<unsigned char>(col[2] * 255.f);
-				mat.packed_color = MaterialManager::pack_color(mat.color);
+				mat.color[0] = static_cast<uint8_t>(col[0] * 255.f);
+				mat.color[1] = static_cast<uint8_t>(col[1] * 255.f);
+				mat.color[2] = static_cast<uint8_t>(col[2] * 255.f);
 				unsaved_changes = true;
-				Grid::draw_material(mat.id);
+				MaterialManager::update_material_color(mat.id, mat);
 			}
 			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("Pick color for this material in the simulator.");
@@ -573,12 +575,11 @@ void UI::render_material_editor() {
 				if (is_empty_mat) {
 					open_empty_rule_warning_popup = true;
 				} else {
-					UserRule new_rule;
-					new_rule.when.fill("");
-					new_rule.when[12] = mat.name;
-					new_rule.then.fill("");
+					RuleDefinition new_rule;
+					new_rule.when[12] = {mat.id};
+					new_rule.then.fill(255);
 					new_rule.chance = 100.0f;
-					mat.user_rules.push_back(new_rule);
+					mat.rules.push_back(new_rule);
 					rebuild_needed = true;
 					unsaved_changes = true;
 				}
@@ -588,8 +589,8 @@ void UI::render_material_editor() {
 			}
 
 			ImGui::BeginChild("RulesScroll", ImVec2(0, 0), true);
-			for (int r_id = 0; r_id < (int)mat.user_rules.size(); ++r_id) {
-				UserRule& rule = mat.user_rules[r_id];
+			for (int r_id = 0; r_id < (int)mat.rules.size(); ++r_id) {
+				RuleDefinition& rule = mat.rules[r_id];
 				ImGui::PushID(r_id);
 
 				ImGui::BeginChild(("##rule_card_" + std::to_string(r_id)).c_str(), ImVec2(0, 230), true,
@@ -601,7 +602,7 @@ void UI::render_material_editor() {
 				float btn_size = ImGui::GetFrameHeight();
 				if (r_id > 0) {
 					if (ImGui::ArrowButton("##up", ImGuiDir_Up)) {
-						std::swap(mat.user_rules[r_id], mat.user_rules[r_id - 1]);
+						std::swap(mat.rules[r_id], mat.rules[r_id - 1]);
 						rebuild_needed = true;
 						unsaved_changes = true;
 					}
@@ -613,9 +614,9 @@ void UI::render_material_editor() {
 				}
 				ImGui::SameLine();
 
-				if (r_id < (int)mat.user_rules.size() - 1) {
+				if (r_id < (int)mat.rules.size() - 1) {
 					if (ImGui::ArrowButton("##down", ImGuiDir_Down)) {
-						std::swap(mat.user_rules[r_id], mat.user_rules[r_id + 1]);
+						std::swap(mat.rules[r_id], mat.rules[r_id + 1]);
 						rebuild_needed = true;
 						unsaved_changes = true;
 					}
@@ -628,8 +629,8 @@ void UI::render_material_editor() {
 				ImGui::SameLine(0.0f, 10.0f);
 
 				if (ImGui::Button("Copy", ImVec2(45, 0))) {
-					UserRule duplicated_rule = rule;
-					mat.user_rules.push_back(duplicated_rule);
+					RuleDefinition duplicated_rule = rule;
+					mat.rules.push_back(duplicated_rule);
 					rebuild_needed = true;
 					unsaved_changes = true;
 					ImGui::EndGroup();
@@ -646,7 +647,7 @@ void UI::render_material_editor() {
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 				ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 				if (ImGui::Button("X", ImVec2(btn_size, btn_size))) {
-					mat.user_rules.erase(mat.user_rules.begin() + r_id);
+					mat.rules.erase(mat.rules.begin() + r_id);
 					rebuild_needed = true;
 					unsaved_changes = true;
 					ImGui::PopStyleColor(3);
@@ -674,21 +675,21 @@ void UI::render_material_editor() {
 					ImGui::SetTooltip("Controls rule probability.");
 				}
 
-				if (ImGui::Checkbox("X Symmetry", &rule.sym_x)) {
+				if (ImGui::Checkbox("X Symmetry", &rule.symmetry.flip_x)) {
 					rebuild_needed = true;
 					unsaved_changes = true;
 				}
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Allows the rule to match its left-right mirror image.");
 				}
-				if (ImGui::Checkbox("Y Symmetry", &rule.sym_y)) {
+				if (ImGui::Checkbox("Y Symmetry", &rule.symmetry.flip_y)) {
 					rebuild_needed = true;
 					unsaved_changes = true;
 				}
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Allows the rule to match its up-down mirror image.");
 				}
-				if (ImGui::Checkbox("Rotational Symmetry", &rule.sym_rot)) {
+				if (ImGui::Checkbox("Rotational Symmetry", &rule.symmetry.rotate)) {
 					rebuild_needed = true;
 					unsaved_changes = true;
 				}
@@ -717,36 +718,79 @@ void UI::render_material_editor() {
 							ImGui::Button(label.c_str(), ImVec2(25, 25));
 							ImGui::PopStyleColor();
 						} else {
-							if (!rule.when[c_id].empty()) {
-								label = rule.when[c_id].substr(0, 1);
-								for (const auto& m : materials) {
-									if (m.name == rule.when[c_id]) {
-										btn_col =
-											ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
-										break;
-									}
+							const auto& when_ids = rule.when[c_id];
+
+							if (when_ids.size() == 1) {
+								const auto& ref = MaterialManager::get_material(when_ids[0]);
+								label = ref.name.substr(0, 1);
+								btn_col =
+									ImVec4(ref.color[0] / 255.f, ref.color[1] / 255.f, ref.color[2] / 255.f, 1.0f);
+							} else if (when_ids.size() > 1) {
+								label = std::to_string(when_ids.size());
+								float r_sum = 0, g_sum = 0, b_sum = 0;
+								for (uint8_t id : when_ids) {
+									const auto& ref = MaterialManager::get_material(id);
+									r_sum += ref.color[0] / 255.f;
+									g_sum += ref.color[1] / 255.f;
+									b_sum += ref.color[2] / 255.f;
 								}
+								float n = static_cast<float>(when_ids.size());
+								btn_col = ImVec4(r_sum / n, g_sum / n, b_sum / n, 1.0f);
 							}
+
+							std::string popup_id =
+								"select_material_when_" + std::to_string(r_id) + "_" + std::to_string(c_id);
 
 							ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
 							if (ImGui::Button(label.c_str(), ImVec2(25, 25))) {
-								ImGui::OpenPopup("select_material_when");
+								ImGui::OpenPopup(popup_id.c_str());
 							}
 							ImGui::PopStyleColor();
 
-							if (ImGui::BeginPopup("select_material_when")) {
-								if (ImGui::Selectable("<wildcard>", rule.when[c_id].empty())) {
-									rule.when[c_id] = "";
-									rebuild_needed = true;
-									unsaved_changes = true;
+							if (ImGui::IsItemHovered()) {
+								if (when_ids.empty()) {
+									ImGui::SetTooltip("Wildcard");
+								} else {
+									std::string tip;
+									for (size_t i = 0; i < when_ids.size(); ++i) {
+										if (i > 0)
+											tip += ", ";
+										tip += MaterialManager::get_material(when_ids[i]).name;
+									}
+									ImGui::SetTooltip("%s", tip.c_str());
 								}
+							}
+
+							if (ImGui::BeginPopup(popup_id.c_str())) {
 								for (const auto& m : materials) {
-									if (ImGui::Selectable(m.name.c_str(), rule.when[c_id] == m.name)) {
-										rule.when[c_id] = m.name;
+									bool checked = std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) !=
+												   rule.when[c_id].end();
+									ImVec4 m_col =
+										ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
+									ImGui::ColorButton(("##wcb_" + std::to_string(r_id) + "_" + std::to_string(c_id) +
+														"_" + std::to_string(m.id))
+														   .c_str(),
+													   m_col, ImGuiColorEditFlags_NoTooltip, ImVec2(14, 14));
+									ImGui::SameLine();
+									ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.4f, 0.4f));
+									if (ImGui::Checkbox(
+											(m.name + "##cb_" + std::to_string(r_id) + "_" + std::to_string(c_id))
+												.c_str(),
+											&checked)) {
+										if (checked) {
+											if (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) ==
+												rule.when[c_id].end()) {
+												rule.when[c_id].push_back(m.id);
+											}
+										} else {
+											std::erase(rule.when[c_id], m.id);
+										}
 										rebuild_needed = true;
 										unsaved_changes = true;
 									}
+									ImGui::PopStyleVar();
 								}
+
 								ImGui::EndPopup();
 							}
 						}
@@ -762,50 +806,73 @@ void UI::render_material_editor() {
 
 				ImGui::BeginGroup();
 				ImGui::Text("Then");
-				for (int y = 0; y < NEIGHBOR_SIZE; ++y) {
-					for (int x = 0; x < NEIGHBOR_SIZE; ++x) {
-						int c_id = y * NEIGHBOR_SIZE + x;
+				for (uint32_t y = 0; y < NEIGHBOR_SIZE; ++y) {
+					for (uint32_t x = 0; x < NEIGHBOR_SIZE; ++x) {
+						const uint32_t c_id = y * NEIGHBOR_SIZE + x;
 						ImGui::PushID(c_id + 100);
 
 						std::string label = "?";
 						ImVec4 btn_col = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
 
-						if (!rule.then[c_id].empty()) {
-							label = rule.then[c_id].substr(0, 1);
-							for (const auto& m : materials) {
-								if (m.name == rule.then[c_id]) {
-									btn_col = ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
-									break;
-								}
-							}
+						uint8_t then_id = rule.then[c_id];
+
+						if (then_id != 255) {
+							const auto& ref = MaterialManager::get_material(then_id);
+							label = ref.name.substr(0, 1);
+							btn_col = ImVec4(ref.color[0] / 255.f, ref.color[1] / 255.f, ref.color[2] / 255.f, 1.0f);
 						} else {
-							if (!rule.when[c_id].empty()) {
-								label = rule.when[c_id].substr(0, 1);
-								for (const auto& m : materials) {
-									if (m.name == rule.when[c_id]) {
-										btn_col = ImVec4(m.color[0] / 255.f * 0.4f, m.color[1] / 255.f * 0.4f,
-														 m.color[2] / 255.f * 0.4f, 1.0f);
-										break;
-									}
+							if (rule.when[c_id].size() == 1) {
+								const auto& ref = MaterialManager::get_material(rule.when[c_id][0]);
+								label = ref.name.substr(0, 1);
+								btn_col = ImVec4(ref.color[0] / 255.f * 0.4f, ref.color[1] / 255.f * 0.4f,
+												 ref.color[2] / 255.f * 0.4f, 1.0f);
+							} else if (rule.when[c_id].size() > 1) {
+								label = std::to_string(rule.when[c_id].size());
+								float r_sum = 0, g_sum = 0, b_sum = 0;
+								for (uint8_t id : rule.when[c_id]) {
+									const auto& ref = MaterialManager::get_material(id);
+									r_sum += ref.color[0] / 255.f;
+									g_sum += ref.color[1] / 255.f;
+									b_sum += ref.color[2] / 255.f;
 								}
+								float n = static_cast<float>(rule.when[c_id].size());
+								btn_col = ImVec4(r_sum / n * 0.4f, g_sum / n * 0.4f, b_sum / n * 0.4f, 1.0f);
 							}
 						}
+
+						const std::string popup_id =
+							"select_material_then_" + std::to_string(r_id) + "_" + std::to_string(c_id);
 
 						ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
 						if (ImGui::Button(label.c_str(), ImVec2(25, 25))) {
-							ImGui::OpenPopup("select_material_then");
+							ImGui::OpenPopup(popup_id.c_str());
 						}
 						ImGui::PopStyleColor();
 
-						if (ImGui::BeginPopup("select_material_then")) {
-							if (ImGui::Selectable("<keep>", rule.then[c_id].empty())) {
-								rule.then[c_id] = "";
+						if (ImGui::IsItemHovered()) {
+							if (then_id == 255) {
+								ImGui::SetTooltip("Unchanged");
+							} else {
+								const std::string tip = MaterialManager::get_material(rule.then[c_id]).name;
+								ImGui::SetTooltip("%s", tip.c_str());
+							}
+						}
+
+						if (ImGui::BeginPopup(popup_id.c_str())) {
+							if (ImGui::Selectable("Unchanged", then_id == 255)) {
+								rule.then[c_id] = 255;
 								rebuild_needed = true;
 								unsaved_changes = true;
 							}
 							for (const auto& m : materials) {
-								if (ImGui::Selectable(m.name.c_str(), rule.then[c_id] == m.name)) {
-									rule.then[c_id] = m.name;
+								ImVec4 m_col = ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
+								ImGui::ColorButton(("##tcb_" + std::to_string(r_id) + "_" + std::to_string(c_id) + "_" +
+													std::to_string(m.id))
+													   .c_str(),
+												   m_col, ImGuiColorEditFlags_NoTooltip, ImVec2(14, 14));
+								ImGui::SameLine();
+								if (ImGui::Selectable(m.name.c_str(), then_id == m.id)) {
+									rule.then[c_id] = m.id;
 									rebuild_needed = true;
 									unsaved_changes = true;
 								}
@@ -1011,10 +1078,10 @@ void UI::render_save_load() {
 		}
 
 		ImGui::BeginChild("SavesListScroll", ImVec2(0, 180), true);
-		for (int i = 0; i < (int)save_files.size(); ++i) {
+		for (uint32_t i = 0; i < static_cast<uint32_t>(save_files.size()); ++i) {
 			bool is_selected = (selected_save_id == i);
 			if (ImGui::Selectable(save_files[i].c_str(), selected_save_id == i)) {
-				selected_save_id = i;
+				selected_save_id = static_cast<int>(i);
 			}
 			if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
 				if (unsaved_changes) {
@@ -1035,7 +1102,7 @@ void UI::render_save_load() {
 		}
 
 		ImGui::Spacing();
-		if (selected_save_id >= 0 && selected_save_id < (int)save_files.size()) {
+		if (selected_save_id >= 0 && selected_save_id < static_cast<int>(save_files.size())) {
 			if (ImGui::Button("Load", ImVec2(80, 25))) {
 				if (unsaved_changes) {
 					pending_save_load = save_files[selected_save_id];
@@ -1054,16 +1121,16 @@ void UI::render_save_load() {
 
 			ImGui::SameLine();
 			if (ImGui::Button("Copy", ImVec2(80, 25))) {
-				std::string old_name = save_files[selected_save_id];
+				const std::string old_name = save_files[selected_save_id];
 				std::string new_name = old_name;
-				size_t dot = new_name.find_last_of('.');
+				const size_t dot = new_name.find_last_of('.');
 				if (dot != std::string::npos) {
 					new_name = new_name.substr(0, dot) + "_copy" + new_name.substr(dot);
 				} else {
 					new_name += "_copy";
 				}
-				std::string old_path = SETS_DIRECTORY + current_set + "/" + old_name;
-				std::string new_path = SETS_DIRECTORY + current_set + "/" + new_name;
+				const std::string old_path = SETS_DIRECTORY + current_set + "/" + old_name;
+				const std::string new_path = SETS_DIRECTORY + current_set + "/" + new_name;
 				try {
 					fs::copy(old_path, new_path);
 				} catch (...) {}
@@ -1103,11 +1170,9 @@ void UI::render_advanced_options() {
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		int vsync_val = 0;
-		SDL_GetRenderVSync(Window::get_renderer(), &vsync_val);
-		bool vsync_enabled = (vsync_val != 0);
+		bool vsync_enabled = Window::get_vsync();
 		if (ImGui::Checkbox("Enable VSync", &vsync_enabled)) {
-			SDL_SetRenderVSync(Window::get_renderer(), vsync_enabled ? 1 : 0);
+			Window::set_vsync(vsync_enabled);
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Synchronizes the frame rate with the monitor's refresh rate.");
@@ -1160,7 +1225,7 @@ void UI::render_advanced_options() {
 		}
 		int thread_count = static_cast<int>(Grid::get_thread_count());
 		if (ImGui::SliderInt("Active Threads", &thread_count, 1, NUM_STRIPS_Y / 2)) {
-			Grid::configure_threads(static_cast<unsigned int>(thread_count));
+			Grid::configure_threads(static_cast<uint32_t>(thread_count));
 		}
 		if (ImGui::IsItemHovered() && mt_active) {
 			ImGui::SetTooltip("Sets the size of the worker thread pool. Automatically set to the maximum number of\n"
@@ -1246,12 +1311,11 @@ void UI::render_modals() {
 			auto& mats = MaterialManager::get_materials();
 			for (auto& m : mats) {
 				if (m.id == 0) {
-					UserRule new_rule;
-					new_rule.when.fill("");
-					new_rule.when[12] = m.name;
-					new_rule.then.fill("");
+					RuleDefinition new_rule;
+					new_rule.when[12] = {m.id};
+					new_rule.then.fill(255);
 					new_rule.chance = 100.0f;
-					m.user_rules.push_back(new_rule);
+					m.rules.push_back(new_rule);
 					MaterialManager::rebuild_compiled_rules();
 					unsaved_changes = true;
 					break;

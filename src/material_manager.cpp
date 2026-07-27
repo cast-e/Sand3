@@ -9,16 +9,17 @@
 
 namespace fs = std::filesystem;
 
-std::vector<Material> MaterialManager::materials{};
-Material MaterialManager::default_empty{"empty", 0, {64, 64, 64}, (255u << 24) | (64u << 16) | (64u << 8) | 64u,
-										{},		 {}};
-std::array<const Material*, 256> MaterialManager::material_by_id{};
+std::vector<MaterialDefinition> MaterialManager::materials{};
+std::array<RuntimeMaterial, 256> MaterialManager::runtime_materials{};
+std::array<uint8_t, 256> MaterialManager::material_by_id{};
+MaterialDefinition MaterialManager::default_empty{"empty", 0, {64, 64, 64}, {}};
+RuntimeMaterial MaterialManager::default_runtime_empty{0, MaterialManager::pack_color({64, 64, 64}), {}};
 
-uint32_t MaterialManager::pack_color(const std::array<unsigned char, 3>& color) {
+uint32_t MaterialManager::pack_color(const std::array<uint8_t, 3>& color) {
 	return (255u << 24) | (color[2] << 16) | (color[1] << 8) | color[0];
 }
 
-unsigned char MaterialManager::get_unused_id() {
+uint8_t MaterialManager::get_unused_id() {
 	std::array<bool, 256> used{};
 	used[0] = true;
 	used[255] = true;
@@ -31,7 +32,7 @@ unsigned char MaterialManager::get_unused_id() {
 
 	for (int i = 1; i < 255; ++i) {
 		if (!used[i]) {
-			return static_cast<unsigned char>(i);
+			return static_cast<uint8_t>(i);
 		}
 	}
 
@@ -50,30 +51,42 @@ bool MaterialManager::is_valid_name(std::string_view name) {
 	return true;
 }
 
-static Material parse_material_from_json(const nlohmann::ordered_json& j, const std::string& default_name,
-										 unsigned char fallback_id) {
-	Material mat;
+static MaterialDefinition parse_material_from_json(const nlohmann::ordered_json& j, const std::string& default_name,
+												   uint8_t fallback_id) {
+	MaterialDefinition mat;
 	mat.name = j.value("name", default_name);
 	mat.id = j.value("id", fallback_id);
 
 	if (j.contains("color")) {
-		mat.color = j["color"].get<std::array<unsigned char, 3>>();
+		mat.color = j["color"].get<std::array<uint8_t, 3>>();
 	} else {
 		mat.color = {64, 64, 64};
 	}
-	mat.packed_color = MaterialManager::pack_color(mat.color);
 
 	if (j.contains("rules")) {
 		for (const auto& r_j : j["rules"]) {
-			UserRule r;
-			r.when = r_j["when"].get<std::array<std::string, NEIGHBOR_COUNT>>();
-			r.then = r_j["then"].get<std::array<std::string, NEIGHBOR_COUNT>>();
-			r.sym_x = r_j.contains("sym_x") && r_j["sym_x"].get<bool>();
-			r.sym_y = r_j.contains("sym_y") && r_j["sym_y"].get<bool>();
-			r.sym_rot = r_j.contains("sym_rot") && r_j["sym_rot"].get<bool>();
+			RuleDefinition r;
+			size_t rule_idx = mat.rules.size();
+
+			const auto& when_arr = r_j["when"];
+			for (uint32_t i = 0; i < NEIGHBOR_COUNT; ++i) {
+				r.when[i] = when_arr[i].get<std::vector<uint8_t>>();
+			}
+
+			r.then.fill(255);
+			if (r_j.contains("then")) {
+				const auto& then_arr = r_j["then"];
+				for (uint32_t i = 0; i < NEIGHBOR_COUNT; ++i) {
+					r.then[i] = then_arr[i].get<uint8_t>();
+				}
+			}
+
+			r.symmetry.flip_x = r_j.contains("sym_x") && r_j["sym_x"].get<bool>();
+			r.symmetry.flip_y = r_j.contains("sym_y") && r_j["sym_y"].get<bool>();
+			r.symmetry.rotate = r_j.contains("sym_rot") && r_j["sym_rot"].get<bool>();
 			r.chance = r_j.contains("chance") ? r_j["chance"].get<float>() : 100.0f;
-			r.when[12] = mat.name;
-			mat.user_rules.push_back(r);
+			r.when[12] = {mat.id};
+			mat.rules.push_back(r);
 		}
 	}
 
@@ -83,13 +96,9 @@ static Material parse_material_from_json(const nlohmann::ordered_json& j, const 
 void MaterialManager::load_all_materials(std::string_view directory_path) {
 	materials.clear();
 
-	Material empty_mat;
-	empty_mat.name = "empty";
-	empty_mat.id = 0;
-	empty_mat.color = {64, 64, 64};
-	empty_mat.packed_color = pack_color(empty_mat.color);
+	MaterialDefinition empty_mat = default_empty;
 
-	std::vector<Material> loaded_mats;
+	std::vector<MaterialDefinition> loaded_mats;
 
 	if (fs::exists(directory_path.data()) && fs::is_directory(directory_path.data())) {
 		for (const auto& entry : fs::directory_iterator(directory_path.data())) {
@@ -100,7 +109,7 @@ void MaterialManager::load_all_materials(std::string_view directory_path) {
 
 				try {
 					nlohmann::ordered_json j = nlohmann::ordered_json::parse(file);
-					Material mat = parse_material_from_json(j, entry.path().stem().string(), 255);
+					MaterialDefinition mat = parse_material_from_json(j, entry.path().stem().string(), 255);
 
 					if (mat.id == 0) {
 						empty_mat = mat;
@@ -114,11 +123,15 @@ void MaterialManager::load_all_materials(std::string_view directory_path) {
 
 	materials.push_back(empty_mat);
 
-	std::sort(loaded_mats.begin(), loaded_mats.end(), [](const Material& a, const Material& b) { return a.id < b.id; });
+	std::sort(loaded_mats.begin(), loaded_mats.end(),
+			  [](const MaterialDefinition& a, const MaterialDefinition& b) { return a.id < b.id; });
 
 	for (auto& mat : loaded_mats) {
 		if (mat.id == 255) {
 			mat.id = get_unused_id();
+		}
+		for (auto& r : mat.rules) {
+			r.when[12] = {mat.id};
 		}
 		materials.push_back(mat);
 	}
@@ -136,8 +149,7 @@ void MaterialManager::save_all_materials(std::string_view directory_path) {
 			for (const auto& m : materials) {
 				if (m.name == stem) {
 					if (m.id == 0) {
-						bool is_default =
-							(m.color[0] == 64 && m.color[1] == 64 && m.color[2] == 64 && m.user_rules.empty());
+						bool is_default = (m.color[0] == 64 && m.color[1] == 64 && m.color[2] == 64 && m.rules.empty());
 						if (is_default) {
 							break;
 						}
@@ -153,7 +165,7 @@ void MaterialManager::save_all_materials(std::string_view directory_path) {
 	}
 
 	for (const auto& mat : materials) {
-		if (mat.id == 0 && mat.color[0] == 64 && mat.color[1] == 64 && mat.color[2] == 64 && mat.user_rules.empty()) {
+		if (mat.id == 0 && mat.color[0] == 64 && mat.color[1] == 64 && mat.color[2] == 64 && mat.rules.empty()) {
 			continue;
 		}
 
@@ -162,18 +174,22 @@ void MaterialManager::save_all_materials(std::string_view directory_path) {
 		j["id"] = mat.id;
 		j["color"] = mat.color;
 		nlohmann::ordered_json rules_arr = nlohmann::ordered_json::array();
-		for (const auto& rule : mat.user_rules) {
+		for (const auto& rule : mat.rules) {
 			nlohmann::ordered_json r;
 			auto when_copy = rule.when;
-			when_copy[12] = "";
-			r["when"] = when_copy;
+			when_copy[12].clear();
+			nlohmann::ordered_json when_json = nlohmann::ordered_json::array();
+			for (uint32_t i = 0; i < NEIGHBOR_COUNT; ++i) {
+				when_json.push_back(when_copy[i]);
+			}
+			r["when"] = when_json;
 			r["then"] = rule.then;
-			if (rule.sym_x)
-				r["sym_x"] = rule.sym_x;
-			if (rule.sym_y)
-				r["sym_y"] = rule.sym_y;
-			if (rule.sym_rot)
-				r["sym_rot"] = rule.sym_rot;
+			if (rule.symmetry.flip_x)
+				r["sym_x"] = rule.symmetry.flip_x;
+			if (rule.symmetry.flip_y)
+				r["sym_y"] = rule.symmetry.flip_y;
+			if (rule.symmetry.rotate)
+				r["sym_rot"] = rule.symmetry.rotate;
 			if (rule.chance != 100.0f)
 				r["chance"] = rule.chance;
 			rules_arr.push_back(r);
@@ -188,69 +204,55 @@ void MaterialManager::save_all_materials(std::string_view directory_path) {
 	}
 }
 
-void MaterialManager::add_material(const Material& mat) {
-	Material m = mat;
+uint8_t MaterialManager::add_material(const MaterialDefinition& mat) {
+	MaterialDefinition m = mat;
 	m.id = get_unused_id();
-	m.packed_color = pack_color(m.color);
 	materials.push_back(m);
 	rebuild_compiled_rules();
+	return m.id;
 }
 
-void MaterialManager::edit_material(size_t index, const Material& mat) {
-	if (index >= materials.size()) {
-		return;
-	}
+void MaterialManager::update_material_name(uint8_t index, std::string_view name) { materials[index].name = name; }
 
-	const std::string old_name = materials[index].name;
-
-	materials[index] = mat;
-	materials[index].packed_color = pack_color(mat.color);
-
-	if (old_name != mat.name && !old_name.empty() && !mat.name.empty()) {
-		for (auto& m : materials) {
-			for (auto& r : m.user_rules) {
-				for (auto& name : r.when) {
-					if (name == old_name)
-						name = mat.name;
-				}
-				for (auto& name : r.then) {
-					if (name == old_name)
-						name = mat.name;
-				}
-			}
-		}
-	}
-
+void MaterialManager::update_material_rules(uint8_t index, const MaterialDefinition& mat) {
+	materials[index].rules = mat.rules;
 	rebuild_compiled_rules();
 }
 
-void MaterialManager::remove_material(size_t index) {
+void MaterialManager::update_material_color(uint8_t index, const MaterialDefinition& mat) {
+	materials[index].color = mat.color;
+	runtime_materials[index].packed_color = pack_color(mat.color);
+
+	Grid::draw_material(mat.id);
+}
+
+void MaterialManager::remove_material(uint8_t index) {
 	if (index >= materials.size() || materials[index].id == 0) {
 		return;
 	}
 
-	std::string name = materials[index].name;
-	unsigned char removed_id = materials[index].id;
+	uint8_t removed_id = materials[index].id;
 
-	std::vector<unsigned char> old_to_new(256);
+	std::vector<uint8_t> old_to_new(256);
 	for (int i = 0; i < 256; ++i) {
-		old_to_new[i] = static_cast<unsigned char>(i);
+		old_to_new[i] = static_cast<uint8_t>(i);
 	}
 	old_to_new[removed_id] = 0;
 
 	Grid::remap_materials(old_to_new);
+	Grid::draw_material(0);
 
 	materials.erase(materials.begin() + index);
 
 	for (auto& m : materials) {
-		for (auto& r : m.user_rules) {
-			for (auto& rule_name : r.when) {
-				if (rule_name == name)
-					rule_name = "";
+		for (auto& r : m.rules) {
+			for (auto& when_cell : r.when) {
+				std::erase(when_cell, removed_id);
 			}
-			for (auto& rule_name : r.then) {
-				if (rule_name == name)
-					rule_name = "";
+			for (auto& then_cell : r.then) {
+				if (then_cell == removed_id) {
+					then_cell = 255;
+				}
 			}
 		}
 	}
@@ -259,68 +261,100 @@ void MaterialManager::remove_material(size_t index) {
 }
 
 void MaterialManager::rebuild_compiled_rules() {
-	material_by_id.fill(&default_empty);
+	material_by_id.fill(0);
+	runtime_materials.fill(default_runtime_empty);
+
 	for (const auto& m : materials) {
-		material_by_id[m.id] = &m;
-	}
+		material_by_id[m.id] = m.id;
 
-	auto resolve_name_to_id = [](const std::string& name) -> unsigned char {
-		if (name.empty())
-			return 255;
-		for (const auto& m : materials) {
-			if (m.name == name) {
-				return m.id;
+		RuntimeMaterial rm;
+		rm.id = m.id;
+		rm.packed_color = pack_color(m.color);
+
+		using WhenArray = std::array<std::bitset<256>, NEIGHBOR_COUNT>;
+		using ThenArray = std::array<uint8_t, NEIGHBOR_COUNT>;
+
+		auto flip_x_when = [](const WhenArray& arr) {
+			WhenArray result{};
+			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
+				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
+					result[y * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - x - 1)] = arr[y * NEIGHBOR_SIZE + x];
+				}
 			}
-		}
-		return 255;
-	};
+			return result;
+		};
 
-	auto flip_x_array = [](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) {
-		std::array<unsigned char, NEIGHBOR_COUNT> result{};
-		for (unsigned char x = 0; x < NEIGHBOR_SIZE; x++) {
-			for (unsigned char y = 0; y < NEIGHBOR_SIZE; y++) {
-				result[y * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - x - 1)] = arr[y * NEIGHBOR_SIZE + x];
+		auto flip_x_then = [](const ThenArray& arr) {
+			ThenArray result{};
+			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
+				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
+					result[y * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - x - 1)] = arr[y * NEIGHBOR_SIZE + x];
+				}
 			}
-		}
-		return result;
-	};
+			return result;
+		};
 
-	auto flip_y_array = [](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) {
-		std::array<unsigned char, NEIGHBOR_COUNT> result{};
-		for (unsigned char x = 0; x < NEIGHBOR_SIZE; x++) {
-			for (unsigned char y = 0; y < NEIGHBOR_SIZE; y++) {
-				result[(NEIGHBOR_SIZE - y - 1) * NEIGHBOR_SIZE + x] = arr[y * NEIGHBOR_SIZE + x];
+		auto flip_y_when = [](const WhenArray& arr) {
+			WhenArray result{};
+			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
+				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
+					result[(NEIGHBOR_SIZE - y - 1) * NEIGHBOR_SIZE + x] = arr[y * NEIGHBOR_SIZE + x];
+				}
 			}
-		}
-		return result;
-	};
+			return result;
+		};
 
-	auto rotate_90_array = [](const std::array<unsigned char, NEIGHBOR_COUNT>& arr) {
-		std::array<unsigned char, NEIGHBOR_COUNT> result{};
-		for (unsigned char x = 0; x < NEIGHBOR_SIZE; x++) {
-			for (unsigned char y = 0; y < NEIGHBOR_SIZE; y++) {
-				result[x * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - y - 1)] = arr[y * NEIGHBOR_SIZE + x];
+		auto flip_y_then = [](const ThenArray& arr) {
+			ThenArray result{};
+			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
+				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
+					result[(NEIGHBOR_SIZE - y - 1) * NEIGHBOR_SIZE + x] = arr[y * NEIGHBOR_SIZE + x];
+				}
 			}
-		}
-		return result;
-	};
+			return result;
+		};
 
-	for (auto& material : materials) {
-		material.compiled_rules.clear();
-		for (const auto& ur : material.user_rules) {
-			CompiledUserRule cur;
+		auto rotate_90_when = [](const WhenArray& arr) {
+			WhenArray result{};
+			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
+				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
+					result[x * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - y - 1)] = arr[y * NEIGHBOR_SIZE + x];
+				}
+			}
+			return result;
+		};
+
+		auto rotate_90_then = [](const ThenArray& arr) {
+			ThenArray result{};
+			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
+				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
+					result[x * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - y - 1)] = arr[y * NEIGHBOR_SIZE + x];
+				}
+			}
+			return result;
+		};
+
+		for (const auto& ur : m.rules) {
+			CompiledRule cur;
 			cur.chance = ur.chance;
 
-			Rule base_rule;
-			for (unsigned char i = 0; i < NEIGHBOR_COUNT; ++i) {
-				base_rule.when[i] = resolve_name_to_id(ur.when[i]);
-				base_rule.then[i] = resolve_name_to_id(ur.then[i]);
+			CompiledRuleVariant base_rule;
+			for (uint8_t i = 0; i < NEIGHBOR_COUNT; ++i) {
+				if (ur.when[i].empty()) {
+					base_rule.when[i].set();
+				} else {
+					base_rule.when[i].reset();
+					for (uint8_t id : ur.when[i]) {
+						base_rule.when[i].set(id);
+					}
+				}
+				base_rule.then[i] = ur.then[i];
 			}
-			base_rule.when[12] = 255;
+			base_rule.when[12].set();
 
 			cur.variants.push_back(base_rule);
 
-			auto add_unique_variant = [&cur](const Rule& candidate) {
+			auto add_unique_variant = [&cur](const CompiledRuleVariant& candidate) {
 				for (const auto& existing : cur.variants) {
 					if (existing.when == candidate.when && existing.then == candidate.then) {
 						return;
@@ -329,56 +363,60 @@ void MaterialManager::rebuild_compiled_rules() {
 				cur.variants.push_back(candidate);
 			};
 
-			if (ur.sym_rot) {
-				Rule r_90;
-				r_90.when = rotate_90_array(base_rule.when);
-				r_90.then = rotate_90_array(base_rule.then);
+			if (ur.symmetry.rotate) {
+				CompiledRuleVariant r_90;
+				r_90.when = rotate_90_when(base_rule.when);
+				r_90.then = rotate_90_then(base_rule.then);
 				add_unique_variant(r_90);
 
-				Rule r_180;
-				r_180.when = rotate_90_array(r_90.when);
-				r_180.then = rotate_90_array(r_90.then);
+				CompiledRuleVariant r_180;
+				r_180.when = rotate_90_when(r_90.when);
+				r_180.then = rotate_90_then(r_90.then);
 				add_unique_variant(r_180);
 
-				Rule r_270;
-				r_270.when = rotate_90_array(r_180.when);
-				r_270.then = rotate_90_array(r_180.then);
+				CompiledRuleVariant r_270;
+				r_270.when = rotate_90_when(r_180.when);
+				r_270.then = rotate_90_then(r_180.then);
 				add_unique_variant(r_270);
 			}
 
-			if (ur.sym_x || ur.sym_y) {
+			if (ur.symmetry.flip_x || ur.symmetry.flip_y) {
 				size_t current_variants_count = cur.variants.size();
 				for (size_t i = 0; i < current_variants_count; ++i) {
-					Rule source = cur.variants[i];
+					CompiledRuleVariant source = cur.variants[i];
 
-					if (ur.sym_x) {
-						Rule r_x;
-						r_x.when = flip_x_array(source.when);
-						r_x.then = flip_x_array(source.then);
+					if (ur.symmetry.flip_x) {
+						CompiledRuleVariant r_x;
+						r_x.when = flip_x_when(source.when);
+						r_x.then = flip_x_then(source.then);
 						add_unique_variant(r_x);
 					}
-					if (ur.sym_y) {
-						Rule r_y;
-						r_y.when = flip_y_array(source.when);
-						r_y.then = flip_y_array(source.then);
+					if (ur.symmetry.flip_y) {
+						CompiledRuleVariant r_y;
+						r_y.when = flip_y_when(source.when);
+						r_y.then = flip_y_then(source.then);
 						add_unique_variant(r_y);
 					}
-					if (ur.sym_x && ur.sym_y) {
-						Rule r_xy;
-						r_xy.when = flip_y_array(flip_x_array(source.when));
-						r_xy.then = flip_y_array(flip_x_array(source.then));
+					if (ur.symmetry.flip_x && ur.symmetry.flip_y) {
+						CompiledRuleVariant r_xy;
+						r_xy.when = flip_y_when(flip_x_when(source.when));
+						r_xy.then = flip_y_then(flip_x_then(source.then));
 						add_unique_variant(r_xy);
 					}
 				}
 			}
 
-			material.compiled_rules.push_back(cur);
+			rm.rules.push_back(cur);
 		}
+
+		runtime_materials[m.id] = rm;
 	}
 }
 
-const Material& MaterialManager::get_material(unsigned char id) { return *material_by_id[id]; }
+const MaterialDefinition& MaterialManager::get_material(uint8_t id) { return materials[material_by_id[id]]; }
 
-unsigned char MaterialManager::get_material_count() { return static_cast<unsigned char>(materials.size()); }
+const RuntimeMaterial& MaterialManager::get_runtime_material(uint8_t id) { return runtime_materials[id]; }
 
-std::vector<Material>& MaterialManager::get_materials() { return materials; }
+uint8_t MaterialManager::get_material_count() { return static_cast<uint8_t>(materials.size()); }
+
+std::vector<MaterialDefinition>& MaterialManager::get_materials() { return materials; }

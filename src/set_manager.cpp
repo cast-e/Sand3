@@ -119,7 +119,6 @@ void SetManager::copy_set(const std::string& source_name, const std::string& new
 		return;
 	}
 
-	// If duplicating the active set, ensure all in-memory edits are saved to src_path first
 	if (source_name == current_set_name) {
 		save_set_metadata(source_name, current_metadata);
 		MaterialManager::save_all_materials(src_path);

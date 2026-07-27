@@ -33,6 +33,9 @@ int main() {
 		if (UI::should_update() || UI::should_step()) {
 			Grid::update();
 			UI::reset_step();
+			SDL_SetRenderVSync(Window::get_renderer(), Window::get_vsync());
+		} else {
+			SDL_SetRenderVSync(Window::get_renderer(), true);
 		}
 
 		ImGui::Render();

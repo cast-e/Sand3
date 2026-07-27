@@ -19,13 +19,13 @@ inline static uint32_t xorshift32() {
 QualityPreset Grid::quality_preset = QualityPreset::Fast;
 std::vector<Cell> Grid::cells;
 std::vector<Cell> Grid::next_cells;
-unsigned int Grid::num_active_threads = 0;
+uint32_t Grid::num_active_threads = 0;
 std::unique_ptr<std::barrier<>> Grid::start_barrier;
 std::unique_ptr<std::barrier<>> Grid::done_barrier;
 std::unique_ptr<std::barrier<>> Grid::phase_barrier;
 std::vector<std::thread> Grid::workers;
 std::atomic<bool> Grid::shutdown_flag{false};
-std::atomic<unsigned int> Grid::frame_changed{0};
+std::atomic<uint32_t> Grid::frame_changed{0};
 
 void Grid::init() {
 	num_active_threads = NUM_STRIPS_Y / 2;
@@ -42,7 +42,7 @@ void Grid::init() {
 	phase_barrier = std::make_unique<std::barrier<>>(num_active_threads);
 
 	workers.reserve(num_active_threads);
-	for (unsigned int t = 0; t < num_active_threads; ++t) {
+	for (uint32_t t = 0; t < num_active_threads; ++t) {
 		workers.emplace_back(&Grid::worker_thread, t);
 	}
 }
@@ -63,7 +63,7 @@ void Grid::shutdown() {
 	phase_barrier.reset();
 }
 
-void Grid::configure_threads(unsigned int thread_count) {
+void Grid::configure_threads(uint32_t thread_count) {
 	shutdown_flag = true;
 	if (start_barrier) {
 		start_barrier->arrive_and_wait();
@@ -84,7 +84,7 @@ void Grid::configure_threads(unsigned int thread_count) {
 		phase_barrier = std::make_unique<std::barrier<>>(num_active_threads);
 
 		workers.reserve(num_active_threads);
-		for (unsigned int t = 0; t < num_active_threads; ++t) {
+		for (uint32_t t = 0; t < num_active_threads; ++t) {
 			workers.emplace_back(&Grid::worker_thread, t);
 		}
 	} else {
@@ -94,7 +94,7 @@ void Grid::configure_threads(unsigned int thread_count) {
 	}
 }
 
-void Grid::worker_thread(const unsigned int thread_id) {
+void Grid::worker_thread(const uint32_t thread_id) {
 	while (true) {
 		start_barrier->arrive_and_wait();
 		if (shutdown_flag) {
@@ -106,18 +106,18 @@ void Grid::worker_thread(const unsigned int thread_id) {
 			continue;
 		}
 
-		unsigned int local_changed = 0;
+		uint32_t local_changed = 0;
 		const bool reverse_x = (Window::get_frame_count() % 2 == 0);
 		const bool reverse_y = (Window::get_frame_count() % 2 == 1);
 
 		if (quality_preset == QualityPreset::Fast) {
 			const bool swap_phases = (Window::get_frame_count() % 2 == 1);
-			for (unsigned int p_id = 0; p_id < 2; ++p_id) {
-				const unsigned int target_sy_mod = swap_phases ? (1 - p_id) : p_id;
+			for (uint32_t p_id = 0; p_id < 2; ++p_id) {
+				const uint32_t target_sy_mod = swap_phases ? (1 - p_id) : p_id;
 
-				unsigned int strip_idx_in_phase = 0;
+				uint32_t strip_idx_in_phase = 0;
 				for (int sy_id = 0; sy_id < NUM_STRIPS_Y; ++sy_id) {
-					const unsigned int sy = reverse_y ? (NUM_STRIPS_Y - 1 - sy_id) : sy_id;
+					const uint32_t sy = reverse_y ? (NUM_STRIPS_Y - 1 - sy_id) : sy_id;
 					if (sy % 2 != target_sy_mod) {
 						continue;
 					}
@@ -136,9 +136,9 @@ void Grid::worker_thread(const unsigned int thread_id) {
 	}
 }
 
-inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rules, const unsigned int cx,
-										const unsigned cy, const bool is_fast_path, unsigned int& local_changed) {
-	for (const CompiledUserRule& cur : rules) {
+inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, const uint32_t cx, const unsigned cy,
+										const bool is_fast_path, uint32_t& local_changed) {
+	for (const CompiledRule& cur : rules) {
 		if (xorshift32() % (100 * 1000) >= static_cast<uint32_t>(cur.chance * 1000))
 			continue;
 
@@ -146,16 +146,16 @@ inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rul
 		bool match_found = false;
 
 		if (num_variants == 1) {
-			const Rule& rule = cur.variants[0];
+			const CompiledRuleVariant& rule = cur.variants[0];
 			if (is_fast_path) {
 				match_found = Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed);
 			} else {
 				match_found = Grid::try_apply_rule_safe(rule, cx, cy, local_changed);
 			}
 		} else if (num_variants == 2) {
-			const unsigned int start_id = xorshift32() & 1;
-			for (unsigned int step = 0; step < 2; ++step) {
-				const Rule& rule = cur.variants[(start_id + step) & 1];
+			const uint32_t start_id = xorshift32() & 1;
+			for (uint32_t step = 0; step < 2; ++step) {
+				const CompiledRuleVariant& rule = cur.variants[(start_id + step) & 1];
 				if (is_fast_path) {
 					if (Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
 						match_found = true;
@@ -169,14 +169,14 @@ inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rul
 				}
 			}
 		} else if (num_variants == 4) {
-			static const unsigned char perms[24][4] = {
-				{0, 1, 2, 3}, {0, 1, 3, 2}, {0, 2, 1, 3}, {0, 2, 3, 1}, {0, 3, 1, 2}, {0, 3, 2, 1},
-				{1, 0, 2, 3}, {1, 0, 3, 2}, {1, 2, 0, 3}, {1, 2, 3, 0}, {1, 3, 0, 2}, {1, 3, 2, 0},
-				{2, 0, 1, 3}, {2, 0, 3, 1}, {2, 1, 0, 3}, {2, 1, 3, 0}, {2, 3, 0, 1}, {2, 3, 1, 0},
-				{3, 0, 1, 2}, {3, 0, 2, 1}, {3, 1, 0, 2}, {3, 1, 2, 0}, {3, 2, 0, 1}, {3, 2, 1, 0}};
-			unsigned int perm_id = xorshift32() % 24;
-			for (unsigned int step = 0; step < 4; ++step) {
-				const Rule& rule = cur.variants[perms[perm_id][step]];
+			static const uint8_t perms[24][4] = {{0, 1, 2, 3}, {0, 1, 3, 2}, {0, 2, 1, 3}, {0, 2, 3, 1}, {0, 3, 1, 2},
+												 {0, 3, 2, 1}, {1, 0, 2, 3}, {1, 0, 3, 2}, {1, 2, 0, 3}, {1, 2, 3, 0},
+												 {1, 3, 0, 2}, {1, 3, 2, 0}, {2, 0, 1, 3}, {2, 0, 3, 1}, {2, 1, 0, 3},
+												 {2, 1, 3, 0}, {2, 3, 0, 1}, {2, 3, 1, 0}, {3, 0, 1, 2}, {3, 0, 2, 1},
+												 {3, 1, 0, 2}, {3, 1, 2, 0}, {3, 2, 0, 1}, {3, 2, 1, 0}};
+			uint32_t perm_id = xorshift32() % 24;
+			for (uint32_t step = 0; step < 4; ++step) {
+				const CompiledRuleVariant& rule = cur.variants[perms[perm_id][step]];
 				if (is_fast_path) {
 					if (Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
 						match_found = true;
@@ -197,20 +197,19 @@ inline static void apply_compiled_rules(const std::vector<CompiledUserRule>& rul
 	}
 }
 
-void Grid::update_strip_1d(const unsigned int sy, const bool reverse_x, const bool reverse_y,
-						   unsigned int& local_changed) {
-	const unsigned int y_start = sy * STRIP_HEIGHT;
-	const unsigned int y_end = std::min(SIM_HEIGHT, y_start + STRIP_HEIGHT);
+void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool reverse_y, uint32_t& local_changed) {
+	const uint32_t y_start = sy * STRIP_HEIGHT;
+	const uint32_t y_end = std::min(SIM_HEIGHT, y_start + STRIP_HEIGHT);
 
-	for (unsigned int y = 0; y < (y_end - y_start); ++y) {
-		for (unsigned int x = 0; x < SIM_WIDTH; ++x) {
-			const unsigned int cx = reverse_x ? (SIM_WIDTH - 1 - x) : x;
-			const unsigned int cy = reverse_y ? (y_end - 1 - y) : (y_start + y);
+	for (uint32_t y = 0; y < (y_end - y_start); ++y) {
+		for (uint32_t x = 0; x < SIM_WIDTH; ++x) {
+			const uint32_t cx = reverse_x ? (SIM_WIDTH - 1 - x) : x;
+			const uint32_t cy = reverse_y ? (y_end - 1 - y) : (y_start + y);
 
 			if (next_cells[cy * SIM_WIDTH + cx].updated)
 				continue;
 
-			const auto& rules = MaterialManager::get_material(cells[cy * SIM_WIDTH + cx].material).compiled_rules;
+			const auto& rules = MaterialManager::get_runtime_material(cells[cy * SIM_WIDTH + cx].material).rules;
 			if (rules.empty())
 				continue;
 
@@ -222,22 +221,22 @@ void Grid::update_strip_1d(const unsigned int sy, const bool reverse_x, const bo
 }
 
 void Grid::update_sequential() {
-	unsigned int local_changed = 0;
+	uint32_t local_changed = 0;
 	const bool reverse_x = (Window::get_frame_count() % 2 == 0);
 	const bool reverse_y = (Window::get_frame_count() % 2 == 1);
 
 	for (int y = 0; y < SIM_HEIGHT; ++y) {
-		for (unsigned int x = 0; x < SIM_WIDTH; ++x) {
-			const unsigned int cx = reverse_x ? (SIM_WIDTH - 1 - x) : x;
-			const unsigned int cy = reverse_y ? (SIM_HEIGHT - 1 - y) : y;
+		for (uint32_t x = 0; x < SIM_WIDTH; ++x) {
+			const uint32_t cx = reverse_x ? (SIM_WIDTH - 1 - x) : x;
+			const uint32_t cy = reverse_y ? (SIM_HEIGHT - 1 - y) : y;
 
-			const unsigned int center_id = cy * SIM_WIDTH + cx;
+			const uint32_t center_id = cy * SIM_WIDTH + cx;
 
 			if (next_cells[center_id].updated) {
 				continue;
 			}
 
-			const auto& rules = MaterialManager::get_material(cells[center_id].material).compiled_rules;
+			const auto& rules = MaterialManager::get_runtime_material(cells[center_id].material).rules;
 			if (rules.empty()) {
 				continue;
 			}
@@ -252,19 +251,19 @@ void Grid::update_sequential() {
 	frame_changed = local_changed;
 }
 
-bool Grid::try_apply_rule_fast(const Rule& rule, const unsigned int center_id, unsigned int& local_changed) {
-	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.when[n_id] == 255) {
+bool Grid::try_apply_rule_fast(const CompiledRuleVariant& rule, const uint32_t center_id, uint32_t& local_changed) {
+	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
+		if (rule.when[n_id].all()) {
 			continue;
 		}
-		if (cells[center_id + neighbor_offsets[n_id]].material != rule.when[n_id]) {
+		if (!rule.when[n_id].test(cells[center_id + neighbor_offsets[n_id]].material)) {
 			return false;
 		}
 	}
 
-	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
+	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
-			unsigned int target_id = center_id + neighbor_offsets[n_id];
+			uint32_t target_id = center_id + neighbor_offsets[n_id];
 			if (next_cells[target_id].updated) {
 				return false;
 			}
@@ -272,9 +271,9 @@ bool Grid::try_apply_rule_fast(const Rule& rule, const unsigned int center_id, u
 	}
 
 	next_cells[center_id].updated = true;
-	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
+	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
-			unsigned int target_id = center_id + neighbor_offsets[n_id];
+			uint32_t target_id = center_id + neighbor_offsets[n_id];
 			next_cells[target_id].material = rule.then[n_id];
 			next_cells[target_id].updated = true;
 			if (target_id != center_id) {
@@ -285,33 +284,33 @@ bool Grid::try_apply_rule_fast(const Rule& rule, const unsigned int center_id, u
 	return true;
 }
 
-bool Grid::try_apply_rule_safe(const Rule& rule, const unsigned int x, const unsigned int y,
-							   unsigned int& local_changed) {
-	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.when[n_id] == 255) {
+bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x, const uint32_t y,
+							   uint32_t& local_changed) {
+	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
+		if (rule.when[n_id].all()) {
 			continue;
 		}
 
 		const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
 		const int dy = static_cast<int>(n_id / NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-		const unsigned int tx = x + dx;
-		const unsigned int ty = y + dy;
+		const uint32_t tx = x + dx;
+		const uint32_t ty = y + dy;
 
 		if (tx >= SIM_WIDTH || ty >= SIM_HEIGHT) {
 			return false;
 		}
 
-		if (cells[ty * SIM_WIDTH + tx].material != rule.when[n_id]) {
+		if (!rule.when[n_id].test(cells[ty * SIM_WIDTH + tx].material)) {
 			return false;
 		}
 	}
 
-	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
+	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
 			const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
 			const int dy = static_cast<int>(n_id / NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-			const unsigned int tx = x + dx;
-			const unsigned int ty = y + dy;
+			const uint32_t tx = x + dx;
+			const uint32_t ty = y + dy;
 
 			if (tx >= SIM_WIDTH || ty >= SIM_HEIGHT) {
 				return false;
@@ -324,12 +323,12 @@ bool Grid::try_apply_rule_safe(const Rule& rule, const unsigned int x, const uns
 	}
 
 	next_cells[y * SIM_WIDTH + x].updated = true;
-	for (unsigned int n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
+	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
 			const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
 			const int dy = static_cast<int>(n_id / NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-			const unsigned int tx = x + dx;
-			const unsigned int ty = y + dy;
+			const uint32_t tx = x + dx;
+			const uint32_t ty = y + dy;
 
 			next_cells[ty * SIM_WIDTH + tx].material = rule.then[n_id];
 			next_cells[ty * SIM_WIDTH + tx].updated = true;
@@ -362,36 +361,34 @@ void Grid::update() {
 void Grid::draw() {
 	uint32_t* buffer = Window::get_buffer();
 
-	for (unsigned int id = 0; id < SIM_SIZE; ++id) {
+	for (uint32_t id = 0; id < SIM_SIZE; ++id) {
 		if (!cells[id].updated) {
 			continue;
 		}
-		unsigned char cell = cells[id].material;
-		buffer[id] = MaterialManager::get_material(cell).packed_color;
+		uint8_t cell = cells[id].material;
+		buffer[id] = MaterialManager::get_runtime_material(cell).packed_color;
 	}
 }
 
-void Grid::draw_material(unsigned int id) {
+void Grid::draw_material(uint32_t id) {
 	uint32_t* buffer = Window::get_buffer();
 
-	for (unsigned int id = 0; id < SIM_SIZE; ++id) {
-		if (cells[id].material == id) {
-			continue;
+	for (uint32_t i = 0; i < SIM_SIZE; ++i) {
+		if (cells[i].material == id) {
+			buffer[i] = MaterialManager::get_runtime_material(cells[i].material).packed_color;
 		}
-		unsigned char cell = cells[id].material;
-		buffer[id] = MaterialManager::get_material(cell).packed_color;
 	}
 }
 
-unsigned char& Grid::get_cell(const unsigned int x, const unsigned int y) { return cells[y * SIM_WIDTH + x].material; }
-void Grid::set_cell(const unsigned int x, const unsigned int y, unsigned char cell) {
+uint8_t& Grid::get_cell(const uint32_t x, const uint32_t y) { return cells[y * SIM_WIDTH + x].material; }
+void Grid::set_cell(const uint32_t x, const uint32_t y, uint8_t cell) {
 	cells[y * SIM_WIDTH + x].material = cell;
 	cells[y * SIM_WIDTH + x].updated = true;
 }
 
-unsigned int Grid::get_changed_cells() { return frame_changed.load(); }
+uint32_t Grid::get_changed_cells() { return frame_changed.load(); }
 
-void Grid::remap_materials(const std::vector<unsigned char>& old_to_new) {
+void Grid::remap_materials(const std::vector<uint8_t>& old_to_new) {
 	for (auto& cell : cells) {
 		if (cell.material < old_to_new.size()) {
 			cell.material = old_to_new[cell.material];
