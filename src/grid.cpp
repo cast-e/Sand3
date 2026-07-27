@@ -313,7 +313,7 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 			const uint32_t ty = y + dy;
 
 			if (tx >= SIM_WIDTH || ty >= SIM_HEIGHT) {
-				return false;
+				continue;
 			}
 
 			if (next_cells[ty * SIM_WIDTH + tx].updated) {
@@ -330,8 +330,13 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 			const uint32_t tx = x + dx;
 			const uint32_t ty = y + dy;
 
-			next_cells[ty * SIM_WIDTH + tx].material = rule.then[n_id];
-			next_cells[ty * SIM_WIDTH + tx].updated = true;
+			if (tx >= SIM_WIDTH || ty >= SIM_HEIGHT) {
+				continue;
+			}
+
+			const uint32_t target_id = ty * SIM_WIDTH + tx;
+			next_cells[target_id].material = rule.then[n_id];
+			next_cells[target_id].updated = true;
 			if (tx != x || ty != y) {
 				local_changed++;
 			}

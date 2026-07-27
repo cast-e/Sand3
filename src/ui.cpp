@@ -568,8 +568,37 @@ void UI::render_material_editor() {
 				ImGui::SetTooltip("Pick color for this material in the simulator.");
 			}
 
+			std::string current_parent =
+				(mat.inherits_from == 255) ? "None" : MaterialManager::get_material(mat.inherits_from).name;
+			if (ImGui::BeginCombo("Inherit From", current_parent.c_str())) {
+				if (ImGui::Selectable("None", mat.inherits_from == 255)) {
+					MaterialManager::set_material_inheritance(selected_id, 255);
+					rebuild_needed = true;
+					unsaved_changes = true;
+				}
+				for (const auto& other_mat : materials) {
+					if (other_mat.id != mat.id && other_mat.name != mat.name) {
+						bool is_selected = (mat.inherits_from == other_mat.id);
+						if (ImGui::Selectable(other_mat.name.c_str(), is_selected)) {
+							MaterialManager::set_material_inheritance(selected_id, other_mat.id);
+							rebuild_needed = true;
+							unsaved_changes = true;
+						}
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Dynamically inherits rules from the selected parent material.");
+			}
+
 			ImGui::Separator();
+
+			ImGui::Spacing();
 			ImGui::Text("Rules:");
+			ImGui::SameLine();
+
+			mat.sync_rule_order();
 
 			if (ImGui::Button("Add Rule")) {
 				if (is_empty_mat) {
@@ -580,6 +609,7 @@ void UI::render_material_editor() {
 					new_rule.then.fill(255);
 					new_rule.chance = 100.0f;
 					mat.rules.push_back(new_rule);
+					mat.rule_order.push_back({false, mat.rules.size() - 1});
 					rebuild_needed = true;
 					unsaved_changes = true;
 				}
@@ -589,20 +619,20 @@ void UI::render_material_editor() {
 			}
 
 			ImGui::BeginChild("RulesScroll", ImVec2(0, 0), true);
-			for (int r_id = 0; r_id < (int)mat.rules.size(); ++r_id) {
-				RuleDefinition& rule = mat.rules[r_id];
+			for (int r_id = 0; r_id < (int)mat.rule_order.size(); ++r_id) {
+				RuleRef ref = mat.rule_order[r_id];
+				RuleDefinition rule = mat.get_effective_rule(r_id);
+				bool rule_changed = false;
 				ImGui::PushID(r_id);
 
-				ImGui::BeginChild(("##rule_card_" + std::to_string(r_id)).c_str(), ImVec2(0, 230), true,
+				ImGui::BeginChild(("##rule_card_" + std::to_string(r_id)).c_str(), ImVec2(0, 200), true,
 								  ImGuiWindowFlags_NoScrollbar);
 
 				ImGui::BeginGroup();
-				ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "Rule #%d", r_id + 1);
-
 				float btn_size = ImGui::GetFrameHeight();
 				if (r_id > 0) {
 					if (ImGui::ArrowButton("##up", ImGuiDir_Up)) {
-						std::swap(mat.rules[r_id], mat.rules[r_id - 1]);
+						std::swap(mat.rule_order[r_id], mat.rule_order[r_id - 1]);
 						rebuild_needed = true;
 						unsaved_changes = true;
 					}
@@ -614,9 +644,9 @@ void UI::render_material_editor() {
 				}
 				ImGui::SameLine();
 
-				if (r_id < (int)mat.rules.size() - 1) {
+				if (r_id < (int)mat.rule_order.size() - 1) {
 					if (ImGui::ArrowButton("##down", ImGuiDir_Down)) {
-						std::swap(mat.rules[r_id], mat.rules[r_id + 1]);
+						std::swap(mat.rule_order[r_id], mat.rule_order[r_id + 1]);
 						rebuild_needed = true;
 						unsaved_changes = true;
 					}
@@ -630,7 +660,10 @@ void UI::render_material_editor() {
 
 				if (ImGui::Button("Copy", ImVec2(45, 0))) {
 					RuleDefinition duplicated_rule = rule;
+					duplicated_rule.is_inherited = false;
 					mat.rules.push_back(duplicated_rule);
+					RuleRef new_ref{false, mat.rules.size() - 1};
+					mat.rule_order.insert(mat.rule_order.begin() + r_id + 1, new_ref);
 					rebuild_needed = true;
 					unsaved_changes = true;
 					ImGui::EndGroup();
@@ -647,7 +680,20 @@ void UI::render_material_editor() {
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 				ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 				if (ImGui::Button("X", ImVec2(btn_size, btn_size))) {
-					mat.rules.erase(mat.rules.begin() + r_id);
+					if (!ref.is_inherited) {
+						size_t target_idx = ref.index;
+						if (target_idx < mat.rules.size()) {
+							mat.rules.erase(mat.rules.begin() + target_idx);
+							mat.rule_order.erase(mat.rule_order.begin() + r_id);
+							for (auto& o_ref : mat.rule_order) {
+								if (!o_ref.is_inherited && o_ref.index > target_idx) {
+									o_ref.index--;
+								}
+							}
+						}
+					} else {
+						mat.rule_order.erase(mat.rule_order.begin() + r_id);
+					}
 					rebuild_needed = true;
 					unsaved_changes = true;
 					ImGui::PopStyleColor(3);
@@ -659,6 +705,10 @@ void UI::render_material_editor() {
 				ImGui::PopStyleColor(3);
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Delete this rule.");
+				}
+
+				if (rule.is_inherited) {
+					ImGui::BeginDisabled(true);
 				}
 
 				ImGui::SetNextItemWidth(150.0f);
@@ -743,7 +793,9 @@ void UI::render_material_editor() {
 
 							ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
 							if (ImGui::Button(label.c_str(), ImVec2(25, 25))) {
-								ImGui::OpenPopup(popup_id.c_str());
+								if (!rule.is_inherited) {
+									ImGui::OpenPopup(popup_id.c_str());
+								}
 							}
 							ImGui::PopStyleColor();
 
@@ -845,7 +897,9 @@ void UI::render_material_editor() {
 
 						ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
 						if (ImGui::Button(label.c_str(), ImVec2(25, 25))) {
-							ImGui::OpenPopup(popup_id.c_str());
+							if (!rule.is_inherited) {
+								ImGui::OpenPopup(popup_id.c_str());
+							}
 						}
 						ImGui::PopStyleColor();
 
@@ -886,6 +940,12 @@ void UI::render_material_editor() {
 					}
 				}
 				ImGui::EndGroup();
+
+				if (rule.is_inherited) {
+					ImGui::EndDisabled();
+				} else if (ref.index < mat.rules.size()) {
+					mat.rules[ref.index] = rule;
+				}
 
 				ImGui::EndChild();
 				ImGui::PopID();

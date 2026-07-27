@@ -126,7 +126,8 @@
                 255,
                 255
             ],
-            "sym_x": true
+            "sym_x": true,
+            "chance": 80.0
         },
         {
             "when": [
