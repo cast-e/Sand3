@@ -21,14 +21,15 @@ struct RuleDefinition {
 	std::array<uint8_t, NEIGHBOR_COUNT> then;
 	SymmetryFlags symmetry;
 	float chance = 1.0f;
-	bool is_inherited = false;
 };
 
-struct RuleRef {
+struct RuleReference {
 	bool is_inherited = false;
 	size_t index = 0;
 
-	bool operator==(const RuleRef& other) const { return is_inherited == other.is_inherited && index == other.index; }
+	bool operator==(const RuleReference& other) const {
+		return is_inherited == other.is_inherited && index == other.index;
+	}
 };
 
 struct MaterialDefinition {
@@ -37,7 +38,7 @@ struct MaterialDefinition {
 	uint8_t inherits_from = 255;
 	std::array<uint8_t, 3> color = {0, 0, 0};
 	std::vector<RuleDefinition> rules;
-	std::vector<RuleRef> rule_order;
+	std::vector<RuleReference> rule_order;
 	size_t last_synced_parent_rule_count = 0;
 
 	void sync_rule_order();

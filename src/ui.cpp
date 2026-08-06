@@ -476,6 +476,10 @@ void UI::render_material_editor() {
 			ImGui::EndChild();
 
 			ImGui::Spacing();
+			const bool at_max = materials.size() == 255;
+			if (at_max) {
+				ImGui::BeginDisabled();
+			}
 			if (ImGui::Button("New", ImVec2(80, 25))) {
 				MaterialDefinition new_mat;
 				new_mat.name = "material_" + std::to_string(materials.size());
@@ -487,12 +491,22 @@ void UI::render_material_editor() {
 				selected_id = static_cast<int>(id);
 				unsaved_changes = true;
 			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Create a new material.");
+			if (at_max) {
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+					ImGui::SetTooltip("Already at maximum material capacity.");
+				}
+				ImGui::EndDisabled();
+			} else {
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Create a new material.");
+				}
 			}
 
 			ImGui::SameLine();
 			if (selected_id >= 0 && selected_id < (int)materials.size()) {
+				if (at_max) {
+					ImGui::BeginDisabled();
+				}
 				if (ImGui::Button("Copy", ImVec2(80, 25))) {
 					MaterialDefinition duplicated_mat = materials[selected_id];
 					duplicated_mat.name = duplicated_mat.name + "_copy";
@@ -503,8 +517,15 @@ void UI::render_material_editor() {
 					selected_id = static_cast<int>(id);
 					unsaved_changes = true;
 				}
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Duplicate the selected material.");
+				if (at_max) {
+					if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+						ImGui::SetTooltip("Already at maximum material capacity.");
+					}
+					ImGui::EndDisabled();
+				} else {
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Duplicate the selected material.");
+					}
 				}
 
 				ImGui::SameLine();
@@ -620,7 +641,7 @@ void UI::render_material_editor() {
 
 			ImGui::BeginChild("RulesScroll", ImVec2(0, 0), true);
 			for (int r_id = 0; r_id < (int)mat.rule_order.size(); ++r_id) {
-				RuleRef ref = mat.rule_order[r_id];
+				RuleReference reference = mat.rule_order[r_id];
 				RuleDefinition rule = mat.get_effective_rule(r_id);
 				bool rule_changed = false;
 				ImGui::PushID(r_id);
@@ -660,9 +681,8 @@ void UI::render_material_editor() {
 
 				if (ImGui::Button("Copy", ImVec2(45, 0))) {
 					RuleDefinition duplicated_rule = rule;
-					duplicated_rule.is_inherited = false;
 					mat.rules.push_back(duplicated_rule);
-					RuleRef new_ref{false, mat.rules.size() - 1};
+					RuleReference new_ref{false, mat.rules.size() - 1};
 					mat.rule_order.insert(mat.rule_order.begin() + r_id + 1, new_ref);
 					rebuild_needed = true;
 					unsaved_changes = true;
@@ -680,8 +700,8 @@ void UI::render_material_editor() {
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 				ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 				if (ImGui::Button("X", ImVec2(btn_size, btn_size))) {
-					if (!ref.is_inherited) {
-						size_t target_idx = ref.index;
+					if (!reference.is_inherited) {
+						size_t target_idx = reference.index;
 						if (target_idx < mat.rules.size()) {
 							mat.rules.erase(mat.rules.begin() + target_idx);
 							mat.rule_order.erase(mat.rule_order.begin() + r_id);
@@ -707,7 +727,7 @@ void UI::render_material_editor() {
 					ImGui::SetTooltip("Delete this rule.");
 				}
 
-				if (rule.is_inherited) {
+				if (reference.is_inherited) {
 					ImGui::BeginDisabled(true);
 				}
 
@@ -771,18 +791,18 @@ void UI::render_material_editor() {
 							const auto& when_ids = rule.when[c_id];
 
 							if (when_ids.size() == 1) {
-								const auto& ref = MaterialManager::get_material(when_ids[0]);
-								label = ref.name.substr(0, 1);
-								btn_col =
-									ImVec4(ref.color[0] / 255.f, ref.color[1] / 255.f, ref.color[2] / 255.f, 1.0f);
+								const auto& reference = MaterialManager::get_material(when_ids[0]);
+								label = reference.name.substr(0, 1);
+								btn_col = ImVec4(reference.color[0] / 255.f, reference.color[1] / 255.f,
+												 reference.color[2] / 255.f, 1.0f);
 							} else if (when_ids.size() > 1) {
 								label = std::to_string(when_ids.size());
 								float r_sum = 0, g_sum = 0, b_sum = 0;
 								for (uint8_t id : when_ids) {
-									const auto& ref = MaterialManager::get_material(id);
-									r_sum += ref.color[0] / 255.f;
-									g_sum += ref.color[1] / 255.f;
-									b_sum += ref.color[2] / 255.f;
+									const auto& reference = MaterialManager::get_material(id);
+									r_sum += reference.color[0] / 255.f;
+									g_sum += reference.color[1] / 255.f;
+									b_sum += reference.color[2] / 255.f;
 								}
 								float n = static_cast<float>(when_ids.size());
 								btn_col = ImVec4(r_sum / n, g_sum / n, b_sum / n, 1.0f);
@@ -793,7 +813,7 @@ void UI::render_material_editor() {
 
 							ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
 							if (ImGui::Button(label.c_str(), ImVec2(25, 25))) {
-								if (!rule.is_inherited) {
+								if (!reference.is_inherited) {
 									ImGui::OpenPopup(popup_id.c_str());
 								}
 							}
@@ -869,23 +889,24 @@ void UI::render_material_editor() {
 						uint8_t then_id = rule.then[c_id];
 
 						if (then_id != 255) {
-							const auto& ref = MaterialManager::get_material(then_id);
-							label = ref.name.substr(0, 1);
-							btn_col = ImVec4(ref.color[0] / 255.f, ref.color[1] / 255.f, ref.color[2] / 255.f, 1.0f);
+							const auto& reference = MaterialManager::get_material(then_id);
+							label = reference.name.substr(0, 1);
+							btn_col = ImVec4(reference.color[0] / 255.f, reference.color[1] / 255.f,
+											 reference.color[2] / 255.f, 1.0f);
 						} else {
 							if (rule.when[c_id].size() == 1) {
-								const auto& ref = MaterialManager::get_material(rule.when[c_id][0]);
-								label = ref.name.substr(0, 1);
-								btn_col = ImVec4(ref.color[0] / 255.f * 0.4f, ref.color[1] / 255.f * 0.4f,
-												 ref.color[2] / 255.f * 0.4f, 1.0f);
+								const auto& reference = MaterialManager::get_material(rule.when[c_id][0]);
+								label = reference.name.substr(0, 1);
+								btn_col = ImVec4(reference.color[0] / 255.f * 0.4f, reference.color[1] / 255.f * 0.4f,
+												 reference.color[2] / 255.f * 0.4f, 1.0f);
 							} else if (rule.when[c_id].size() > 1) {
 								label = std::to_string(rule.when[c_id].size());
 								float r_sum = 0, g_sum = 0, b_sum = 0;
 								for (uint8_t id : rule.when[c_id]) {
-									const auto& ref = MaterialManager::get_material(id);
-									r_sum += ref.color[0] / 255.f;
-									g_sum += ref.color[1] / 255.f;
-									b_sum += ref.color[2] / 255.f;
+									const auto& reference = MaterialManager::get_material(id);
+									r_sum += reference.color[0] / 255.f;
+									g_sum += reference.color[1] / 255.f;
+									b_sum += reference.color[2] / 255.f;
 								}
 								float n = static_cast<float>(rule.when[c_id].size());
 								btn_col = ImVec4(r_sum / n * 0.4f, g_sum / n * 0.4f, b_sum / n * 0.4f, 1.0f);
@@ -897,7 +918,7 @@ void UI::render_material_editor() {
 
 						ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
 						if (ImGui::Button(label.c_str(), ImVec2(25, 25))) {
-							if (!rule.is_inherited) {
+							if (!reference.is_inherited) {
 								ImGui::OpenPopup(popup_id.c_str());
 							}
 						}
@@ -941,10 +962,10 @@ void UI::render_material_editor() {
 				}
 				ImGui::EndGroup();
 
-				if (rule.is_inherited) {
+				if (reference.is_inherited) {
 					ImGui::EndDisabled();
-				} else if (ref.index < mat.rules.size()) {
-					mat.rules[ref.index] = rule;
+				} else if (reference.index < mat.rules.size()) {
+					mat.rules[reference.index] = rule;
 				}
 
 				ImGui::EndChild();
