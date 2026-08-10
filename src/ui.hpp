@@ -5,6 +5,8 @@
 
 #include <string>
 
+enum class BrushShape : int { Square, Circle, Size };
+
 class UI {
 public:
 	UI() = delete;
@@ -17,8 +19,13 @@ public:
 
 	static void trigger_exit() { show_exit_popup = true; }
 	static bool should_update() { return update; }
+	static void pause_simulation() { update = false; }
 	static bool should_step() { return step_frame; }
 	static void reset_step() { step_frame = false; }
+
+	static BrushShape get_brush_shape() { return brush_shape; }
+	static uint8_t get_selected_id() { return selected_id; }
+	static void set_selected_id(uint8_t id) { selected_id = id; }
 
 private:
 	static void render_header(ImGuiIO& io);
@@ -29,14 +36,21 @@ private:
 	static void render_advanced_options();
 	static void render_shortcuts();
 	static void render_modals();
+	static void render_mouse_overlay();
+
+	static void handle_zoom_and_pan(ImGuiIO& io);
+	static void handle_keyboard_shortcuts(ImGuiIO& io);
+	static void handle_mouse_wheel_brush_size(ImGuiIO& io);
+	static void handle_canvas_interaction();
 
 	static char save_file_name_buf[128];
 	static char save_as_buf[64];
 	static char new_set_name_buf[64];
 
 	static int selected_save_id;
-	static int selected_id;
+	static uint8_t selected_id;
 	static int mouse_size;
+	static BrushShape brush_shape;
 
 	static bool open_switch_popup;
 	static bool open_create_set_popup;

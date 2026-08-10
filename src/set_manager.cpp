@@ -7,6 +7,7 @@
 #include "grid.hpp"
 #include "material_manager.hpp"
 #include "sanitize.hpp"
+#include "undo_manager.hpp"
 
 namespace fs = std::filesystem;
 
@@ -95,6 +96,7 @@ void SetManager::set_current_set(const std::string& name) {
 	fs::create_directories(SETS_DIRECTORY + name);
 	MaterialManager::load_all_materials(SETS_DIRECTORY + name);
 	Grid::clear();
+	UndoManager::init();
 }
 
 void SetManager::create_new_empty_set(const std::string& name) {
@@ -109,6 +111,7 @@ void SetManager::create_new_empty_set(const std::string& name) {
 	current_metadata = meta;
 	MaterialManager::load_all_materials(set_path);
 	Grid::clear();
+	UndoManager::init();
 }
 
 void SetManager::copy_set(const std::string& source_name, const std::string& new_name) {

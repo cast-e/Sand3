@@ -54,7 +54,7 @@ bool MaterialManager::is_valid_name(std::string_view name) {
 void MaterialDefinition::sync_rule_order() {
 	std::vector<RuleReference> valid_refs;
 
-	const MaterialDefinition* parent = &MaterialManager::get_material(inherits_from);
+	const auto* parent = &MaterialManager::get_material(inherits_from);
 
 	size_t parent_rule_count = parent ? parent->rules.size() : 0;
 	size_t custom_rule_count = rules.size();
@@ -105,7 +105,7 @@ RuleDefinition MaterialDefinition::get_effective_rule(size_t order_idx) const {
 
 	const RuleReference& reference = rule_order[order_idx];
 	if (reference.is_inherited && inherits_from != 255) {
-		const MaterialDefinition& parent = MaterialManager::get_material(inherits_from);
+		const auto& parent = MaterialManager::get_material(inherits_from);
 		if (reference.index < parent.rules.size()) {
 			RuleDefinition r = parent.rules[reference.index];
 			MaterialManager::replace_self_references(r, parent.id, id);
@@ -376,38 +376,35 @@ void MaterialManager::set_material_inheritance(uint8_t index, uint8_t parent_id)
 	rebuild_compiled_rules();
 }
 
-void MaterialManager::update_material_color(uint8_t index, const MaterialDefinition& mat) {
-	materials[index].color = mat.color;
-	runtime_materials[index].packed_color = pack_color(mat.color);
+void MaterialManager::update_material_color(uint8_t id, const MaterialDefinition& mat) {
+	uint8_t idx = material_by_id[id];
+	materials[idx].color = mat.color;
+	runtime_materials[idx].packed_color = pack_color(mat.color);
 
-	Grid::draw_material(mat.id);
+	Grid::draw_material(id);
 }
 
-void MaterialManager::remove_material(uint8_t index) {
-	if (index >= materials.size() || materials[index].id == 0) {
-		return;
-	}
-
-	uint8_t removed_id = materials[index].id;
+void MaterialManager::remove_material(uint8_t id) {
+	uint8_t idx = material_by_id[id];
 
 	std::vector<uint8_t> old_to_new(256);
 	for (int i = 0; i < 256; ++i) {
 		old_to_new[i] = static_cast<uint8_t>(i);
 	}
-	old_to_new[removed_id] = 0;
+	old_to_new[idx] = 0;
 
 	Grid::remap_materials(old_to_new);
 	Grid::draw_material(0);
 
-	materials.erase(materials.begin() + index);
+	materials.erase(materials.begin() + idx);
 
 	for (auto& m : materials) {
 		for (auto& r : m.rules) {
 			for (auto& when_cell : r.when) {
-				std::erase(when_cell, removed_id);
+				std::erase(when_cell, idx);
 			}
 			for (auto& then_cell : r.then) {
-				if (then_cell == removed_id) {
+				if (then_cell == idx) {
 					then_cell = 255;
 				}
 			}
@@ -578,15 +575,9 @@ void MaterialManager::rebuild_compiled_rules() {
 }
 
 const MaterialDefinition& MaterialManager::get_material(uint8_t id) {
-	if (id == 255)
-		return default_empty;
 	uint8_t idx = material_by_id[id];
-	if (idx < materials.size() && materials[idx].id == id) {
+	if (idx < materials.size()) {
 		return materials[idx];
-	}
-	for (const auto& m : materials) {
-		if (m.id == id)
-			return m;
 	}
 	return default_empty;
 }

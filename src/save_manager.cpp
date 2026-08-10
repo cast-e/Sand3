@@ -8,6 +8,7 @@
 #include "const.hpp"
 #include "grid.hpp"
 #include "set_manager.hpp"
+#include "undo_manager.hpp"
 
 void SaveManager::bwt_encode(const uint8_t* in_data, size_t N, std::vector<uint8_t>& out_L, uint16_t& out_primary_id) {
 	if (N == 0) {
@@ -207,5 +208,6 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 			Grid::set_cell(x, y, block_raw[k]);
 		}
 	}
+	UndoManager::init();
 	return true;
 }

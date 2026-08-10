@@ -30,6 +30,12 @@ set(SOURCES
     ui.hpp
     ui.cpp
 
+    undo_manager.hpp
+    undo_manager.cpp
+
+    config_manager.hpp
+    config_manager.cpp
+
     main.cpp
 )
 

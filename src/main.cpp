@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 
+#include "config_manager.hpp"
 #include "grid.hpp"
 #include "set_manager.hpp"
 #include "ui.hpp"
@@ -12,6 +13,7 @@ int main() {
 	Window::init(1600, 900);
 	Grid::init();
 	UI::init();
+	ConfigManager::load();
 
 	SetManager::set_current_set(SetManager::get_sets()[0]);
 
@@ -41,10 +43,4 @@ int main() {
 		ImGui::Render();
 		Window::present();
 	}
-
-	UI::shutdown();
-	Grid::shutdown();
-	Window::shutdown();
-
-	return 0;
 }

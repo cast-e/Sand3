@@ -11,11 +11,28 @@
       }
     },
     {
+      "name": "windows-mingw-debug",
+      "displayName": "Windows (MinGW-w64) Debug",
+      "binaryDir": "${sourceDir}/build-win64-debug",
+      "toolchainFile": "${sourceDir}/cmake/mingw-w64-x86_64.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
       "name": "linux-gcc",
       "displayName": "Linux (GCC)",
       "binaryDir": "${sourceDir}/build-linux",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-gcc-debug",
+      "displayName": "Linux (GCC) Debug",
+      "binaryDir": "${sourceDir}/build-linux-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
       }
     }
   ]

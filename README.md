@@ -14,6 +14,45 @@
 - Helpful tooltips and shortcuts in the GUI.
 - Standalone executable for easy portability.
 - Compressed save files using a BWT + RLE compression algorithm.
+- Inherit rules from other materials for easier material creation.
+- Square and circle brushes with support for straight lines and flood fill.
+- Simple undo/redo system to help creating complex saves.
+
+## Shortcuts
+
+### Simulation
+- **Space**: Toggle simulation
+- **F**: Step simulation by one frame
+- **R**: Clear grid
+
+### General
+- **Q**: Toggle compact UI
+- **Ctrl + Z**: Undo last action
+- **Ctrl + Y** / **Ctrl + Shift + Z**: Redo action
+- **F11**: Toggle fullscreen
+- **Escape**: Quit
+
+### Grid
+- **Left Mouse Drag**: Draw material
+- **Right Mouse Drag**: Erase material
+- **Shift + Mouse Drag**: Draw straight line or erase
+- **Shift + Alt + Mouse Click**: Flood fill or erase
+- **Middle Click**: Eyedropper (pick material)
+
+### Brush
+- **Mouse Wheel**: Adjust brush size
+- **Ctrl + Mouse Wheel**: Faster brush size adjust
+- **T**: Next brush shape (square, circle)
+
+### Camera
+- **Shift + Middle Mouse Drag**: Pan camera
+- **Shift + Mouse Wheel / PageUp / PageDown / +/-**: Zoom camera
+
+### Rule Grid
+- **Left Click**: Select material(s)
+- **Shift + Left Click / Mouse Drag**: Paint copied material(s)
+- **Middle Click**: Copy material(s)
+- **Right Click**: Clear cell(s)
 
 ## Building
 
