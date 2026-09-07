@@ -43,15 +43,15 @@ set(SOURCES
 )
 
 set(RESOURCES
-    roboto.h
-    icon.h
-    shaders/simulation_spv.h
+    resources/roboto_ttf.h
+    resources/sand3_png.h
+    resources/simulation_spv.h
 )
 
 find_package(Threads REQUIRED)
 
 if (WIN32)
-    set(RESOURCES ${RESOURCES} "sand3.rc")
+    set(RESOURCES ${RESOURCES} "resources/sand3.rc")
 endif()
 
 add_executable(sand3 ${SOURCES} ${RESOURCES})

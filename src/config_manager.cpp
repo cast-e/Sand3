@@ -54,9 +54,9 @@ void ConfigManager::load() {
 					config.vsync = val == "true";
 				else if (key == "target_fps")
 					config.target_fps = std::stoi(val);
-				else if (key == "quality_preset")
-					config.quality_preset = std::stoi(val);
-				else if (key == "thread_count")
+				else if (key == "processing_mode") {
+					config.processing_mode = std::stoi(val);
+				} else if (key == "thread_count")
 					config.thread_count = std::stoi(val);
 				else if (key == "prevent_downclock")
 					config.prevent_downclock = val == "true";
@@ -69,7 +69,7 @@ void ConfigManager::load() {
 	// Apply advanced settings
 	Window::set_vsync(config.vsync);
 	Window::set_target_fps(static_cast<uint32_t>(config.target_fps));
-	Grid::set_quality_preset(static_cast<QualityPreset>(config.quality_preset));
+	Grid::set_processing_mode(static_cast<ProcessingMode>(config.processing_mode));
 	Grid::configure_threads(static_cast<uint32_t>(config.thread_count));
 	Vulkan::set_prevent_downclock(config.prevent_downclock);
 
@@ -106,7 +106,7 @@ void ConfigManager::save() {
 
 	config.vsync = Window::get_vsync();
 	config.target_fps = static_cast<uint32_t>(Window::get_target_fps());
-	config.quality_preset = static_cast<uint32_t>(Grid::get_quality_preset());
+	config.processing_mode = static_cast<uint32_t>(Grid::get_processing_mode());
 	config.thread_count = static_cast<uint32_t>(Grid::get_thread_count());
 	config.prevent_downclock = Vulkan::is_prevent_downclock_enabled();
 
@@ -123,7 +123,7 @@ void ConfigManager::save() {
 		out << "[Advanced]\n";
 		out << "vsync = " << (config.vsync ? "true" : "false") << "\n";
 		out << "target_fps = " << config.target_fps << "\n";
-		out << "quality_preset = " << config.quality_preset << "\n";
+		out << "processing_mode = " << config.processing_mode << "\n";
 		out << "thread_count = " << config.thread_count << "\n";
 		out << "prevent_downclock = " << (config.prevent_downclock ? "true" : "false") << "\n";
 

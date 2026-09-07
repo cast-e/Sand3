@@ -580,7 +580,7 @@ void MaterialManager::rebuild_compiled_rules() {
 
 	if (Vulkan::is_available()) {
 		Vulkan::update_rules();
-		if (Grid::get_quality_preset() == QualityPreset::GPU) {
+		if (Grid::get_processing_mode() == ProcessingMode::GPU) {
 			Vulkan::refresh_display();
 		}
 	}

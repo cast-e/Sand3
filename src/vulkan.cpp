@@ -6,7 +6,7 @@
 #include <cstring>
 
 #include "material_manager.hpp"
-#include "shaders/simulation_spv.h"
+#include "resources/simulation_spv.h"
 
 bool Vulkan::initialized = false;
 bool Vulkan::prevent_downclocking = false;

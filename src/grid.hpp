@@ -26,7 +26,7 @@ inline constexpr std::array<int, NEIGHBOR_COUNT> compute_neighbor_offsets() {
 	return offsets;
 }
 
-enum class QualityPreset : int { Slow = 0, Fast = 1, GPU = 2 };
+enum class ProcessingMode : int { CPU = 0, GPU = 1 };
 
 class Grid {
 public:
@@ -40,7 +40,6 @@ public:
 private:
 	static void worker_thread(const uint32_t thread_id);
 	static void update_strip_1d(const uint32_t sy, const bool reverse_x, const bool reverse_y, uint32_t& local_changed);
-	static void update_sequential();
 
 public:
 	static bool try_apply_rule_fast(const CompiledRuleVariant& rule, const uint32_t center_id, uint32_t& local_changed);
@@ -58,8 +57,8 @@ public:
 	static void restore_state(const std::vector<uint8_t>& state);
 	static std::vector<uint8_t> get_all_cells();
 
-	static QualityPreset get_quality_preset() { return quality_preset; }
-	static void set_quality_preset(QualityPreset preset);
+	static ProcessingMode get_processing_mode() { return processing_mode; }
+	static void set_processing_mode(ProcessingMode preset);
 
 	static uint32_t get_thread_count() { return num_active_threads; }
 
@@ -73,7 +72,7 @@ public:
 private:
 	static constexpr std::array<int, NEIGHBOR_COUNT> neighbor_offsets = compute_neighbor_offsets();
 
-	static QualityPreset quality_preset;
+	static ProcessingMode processing_mode;
 	static std::vector<Cell> cells;
 	static std::vector<Cell> next_cells;
 

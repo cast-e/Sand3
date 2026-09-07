@@ -8,7 +8,7 @@
 
 #include "const.hpp"
 #include "grid.hpp"
-#include "icon.h"
+#include "resources/sand3_png.h"
 #include "vulkan.hpp"
 
 SDL_Window* Window::window = nullptr;
@@ -19,6 +19,7 @@ SDL_FRect Window::dst_rect{0.0f, 0.0f, 0.0f, 0.0f};
 uint64_t Window::frame_count = 0;
 uint64_t Window::next_frame_counter = 0;
 uint32_t Window::target_fps = 500;
+bool Window::vsync_enabled = false;
 
 void Window::init(uint32_t t_width, uint32_t t_height) {
 	dst_rect = {0.0f, 0.0f, static_cast<float>(t_width), static_cast<float>(t_height)};
@@ -29,7 +30,7 @@ void Window::init(uint32_t t_width, uint32_t t_height) {
 	if (window == NULL) {
 		fmt::print("SDL_CreateWindow failed: {}\n", SDL_GetError());
 	}
-	SDL_IOStream* io_stream = SDL_IOFromMem(sand3_png, sizeof(sand3_png));
+	SDL_IOStream* io_stream = SDL_IOFromMem(sand3_png, sand3_png_len);
 	SDL_Surface* surface = SDL_LoadPNG_IO(io_stream, true);
 	if (surface == NULL) {
 		fmt::print("SDL_LoadPNG_IO failed: {}\n", SDL_GetError());
@@ -74,7 +75,7 @@ void Window::shutdown() {
 
 void Window::present() {
 	const void* pixels = buffer.data();
-	if (Grid::get_quality_preset() == QualityPreset::GPU && Vulkan::is_available()) {
+	if (Grid::get_processing_mode() == ProcessingMode::GPU && Vulkan::is_available()) {
 		uint32_t* gpu_pixels = Vulkan::get_display_buffer();
 		if (gpu_pixels) {
 			pixels = gpu_pixels;
@@ -126,7 +127,7 @@ void Window::present() {
 SDL_Window* Window::get_window() { return window; }
 SDL_Renderer* Window::get_renderer() { return renderer; }
 uint32_t* Window::get_buffer() {
-	if (Grid::get_quality_preset() == QualityPreset::GPU && Vulkan::is_available()) {
+	if (Grid::get_processing_mode() == ProcessingMode::GPU && Vulkan::is_available()) {
 		uint32_t* gpu_pixels = Vulkan::get_display_buffer();
 		if (gpu_pixels) {
 			return gpu_pixels;
@@ -136,8 +137,6 @@ uint32_t* Window::get_buffer() {
 }
 
 uint64_t Window::get_frame_count() { return frame_count; }
-
-bool Window::vsync_enabled = false;
 
 uint32_t Window::get_target_fps() { return target_fps; }
 void Window::set_target_fps(uint32_t target) { target_fps = target; }

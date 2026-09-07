@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,7 @@
 #include "config_manager.hpp"
 #include "grid.hpp"
 #include "material_manager.hpp"
-#include "roboto.h"
+#include "resources/roboto_ttf.h"
 #include "sanitize.hpp"
 #include "save_manager.hpp"
 #include "set_manager.hpp"
@@ -122,10 +123,72 @@ static ScreenRect grid_to_screen_rect(int start_x, int start_y, int size) {
 	return {sx1, sy1, sx2, sy2};
 }
 
+static ScreenRect grid_to_screen_rect_wh(int start_x, int start_y, int w, int h) {
+	SDL_FRect dst_rect = Window::get_dst_rect();
+	float sx1 = dst_rect.x + (static_cast<float>(start_x) / SIM_WIDTH) * dst_rect.w;
+	float sy1 = dst_rect.y + (static_cast<float>(start_y) / SIM_HEIGHT) * dst_rect.h;
+	float sx2 = dst_rect.x + (static_cast<float>(start_x + w) / SIM_WIDTH) * dst_rect.w;
+	float sy2 = dst_rect.y + (static_cast<float>(start_y + h) / SIM_HEIGHT) * dst_rect.h;
+	return {sx1, sy1, sx2, sy2};
+}
+
 static GridRect calculate_brush_bounds(ImVec2 grid_pos, int brush_size) {
 	int x_start = static_cast<int>(grid_pos.x - static_cast<float>(brush_size) / 2.0f + 0.5f);
 	int y_start = static_cast<int>(grid_pos.y - static_cast<float>(brush_size) / 2.0f + 0.5f);
 	return {x_start, y_start, brush_size, brush_size};
+}
+
+static ResizeHandle get_hovered_resize_handle(const ScreenRect& srect, ImVec2 mouse_pos) {
+	ImVec2 handle_pts[8] = {
+		ImVec2(srect.x1, srect.y1),						 // TopLeft
+		ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y1),	 // Top
+		ImVec2(srect.x2, srect.y1),						 // TopRight
+		ImVec2(srect.x2, (srect.y1 + srect.y2) * 0.5f),	 // Right
+		ImVec2(srect.x2, srect.y2),						 // BottomRight
+		ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y2),	 // Bottom
+		ImVec2(srect.x1, srect.y2),						 // BottomLeft
+		ImVec2(srect.x1, (srect.y1 + srect.y2) * 0.5f)	 // Left
+	};
+
+	ResizeHandle handle_enums[8] = {ResizeHandle::TopLeft,	  ResizeHandle::Top,		 ResizeHandle::TopRight,
+									ResizeHandle::Right,	  ResizeHandle::BottomRight, ResizeHandle::Bottom,
+									ResizeHandle::BottomLeft, ResizeHandle::Left};
+
+	const float hit_dist = 12.0f;
+	float min_d = 1e9f;
+	ResizeHandle closest = ResizeHandle::None;
+
+	for (int i = 0; i < 8; ++i) {
+		float d = std::hypot(mouse_pos.x - handle_pts[i].x, mouse_pos.y - handle_pts[i].y);
+		if (d < min_d) {
+			min_d = d;
+			closest = handle_enums[i];
+		}
+	}
+
+	if (min_d <= hit_dist) {
+		return closest;
+	}
+	return ResizeHandle::None;
+}
+
+static ImGuiMouseCursor get_cursor_for_resize_handle(ResizeHandle h) {
+	switch (h) {
+		case ResizeHandle::TopLeft:
+		case ResizeHandle::BottomRight:
+			return ImGuiMouseCursor_ResizeNWSE;
+		case ResizeHandle::TopRight:
+		case ResizeHandle::BottomLeft:
+			return ImGuiMouseCursor_ResizeNESW;
+		case ResizeHandle::Top:
+		case ResizeHandle::Bottom:
+			return ImGuiMouseCursor_ResizeNS;
+		case ResizeHandle::Left:
+		case ResizeHandle::Right:
+			return ImGuiMouseCursor_ResizeEW;
+		default:
+			return ImGuiMouseCursor_Arrow;
+	}
 }
 
 static float cross_2d(ImVec2 a, ImVec2 b, ImVec2 c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
@@ -439,6 +502,20 @@ float UI::target_zoom = 1.0f;
 float UI::target_pan_x = 0.0f;
 float UI::target_pan_y = 0.0f;
 
+ToolMode UI::current_tool = ToolMode::Brush;
+SelectionState UI::selection_state = SelectionState::None;
+ResizeHandle UI::active_resize_handle = ResizeHandle::None;
+SelectionBox UI::selection_box = {};
+ClipboardData UI::clipboard = {};
+std::vector<uint8_t> UI::floating_cells = {};
+int UI::move_origin_x = 0;
+int UI::move_origin_y = 0;
+int UI::move_grab_offset_x = 0;
+int UI::move_grab_offset_y = 0;
+int UI::current_floating_x = 0;
+int UI::current_floating_y = 0;
+bool UI::transparent_mode = false;
+
 void UI::init() {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
@@ -450,8 +527,7 @@ void UI::init() {
 
 	ImFontConfig font_cfg;
 	font_cfg.FontDataOwnedByAtlas = false;
-	io.Fonts->AddFontFromMemoryTTF(const_cast<uint8_t*>(___assets_Roboto_Regular_ttf), ___assets_Roboto_Regular_ttf_len,
-								   16.0f, &font_cfg);
+	io.Fonts->AddFontFromMemoryTTF(const_cast<uint8_t*>(roboto_ttf), roboto_ttf_len, 16.0f, &font_cfg);
 
 	init_style();
 
@@ -505,20 +581,613 @@ void UI::render() {
 	render_mouse_overlay();
 
 	render_modals();
+
+	// Cursor icons for the UI
+	ImGuiContext& g = *GImGui;
+	if (g.HoveredIdIsDisabled) {
+		ImGui::SetMouseCursor(ImGuiMouseCursor_NotAllowed);
+	} else if (g.HoveredId != 0 && ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow) {
+		ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+	}
+}
+
+void UI::set_tool_mode(ToolMode mode) {
+	if (current_tool == mode)
+		return;
+	if (current_tool == ToolMode::Select) {
+		deselect();
+	}
+	active_resize_handle = ResizeHandle::None;
+	selection_state = SelectionState::None;
+	current_tool = mode;
+	UndoManager::push_snapshot("Switched to " + std::string(current_tool == ToolMode::Brush ? "Brush" : "Select"));
+}
+
+void UI::deselect() {
+	if (selection_state == SelectionState::Moving) {
+		int bw = selection_box.width();
+		int bh = selection_box.height();
+		for (int y = 0; y < bh; ++y) {
+			for (int x = 0; x < bw; ++x) {
+				int gx = move_origin_x + x;
+				int gy = move_origin_y + y;
+				if (gx >= 0 && gx < static_cast<int>(SIM_WIDTH) && gy >= 0 && gy < static_cast<int>(SIM_HEIGHT)) {
+					Grid::set_cell(gx, gy, floating_cells[y * bw + x]);
+				}
+			}
+		}
+		floating_cells.clear();
+	}
+	active_resize_handle = ResizeHandle::None;
+	selection_state = SelectionState::None;
+}
+
+void UI::restore_selection_state(ToolMode mode, SelectionState state, const SelectionBox& box) {
+	if (selection_state == SelectionState::Moving) {
+		floating_cells.clear();
+	}
+	active_resize_handle = ResizeHandle::None;
+	current_tool = mode;
+	if (state == SelectionState::Moving || state == SelectionState::Pasting || state == SelectionState::Resizing) {
+		selection_state = SelectionState::Selected;
+	} else {
+		selection_state = state;
+	}
+	selection_box = box;
+}
+
+void UI::copy_selection() {
+	if (selection_state != SelectionState::Selected)
+		return;
+	int min_x = selection_box.min_x();
+	int min_y = selection_box.min_y();
+	int bw = selection_box.width();
+	int bh = selection_box.height();
+	clipboard.width = bw;
+	clipboard.height = bh;
+	clipboard.cells.resize(bw * bh);
+	for (int y = 0; y < bh; ++y) {
+		for (int x = 0; x < bw; ++x) {
+			clipboard.cells[y * bw + x] = Grid::get_cell(min_x + x, min_y + y);
+		}
+	}
+}
+
+void UI::cut_selection() {
+	if (selection_state != SelectionState::Selected)
+		return;
+	copy_selection();
+	int min_x = selection_box.min_x();
+	int min_y = selection_box.min_y();
+	int bw = selection_box.width();
+	int bh = selection_box.height();
+	for (int y = 0; y < bh; ++y) {
+		for (int x = 0; x < bw; ++x) {
+			Grid::set_cell(min_x + x, min_y + y, 0);
+		}
+	}
+	UndoManager::push_snapshot("Cut Selection");
+	deselect();
+}
+
+void UI::fill_selection(uint8_t id) {
+	if (selection_state != SelectionState::Selected)
+		return;
+	int min_x = selection_box.min_x();
+	int min_y = selection_box.min_y();
+	int bw = selection_box.width();
+	int bh = selection_box.height();
+	for (int y = 0; y < bh; ++y) {
+		for (int x = 0; x < bw; ++x) {
+			Grid::set_cell(min_x + x, min_y + y, id);
+		}
+	}
+	UndoManager::push_snapshot("Filled Selection");
+}
+
+void UI::rotate_selection(bool clockwise) {
+	if (selection_state == SelectionState::Selected) {
+		int min_x = selection_box.min_x();
+		int min_y = selection_box.min_y();
+		int w = selection_box.width();
+		int h = selection_box.height();
+		if (w <= 0 || h <= 0)
+			return;
+
+		std::vector<uint8_t> old_cells(w * h);
+		for (int y = 0; y < h; ++y) {
+			for (int x = 0; x < w; ++x) {
+				old_cells[y * w + x] = Grid::get_cell(min_x + x, min_y + y);
+			}
+		}
+
+		for (int y = 0; y < h; ++y) {
+			for (int x = 0; x < w; ++x) {
+				Grid::set_cell(min_x + x, min_y + y, 0);
+			}
+		}
+
+		int new_w = h;
+		int new_h = w;
+		std::vector<uint8_t> new_cells(new_w * new_h);
+		for (int y = 0; y < h; ++y) {
+			for (int x = 0; x < w; ++x) {
+				int nx, ny;
+				if (clockwise) {
+					nx = (h - 1) - y;
+					ny = x;
+				} else {
+					nx = y;
+					ny = (w - 1) - x;
+				}
+				new_cells[ny * new_w + nx] = old_cells[y * w + x];
+			}
+		}
+
+		int cx = min_x + w / 2;
+		int cy = min_y + h / 2;
+		int new_min_x = std::clamp(cx - new_w / 2, 0, std::max(0, static_cast<int>(SIM_WIDTH) - new_w));
+		int new_min_y = std::clamp(cy - new_h / 2, 0, std::max(0, static_cast<int>(SIM_HEIGHT) - new_h));
+
+		for (int ny = 0; ny < new_h; ++ny) {
+			for (int nx = 0; nx < new_w; ++nx) {
+				Grid::set_cell(new_min_x + nx, new_min_y + ny, new_cells[ny * new_w + nx]);
+			}
+		}
+
+		selection_box.start_x = new_min_x;
+		selection_box.start_y = new_min_y;
+		selection_box.current_x = new_min_x + new_w - 1;
+		selection_box.current_y = new_min_y + new_h - 1;
+
+		UndoManager::push_snapshot(clockwise ? "Rotate Selection CW" : "Rotate Selection CCW");
+	} else if (selection_state == SelectionState::Moving) {
+		int w = selection_box.width();
+		int h = selection_box.height();
+		if (w <= 0 || h <= 0 || floating_cells.size() < static_cast<size_t>(w * h))
+			return;
+
+		int new_w = h;
+		int new_h = w;
+		std::vector<uint8_t> new_cells(new_w * new_h);
+		for (int y = 0; y < h; ++y) {
+			for (int x = 0; x < w; ++x) {
+				int nx, ny;
+				if (clockwise) {
+					nx = (h - 1) - y;
+					ny = x;
+				} else {
+					nx = y;
+					ny = (w - 1) - x;
+				}
+				new_cells[ny * new_w + nx] = floating_cells[y * w + x];
+			}
+		}
+		floating_cells = std::move(new_cells);
+
+		int old_gx = move_grab_offset_x;
+		int old_gy = move_grab_offset_y;
+		if (clockwise) {
+			move_grab_offset_x = (h - 1) - old_gy;
+			move_grab_offset_y = old_gx;
+		} else {
+			move_grab_offset_x = old_gy;
+			move_grab_offset_y = (w - 1) - old_gx;
+		}
+
+		selection_box.start_x = current_floating_x;
+		selection_box.start_y = current_floating_y;
+		selection_box.current_x = current_floating_x + new_w - 1;
+		selection_box.current_y = current_floating_y + new_h - 1;
+	} else if (selection_state == SelectionState::Pasting && !clipboard.empty()) {
+		int w = clipboard.width;
+		int h = clipboard.height;
+		if (w <= 0 || h <= 0 || clipboard.cells.size() < static_cast<size_t>(w * h))
+			return;
+
+		int new_w = h;
+		int new_h = w;
+		std::vector<uint8_t> new_cells(new_w * new_h);
+		for (int y = 0; y < h; ++y) {
+			for (int x = 0; x < w; ++x) {
+				int nx, ny;
+				if (clockwise) {
+					nx = (h - 1) - y;
+					ny = x;
+				} else {
+					nx = y;
+					ny = (w - 1) - x;
+				}
+				new_cells[ny * new_w + nx] = clipboard.cells[y * w + x];
+			}
+		}
+		clipboard.cells = std::move(new_cells);
+		clipboard.width = new_w;
+		clipboard.height = new_h;
+	}
+}
+
+void UI::paste_clipboard() {
+	if (clipboard.empty())
+		return;
+	current_tool = ToolMode::Select;
+	selection_state = SelectionState::Pasting;
+}
+
+void UI::render_selection_controls() {
+	bool is_brush = (current_tool == ToolMode::Brush);
+	bool is_select = (current_tool == ToolMode::Select);
+
+	float avail_w = ImGui::GetContentRegionAvail().x;
+	float spacing_x = ImGui::GetStyle().ItemSpacing.x;
+	float tool_w = (avail_w - spacing_x) * 0.5f;
+
+	if (is_brush) {
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.85f, 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 0.95f, 1.0f));
+	}
+	if (ImGui::Button("Brush (B)", ImVec2(tool_w, 28.0f))) {
+		set_tool_mode(ToolMode::Brush);
+	}
+	if (is_brush) {
+		ImGui::PopStyleColor(2);
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Drawing brush tool (B)");
+
+	ImGui::SameLine();
+	if (is_select) {
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.85f, 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 0.95f, 1.0f));
+	}
+	if (ImGui::Button("Select (S)", ImVec2(tool_w, 28.0f))) {
+		set_tool_mode(ToolMode::Select);
+	}
+	if (is_select) {
+		ImGui::PopStyleColor(2);
+	}
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Box selection and move/copy/paste tool (S)");
+
+	if (current_tool == ToolMode::Brush) {
+		ImGui::Spacing();
+		ImGui::Text("Brush Settings:");
+		ImGui::SliderInt("Brush Size", &mouse_size, 1, 512);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Adjust brush width (Scroll wheel or [ / ]).");
+		}
+
+		const char* shape_names[] = {"Square", "Circle"};
+		int current_shape = static_cast<int>(brush_shape);
+		if (ImGui::Combo("Brush Shape", &current_shape, shape_names, IM_ARRAYSIZE(shape_names))) {
+			brush_shape = static_cast<BrushShape>(current_shape);
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Select brush shape (Square or Circle, toggle with Tab/T).");
+		}
+	} else if (current_tool == ToolMode::Select) {
+		ImGui::Spacing();
+		bool has_selection = (selection_state == SelectionState::Selected);
+		bool has_clipboard = !clipboard.empty();
+
+		float col_w = (avail_w - spacing_x) * 0.5f;
+		ImVec2 btn_sz(col_w, 28.0f);
+
+		// Row 1: Copy and Cut
+		if (!has_selection)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Copy (Ctrl+C)##Sel", btn_sz)) {
+			copy_selection();
+		}
+		if (!has_selection)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Copy selected cells to clipboard (Ctrl+C)");
+
+		ImGui::SameLine();
+		if (!has_selection)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Cut (Ctrl+X)##Sel", btn_sz)) {
+			cut_selection();
+		}
+		if (!has_selection)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Cut selected cells to clipboard (Ctrl+X)");
+
+		// Row 2: Paste and Delete
+		if (!has_clipboard)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Paste (Ctrl+V)##Sel", btn_sz)) {
+			paste_clipboard();
+		}
+		if (!has_clipboard)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Paste clipboard at cursor (Ctrl+V)");
+
+		ImGui::SameLine();
+		if (!has_selection)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Delete (Del)##Sel", btn_sz)) {
+			fill_selection(0);
+			deselect();
+		}
+		if (!has_selection)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Clear selected cells on grid (Del)");
+
+		// Row 3: Fill and Deselect
+		if (!has_selection)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Fill (Ctrl+F)##Sel", btn_sz)) {
+			fill_selection(selected_id);
+		}
+		if (!has_selection)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Fill selected cells with current material (Ctrl+F)");
+
+		ImGui::SameLine();
+		if (!has_selection)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Deselect (Esc)##Sel", btn_sz)) {
+			deselect();
+		}
+		if (!has_selection)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Clear active selection (Esc)");
+
+		// Row 4: Rotate CW and Rotate CCW
+		bool can_rotate = (has_selection || selection_state == SelectionState::Moving ||
+						   (selection_state == SelectionState::Pasting && !clipboard.empty()));
+		if (!can_rotate)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Rotate CW (R)##Sel", btn_sz)) {
+			rotate_selection(true);
+		}
+		if (!can_rotate)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Rotate selection 90° clockwise (R)");
+
+		ImGui::SameLine();
+		if (!can_rotate)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Rotate CCW (Shift+R)##Sel", btn_sz)) {
+			rotate_selection(false);
+		}
+		if (!can_rotate)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+			ImGui::SetTooltip("Rotate selection 90° counter-clockwise (Shift+R)");
+
+		// Row 5: Transparent Checkbox
+		ImGui::Spacing();
+		ImGui::Checkbox("Transparent", &transparent_mode);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"When enabled, air/empty cells in clipboard or moved selection will not overwrite existing cells.");
+		}
+
+		ImGui::Spacing();
+		if (has_selection) {
+			ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "Selected: %dx%d (%d cells)", selection_box.width(),
+							   selection_box.height(), selection_box.width() * selection_box.height());
+			ImGui::TextDisabled("Drag inside: Move | Drag handles: Resize | Arrows: Nudge | R: Rotate");
+		} else if (selection_state == SelectionState::Pasting) {
+			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
+							   "Pasting: %dx%d (Click canvas to stamp, R to rotate, Esc to cancel)", clipboard.width,
+							   clipboard.height);
+		} else {
+			ImGui::TextDisabled("Click & drag to select area | Click canvas to deselect");
+		}
+	}
 }
 
 void UI::render_mouse_overlay() {
 	ImGuiIO& io = ImGui::GetIO();
+	ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
+
+	if (current_tool == ToolMode::Select) {
+		if (selection_state == SelectionState::Selecting || selection_state == SelectionState::Selected ||
+			selection_state == SelectionState::Resizing) {
+			int min_x = selection_box.min_x();
+			int min_y = selection_box.min_y();
+			int bw = selection_box.width();
+			int bh = selection_box.height();
+			ScreenRect srect = grid_to_screen_rect_wh(min_x, min_y, bw, bh);
+
+			// Semi-transparent fill
+			draw_list->AddRectFilled(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2),
+									 IM_COL32(50, 150, 255, 30));
+
+			// Dual-tone border
+			draw_list->AddRect(ImVec2(srect.x1 - 1.0f, srect.y1 - 1.0f), ImVec2(srect.x2 + 1.0f, srect.y2 + 1.0f),
+							   IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
+			draw_list->AddRect(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2), IM_COL32(80, 200, 255, 255),
+							   0.0f, 0, 1.5f);
+
+			if (selection_state == SelectionState::Selected || selection_state == SelectionState::Resizing) {
+				float handle_size = 5.0f;
+				ImVec2 handle_pts[8] = {
+					ImVec2(srect.x1, srect.y1),						 // TopLeft
+					ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y1),	 // Top
+					ImVec2(srect.x2, srect.y1),						 // TopRight
+					ImVec2(srect.x2, (srect.y1 + srect.y2) * 0.5f),	 // Right
+					ImVec2(srect.x2, srect.y2),						 // BottomRight
+					ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y2),	 // Bottom
+					ImVec2(srect.x1, srect.y2),						 // BottomLeft
+					ImVec2(srect.x1, (srect.y1 + srect.y2) * 0.5f)	 // Left
+				};
+				ResizeHandle handle_enums[8] = {
+					ResizeHandle::TopLeft,	   ResizeHandle::Top,	 ResizeHandle::TopRight,   ResizeHandle::Right,
+					ResizeHandle::BottomRight, ResizeHandle::Bottom, ResizeHandle::BottomLeft, ResizeHandle::Left};
+				ResizeHandle hovered_handle = (selection_state == SelectionState::Resizing)
+												  ? active_resize_handle
+												  : get_hovered_resize_handle(srect, io.MousePos);
+
+				for (int i = 0; i < 8; ++i) {
+					bool is_active = (hovered_handle == handle_enums[i]);
+					float sz = is_active ? (handle_size + 1.5f) : handle_size;
+					ImU32 fill_col = is_active ? IM_COL32(100, 220, 255, 255) : IM_COL32(255, 255, 255, 255);
+					ImU32 border_col = is_active ? IM_COL32(0, 50, 100, 255) : IM_COL32(0, 0, 0, 255);
+					draw_list->AddRectFilled(ImVec2(handle_pts[i].x - sz, handle_pts[i].y - sz),
+											 ImVec2(handle_pts[i].x + sz, handle_pts[i].y + sz), fill_col);
+					draw_list->AddRect(ImVec2(handle_pts[i].x - sz, handle_pts[i].y - sz),
+									   ImVec2(handle_pts[i].x + sz, handle_pts[i].y + sz), border_col, 0.0f, 0,
+									   is_active ? 1.5f : 1.0f);
+				}
+
+				char dim_buf[32];
+				std::snprintf(dim_buf, sizeof(dim_buf), "%d x %d", bw, bh);
+				ImVec2 text_size = ImGui::CalcTextSize(dim_buf);
+				float badge_pad_x = 4.0f;
+				float badge_pad_y = 2.0f;
+				float badge_x = srect.x1;
+				float badge_y = srect.y1 - text_size.y - badge_pad_y * 2.0f - 4.0f;
+				if (badge_y < 10.0f) {
+					badge_y = srect.y2 + 4.0f;
+				}
+				draw_list->AddRectFilled(
+					ImVec2(badge_x, badge_y),
+					ImVec2(badge_x + text_size.x + badge_pad_x * 2.0f, badge_y + text_size.y + badge_pad_y * 2.0f),
+					IM_COL32(20, 20, 20, 220), 3.0f);
+				draw_list->AddText(ImVec2(badge_x + badge_pad_x, badge_y + badge_pad_y), IM_COL32(220, 220, 220, 255),
+								   dim_buf);
+			}
+		} else if (selection_state == SelectionState::Moving) {
+			int bw = selection_box.width();
+			int bh = selection_box.height();
+			ScreenRect srect = grid_to_screen_rect_wh(current_floating_x, current_floating_y, bw, bh);
+
+			for (int y = 0; y < bh; ++y) {
+				int x = 0;
+				while (x < bw) {
+					uint8_t m = floating_cells[y * bw + x];
+					if (m == 0 && transparent_mode) {
+						x++;
+						continue;
+					}
+					int start_x = x;
+					while (x < bw && floating_cells[y * bw + x] == m) {
+						x++;
+					}
+					int len = x - start_x;
+					ScreenRect r = grid_to_screen_rect_wh(current_floating_x + start_x, current_floating_y + y, len, 1);
+					if (m != 0) {
+						const auto& mat_def = MaterialManager::get_material(m);
+						draw_list->AddRectFilled(ImVec2(r.x1, r.y1), ImVec2(r.x2, r.y2),
+												 IM_COL32(mat_def.color[0], mat_def.color[1], mat_def.color[2], 210));
+					} else {
+						draw_list->AddRectFilled(ImVec2(r.x1, r.y1), ImVec2(r.x2, r.y2), IM_COL32(40, 40, 40, 160));
+					}
+				}
+			}
+
+			draw_list->AddRect(ImVec2(srect.x1 - 1.0f, srect.y1 - 1.0f), ImVec2(srect.x2 + 1.0f, srect.y2 + 1.0f),
+							   IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
+			draw_list->AddRect(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2), IM_COL32(255, 200, 50, 255),
+							   0.0f, 0, 1.5f);
+		} else if (selection_state == SelectionState::Pasting && !clipboard.empty()) {
+			int bw = clipboard.width;
+			int bh = clipboard.height;
+			ScreenRect srect = grid_to_screen_rect_wh(current_floating_x, current_floating_y, bw, bh);
+
+			for (int y = 0; y < bh; ++y) {
+				int x = 0;
+				while (x < bw) {
+					uint8_t m = clipboard.cells[y * bw + x];
+					if (m == 0 && transparent_mode) {
+						x++;
+						continue;
+					}
+					int start_x = x;
+					while (x < bw && clipboard.cells[y * bw + x] == m) {
+						x++;
+					}
+					int len = x - start_x;
+					ScreenRect r = grid_to_screen_rect_wh(current_floating_x + start_x, current_floating_y + y, len, 1);
+					if (m != 0) {
+						const auto& mat_def = MaterialManager::get_material(m);
+						draw_list->AddRectFilled(ImVec2(r.x1, r.y1), ImVec2(r.x2, r.y2),
+												 IM_COL32(mat_def.color[0], mat_def.color[1], mat_def.color[2], 210));
+					} else {
+						draw_list->AddRectFilled(ImVec2(r.x1, r.y1), ImVec2(r.x2, r.y2), IM_COL32(40, 40, 40, 160));
+					}
+				}
+			}
+
+			draw_list->AddRect(ImVec2(srect.x1 - 1.0f, srect.y1 - 1.0f), ImVec2(srect.x2 + 1.0f, srect.y2 + 1.0f),
+							   IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
+			draw_list->AddRect(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2), IM_COL32(50, 255, 120, 255),
+							   0.0f, 0, 1.5f);
+
+			char paste_buf[64];
+			std::snprintf(paste_buf, sizeof(paste_buf), "Paste (%dx%d) - Left Click to Stamp", bw, bh);
+			ImVec2 text_size = ImGui::CalcTextSize(paste_buf);
+			float badge_x = srect.x1;
+			float badge_y = srect.y1 - text_size.y - 8.0f;
+			if (badge_y < 10.0f)
+				badge_y = srect.y2 + 4.0f;
+			draw_list->AddRectFilled(ImVec2(badge_x, badge_y),
+									 ImVec2(badge_x + text_size.x + 8.0f, badge_y + text_size.y + 4.0f),
+									 IM_COL32(20, 20, 20, 220), 3.0f);
+			draw_list->AddText(ImVec2(badge_x + 4.0f, badge_y + 2.0f), IM_COL32(100, 255, 150, 255), paste_buf);
+		}
+
+		if (!io.WantCaptureMouse) {
+			if (selection_state == SelectionState::Moving) {
+				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+			} else if (selection_state == SelectionState::Pasting) {
+				ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+			} else if (selection_state == SelectionState::Selecting) {
+				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+			} else if (selection_state == SelectionState::Resizing) {
+				ImGui::SetMouseCursor(get_cursor_for_resize_handle(active_resize_handle));
+			} else if (selection_state == SelectionState::Selected) {
+				ScreenRect srect = grid_to_screen_rect_wh(selection_box.min_x(), selection_box.min_y(),
+														  selection_box.width(), selection_box.height());
+				ResizeHandle h = get_hovered_resize_handle(srect, io.MousePos);
+				if (h != ResizeHandle::None) {
+					ImGui::SetMouseCursor(get_cursor_for_resize_handle(h));
+				} else {
+					ImVec2 gp = screen_to_grid_pos(io.MousePos);
+					if (selection_box.contains(static_cast<int>(gp.x), static_cast<int>(gp.y))) {
+						ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+					}
+				}
+			} else if (selection_state == SelectionState::None) {
+				ImVec2 cur_mouse = io.MousePos;
+				float ch_size = 8.0f;
+				draw_list->AddLine(ImVec2(cur_mouse.x - ch_size, cur_mouse.y),
+								   ImVec2(cur_mouse.x + ch_size, cur_mouse.y), IM_COL32(255, 255, 255, 200), 1.5f);
+				draw_list->AddLine(ImVec2(cur_mouse.x, cur_mouse.y - ch_size),
+								   ImVec2(cur_mouse.x, cur_mouse.y + ch_size), IM_COL32(255, 255, 255, 200), 1.5f);
+			}
+		}
+		return;
+	}
+
 	if (io.WantCaptureMouse)
 		return;
 
-	ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
 	ImVec2 cur_mouse = io.MousePos;
 
 	bool is_shift_down = io.KeyShift;
 	bool is_alt_down = io.KeyAlt;
 	bool is_left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
 	bool is_right_down = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+
+	if (is_shift_down && is_alt_down) {
+		ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+	} else if (is_shift_down) {
+		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+	} else if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+	}
 
 	const auto& mat = MaterialManager::get_material(is_right_down ? 0 : selected_id);
 	uint8_t r = mat.color[0];
@@ -683,20 +1352,94 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 }
 
 void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
-	if (!io.WantTextInput) {
-		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
-			if (io.KeyShift) {
-				UndoManager::redo();
-			} else {
-				UndoManager::undo();
-			}
-		} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
+	if (io.WantTextInput)
+		return;
+
+	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+		if (io.KeyShift) {
 			UndoManager::redo();
+		} else {
+			UndoManager::undo();
+		}
+	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
+		UndoManager::redo();
+	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+		copy_selection();
+	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+		cut_selection();
+	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+		paste_clipboard();
+	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) {
+		if (selection_state == SelectionState::Selected) {
+			copy_selection();
+			paste_clipboard();
 		}
 	}
 
-	if (io.WantTextInput)
-		return;
+	// Tool mode toggles
+	if (ImGui::IsKeyPressed(ImGuiKey_B)) {
+		set_tool_mode(ToolMode::Brush);
+	}
+	if (ImGui::IsKeyPressed(ImGuiKey_S)) {
+		set_tool_mode(ToolMode::Select);
+	}
+
+	// Delete selection
+	if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+		if (selection_state == SelectionState::Selected) {
+			fill_selection(0);
+			deselect();
+		}
+	}
+
+	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
+		if (selection_state == SelectionState::Selected) {
+			fill_selection(selected_id);
+		}
+	}
+
+	// Nudge selection with arrow keys
+	if (selection_state == SelectionState::Selected) {
+		int nudge_x = 0;
+		int nudge_y = 0;
+		int step = io.KeyShift ? 10 : 1;
+		if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
+			nudge_x -= step;
+		if (ImGui::IsKeyPressed(ImGuiKey_RightArrow))
+			nudge_x += step;
+		if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
+			nudge_y -= step;
+		if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
+			nudge_y += step;
+
+		if (nudge_x != 0 || nudge_y != 0) {
+			int min_x = selection_box.min_x();
+			int min_y = selection_box.min_y();
+			int bw = selection_box.width();
+			int bh = selection_box.height();
+			int new_x = std::clamp(min_x + nudge_x, 0, static_cast<int>(SIM_WIDTH) - bw);
+			int new_y = std::clamp(min_y + nudge_y, 0, static_cast<int>(SIM_HEIGHT) - bh);
+			if (new_x != min_x || new_y != min_y) {
+				std::vector<uint8_t> temp(bw * bh);
+				for (int y = 0; y < bh; ++y) {
+					for (int x = 0; x < bw; ++x) {
+						temp[y * bw + x] = Grid::get_cell(min_x + x, min_y + y);
+						Grid::set_cell(min_x + x, min_y + y, 0);
+					}
+				}
+				for (int y = 0; y < bh; ++y) {
+					for (int x = 0; x < bw; ++x) {
+						Grid::set_cell(new_x + x, new_y + y, temp[y * bw + x]);
+					}
+				}
+				selection_box.start_x = new_x;
+				selection_box.start_y = new_y;
+				selection_box.current_x = new_x + bw - 1;
+				selection_box.current_y = new_y + bh - 1;
+				UndoManager::push_snapshot("Nudge Selection");
+			}
+		}
+	}
 
 	if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
 		update = !update;
@@ -704,7 +1447,7 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 			UndoManager::push_snapshot("Resume Simulation");
 		}
 	}
-	if (ImGui::IsKeyPressed(ImGuiKey_F) && !update) {
+	if (ImGui::IsKeyPressed(ImGuiKey_F) && !update && !io.KeyCtrl) {
 		step_frame = true;
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_T)) {
@@ -713,7 +1456,18 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 	if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
 		ui_compact = !ui_compact;
 	}
-	if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+	// Rotate selection: R for 90° Clockwise, Shift+R for 90° Counter-Clockwise
+	if (ImGui::IsKeyPressed(ImGuiKey_R, false) && !io.KeyCtrl) {
+		bool can_rotate = (selection_state == SelectionState::Selected ||
+						   selection_state == SelectionState::Moving ||
+						   (selection_state == SelectionState::Pasting && !clipboard.empty()));
+		if (can_rotate) {
+			rotate_selection(!io.KeyShift);
+		}
+	}
+	// Clear grid: Ctrl + Shift + R or Ctrl + Shift + Delete
+	if ((io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_R, false)) ||
+		(io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Delete, false))) {
 		Grid::clear();
 		UndoManager::push_snapshot("Clear Grid");
 	}
@@ -734,7 +1488,16 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-		show_exit_popup = true;
+		if (selection_state == SelectionState::Moving) {
+			deselect();
+		} else if (selection_state == SelectionState::Pasting) {
+			selection_state = SelectionState::None;
+		} else if (selection_state == SelectionState::Selected || selection_state == SelectionState::Selecting ||
+				   selection_state == SelectionState::Resizing) {
+			deselect();
+		} else {
+			show_exit_popup = true;
+		}
 	}
 }
 
@@ -748,7 +1511,7 @@ void UI::handle_mouse_wheel_brush_size(ImGuiIO& io) {
 
 void UI::handle_canvas_interaction() {
 	ImGuiIO& io = ImGui::GetIO();
-	if (io.WantCaptureMouse)
+	if (io.WantCaptureMouse && selection_state != SelectionState::Moving && selection_state != SelectionState::Resizing)
 		return;
 
 	ImVec2 grid_pos = screen_to_grid_pos(io.MousePos);
@@ -763,6 +1526,251 @@ void UI::handle_canvas_interaction() {
 				selected_id = MaterialManager::get_material(cell).id;
 			}
 		}
+	}
+
+	if (current_tool == ToolMode::Select) {
+		// Pasting state
+		if (selection_state == SelectionState::Pasting) {
+			if (clipboard.empty()) {
+				selection_state = SelectionState::None;
+				return;
+			}
+			int px = static_cast<int>(grid_pos.x) - clipboard.width / 2;
+			int py = static_cast<int>(grid_pos.y) - clipboard.height / 2;
+			current_floating_x = std::clamp(px, 0, std::max(0, static_cast<int>(SIM_WIDTH) - clipboard.width));
+			current_floating_y = std::clamp(py, 0, std::max(0, static_cast<int>(SIM_HEIGHT) - clipboard.height));
+
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+				for (int y = 0; y < clipboard.height; ++y) {
+					for (int x = 0; x < clipboard.width; ++x) {
+						int gx = current_floating_x + x;
+						int gy = current_floating_y + y;
+						if (gx >= 0 && gx < static_cast<int>(SIM_WIDTH) && gy >= 0 &&
+							gy < static_cast<int>(SIM_HEIGHT)) {
+							uint8_t cell = clipboard.cells[y * clipboard.width + x];
+							if (!transparent_mode || cell != 0) {
+								Grid::set_cell(gx, gy, cell);
+							}
+						}
+					}
+				}
+				UndoManager::push_snapshot("Paste");
+				selection_box.start_x = current_floating_x;
+				selection_box.start_y = current_floating_y;
+				selection_box.current_x = current_floating_x + clipboard.width - 1;
+				selection_box.current_y = current_floating_y + clipboard.height - 1;
+				selection_state = SelectionState::Selected;
+			} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+				selection_state = SelectionState::None;
+			}
+			return;
+		}
+
+		// Moving state
+		if (selection_state == SelectionState::Moving) {
+			int bw = selection_box.width();
+			int bh = selection_box.height();
+			int gx = static_cast<int>(grid_pos.x);
+			int gy = static_cast<int>(grid_pos.y);
+			current_floating_x = std::clamp(gx - move_grab_offset_x, 0, std::max(0, static_cast<int>(SIM_WIDTH) - bw));
+			current_floating_y = std::clamp(gy - move_grab_offset_y, 0, std::max(0, static_cast<int>(SIM_HEIGHT) - bh));
+
+			if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+				for (int y = 0; y < bh; ++y) {
+					for (int x = 0; x < bw; ++x) {
+						int fgx = current_floating_x + x;
+						int fgy = current_floating_y + y;
+						if (fgx >= 0 && fgx < static_cast<int>(SIM_WIDTH) && fgy >= 0 &&
+							fgy < static_cast<int>(SIM_HEIGHT)) {
+							uint8_t cell = floating_cells[y * bw + x];
+							if (!transparent_mode || cell != 0) {
+								Grid::set_cell(fgx, fgy, cell);
+							}
+						}
+					}
+				}
+				floating_cells.clear();
+				if (current_floating_x != move_origin_x || current_floating_y != move_origin_y) {
+					UndoManager::push_snapshot("Move Selection");
+				}
+				selection_box.start_x = current_floating_x;
+				selection_box.start_y = current_floating_y;
+				selection_box.current_x = current_floating_x + bw - 1;
+				selection_box.current_y = current_floating_y + bh - 1;
+				selection_state = SelectionState::Selected;
+			} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+				deselect();
+			}
+			return;
+		}
+
+		// Resizing state
+		if (selection_state == SelectionState::Resizing) {
+			int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(SIM_WIDTH) - 1);
+			int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(SIM_HEIGHT) - 1);
+
+			if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+				if (active_resize_handle == ResizeHandle::Top || active_resize_handle == ResizeHandle::Bottom) {
+					selection_box.current_y = gy;
+				} else if (active_resize_handle == ResizeHandle::Left || active_resize_handle == ResizeHandle::Right) {
+					selection_box.current_x = gx;
+				} else {
+					selection_box.current_x = gx;
+					selection_box.current_y = gy;
+				}
+			} else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+				if (active_resize_handle == ResizeHandle::Top || active_resize_handle == ResizeHandle::Bottom) {
+					selection_box.current_y = gy;
+				} else if (active_resize_handle == ResizeHandle::Left || active_resize_handle == ResizeHandle::Right) {
+					selection_box.current_x = gx;
+				} else {
+					selection_box.current_x = gx;
+					selection_box.current_y = gy;
+				}
+				int min_x = selection_box.min_x();
+				int min_y = selection_box.min_y();
+				int max_x = selection_box.max_x();
+				int max_y = selection_box.max_y();
+				selection_box.start_x = min_x;
+				selection_box.start_y = min_y;
+				selection_box.current_x = max_x;
+				selection_box.current_y = max_y;
+				selection_state = SelectionState::Selected;
+				active_resize_handle = ResizeHandle::None;
+				UndoManager::push_snapshot("Resize Selection");
+			} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+				int min_x = selection_box.min_x();
+				int min_y = selection_box.min_y();
+				int max_x = selection_box.max_x();
+				int max_y = selection_box.max_y();
+				selection_box.start_x = min_x;
+				selection_box.start_y = min_y;
+				selection_box.current_x = max_x;
+				selection_box.current_y = max_y;
+				selection_state = SelectionState::Selected;
+				active_resize_handle = ResizeHandle::None;
+			}
+			return;
+		}
+
+		// None, Selecting, Selected
+		int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(SIM_WIDTH) - 1);
+		int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(SIM_HEIGHT) - 1);
+
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+			if (selection_state == SelectionState::Selected) {
+				ScreenRect srect = grid_to_screen_rect_wh(selection_box.min_x(), selection_box.min_y(),
+														  selection_box.width(), selection_box.height());
+				ResizeHandle h = get_hovered_resize_handle(srect, io.MousePos);
+				if (h != ResizeHandle::None) {
+					active_resize_handle = h;
+					selection_state = SelectionState::Resizing;
+					int x1 = selection_box.min_x();
+					int y1 = selection_box.min_y();
+					int x2 = selection_box.max_x();
+					int y2 = selection_box.max_y();
+					if (h == ResizeHandle::TopLeft) {
+						selection_box.start_x = x2;
+						selection_box.start_y = y2;
+						selection_box.current_x = gx;
+						selection_box.current_y = gy;
+					} else if (h == ResizeHandle::TopRight) {
+						selection_box.start_x = x1;
+						selection_box.start_y = y2;
+						selection_box.current_x = gx;
+						selection_box.current_y = gy;
+					} else if (h == ResizeHandle::BottomLeft) {
+						selection_box.start_x = x2;
+						selection_box.start_y = y1;
+						selection_box.current_x = gx;
+						selection_box.current_y = gy;
+					} else if (h == ResizeHandle::BottomRight) {
+						selection_box.start_x = x1;
+						selection_box.start_y = y1;
+						selection_box.current_x = gx;
+						selection_box.current_y = gy;
+					} else if (h == ResizeHandle::Top) {
+						selection_box.start_x = x1;
+						selection_box.current_x = x2;
+						selection_box.start_y = y2;
+						selection_box.current_y = gy;
+					} else if (h == ResizeHandle::Bottom) {
+						selection_box.start_x = x1;
+						selection_box.current_x = x2;
+						selection_box.start_y = y1;
+						selection_box.current_y = gy;
+					} else if (h == ResizeHandle::Left) {
+						selection_box.start_y = y1;
+						selection_box.current_y = y2;
+						selection_box.start_x = x2;
+						selection_box.current_x = gx;
+					} else if (h == ResizeHandle::Right) {
+						selection_box.start_y = y1;
+						selection_box.current_y = y2;
+						selection_box.start_x = x1;
+						selection_box.current_x = gx;
+					}
+					return;
+				}
+
+				if (selection_box.contains(gx, gy)) {
+					// Start moving
+					int min_x = selection_box.min_x();
+					int min_y = selection_box.min_y();
+					int bw = selection_box.width();
+					int bh = selection_box.height();
+					floating_cells.resize(bw * bh);
+					for (int y = 0; y < bh; ++y) {
+						for (int x = 0; x < bw; ++x) {
+							floating_cells[y * bw + x] = Grid::get_cell(min_x + x, min_y + y);
+							Grid::set_cell(min_x + x, min_y + y, 0);
+						}
+					}
+					move_origin_x = min_x;
+					move_origin_y = min_y;
+					move_grab_offset_x = gx - min_x;
+					move_grab_offset_y = gy - min_y;
+					current_floating_x = min_x;
+					current_floating_y = min_y;
+					selection_state = SelectionState::Moving;
+					return;
+				}
+			}
+
+			// Start new selection (or will deselect on release if not dragged)
+			selection_box.start_x = gx;
+			selection_box.start_y = gy;
+			selection_box.current_x = gx;
+			selection_box.current_y = gy;
+			selection_state = SelectionState::Selecting;
+		} else if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && selection_state == SelectionState::Selecting) {
+			selection_box.current_x = gx;
+			selection_box.current_y = gy;
+		} else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && selection_state == SelectionState::Selecting) {
+			selection_box.current_x = gx;
+			selection_box.current_y = gy;
+			ImVec2 drag_delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+			float dist = std::hypot(drag_delta.x, drag_delta.y);
+			int dx = std::abs(selection_box.current_x - selection_box.start_x);
+			int dy = std::abs(selection_box.current_y - selection_box.start_y);
+
+			if (dist < 6.0f || (dx == 0 && dy == 0)) {
+				deselect();
+			} else {
+				int min_x = selection_box.min_x();
+				int min_y = selection_box.min_y();
+				int max_x = selection_box.max_x();
+				int max_y = selection_box.max_y();
+				selection_box.start_x = min_x;
+				selection_box.start_y = min_y;
+				selection_box.current_x = max_x;
+				selection_box.current_y = max_y;
+				selection_state = SelectionState::Selected;
+			}
+		} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+			deselect();
+		}
+		return;
 	}
 
 	bool is_shift = io.KeyShift;
@@ -816,6 +1824,8 @@ void UI::render_header(ImGuiIO& io) {
 	ImGui::Text("FPS: %.1f (%.3f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
 	ImGui::Text("Active cells: %u", Grid::get_changed_cells());
 	ImGui::Separator();
+	render_selection_controls();
+	ImGui::Separator();
 }
 
 void UI::render_sim_content() {
@@ -861,20 +1871,8 @@ void UI::render_sim_content() {
 	}
 
 	ImGui::Separator();
-	ImGui::Text("Brush Settings:");
-	ImGui::SliderInt("Brush Size", &mouse_size, 1, 512);
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Adjust brush width.");
-	}
-
-	const char* shape_names[] = {"Square", "Circle"};
-	int current_shape = static_cast<int>(brush_shape);
-	if (ImGui::Combo("Brush Shape", &current_shape, shape_names, IM_ARRAYSIZE(shape_names))) {
-		brush_shape = static_cast<BrushShape>(current_shape);
-	}
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Select brush shape (Square or Circle).");
-	}
+	render_selection_controls();
+	ImGui::Separator();
 
 	std::vector<MaterialDefinition>& materials = MaterialManager::get_materials();
 
@@ -1850,36 +2848,27 @@ void UI::render_advanced_options() {
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		ImGui::Text("Simulation Quality Preset");
-		QualityPreset q = Grid::get_quality_preset();
+		ImGui::Text("Simulation Engine");
+		ProcessingMode q = Grid::get_processing_mode();
 
-		if (ImGui::RadioButton("Slow (Accuracy)", q == QualityPreset::Slow)) {
-			Grid::set_quality_preset(QualityPreset::Slow);
+		if (ImGui::RadioButton("CPU (Multithreaded)", q == ProcessingMode::CPU)) {
+			Grid::set_processing_mode(ProcessingMode::CPU);
 			ConfigManager::save();
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Slow but accurate. Ideal for precise cellular automata (e.g. Sierpinski triangles).");
-		}
-
-		if (ImGui::RadioButton("Fast (Multithreaded)", q == QualityPreset::Fast)) {
-			Grid::set_quality_preset(QualityPreset::Fast);
-			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Fast multithreaded simulation. Ideal for fast physics simulations (e.g. sand, fire, etc.)");
+			ImGui::SetTooltip("Multithreaded CPU simulation across configurable worker threads.");
 		}
 
 		bool gpu_avail = Vulkan::is_available();
 		if (!gpu_avail) {
 			ImGui::BeginDisabled();
 		}
-		if (ImGui::RadioButton("Fastest (GPU)", q == QualityPreset::GPU)) {
-			Grid::set_quality_preset(QualityPreset::GPU);
+		if (ImGui::RadioButton("GPU (Vulkan)", q == ProcessingMode::GPU)) {
+			Grid::set_processing_mode(ProcessingMode::GPU);
 			ConfigManager::save();
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Fastest simulation using hardware-accelerated GPU using Vulkan compute shaders.");
+			ImGui::SetTooltip("Hardware-accelerated simulation using Vulkan compute shaders.");
 		}
 		if (!gpu_avail) {
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -1889,7 +2878,7 @@ void UI::render_advanced_options() {
 			ImGui::EndDisabled();
 		}
 
-		if (q == QualityPreset::Fast) {
+		if (q == ProcessingMode::CPU) {
 			ImGui::Spacing();
 			ImGui::Separator();
 			ImGui::Spacing();
@@ -1906,7 +2895,7 @@ void UI::render_advanced_options() {
 			}
 		}
 
-		if (q == QualityPreset::GPU && Vulkan::is_available()) {
+		if (q == ProcessingMode::GPU && gpu_avail) {
 			ImGui::Spacing();
 			ImGui::Separator();
 			ImGui::Spacing();
@@ -1917,7 +2906,8 @@ void UI::render_advanced_options() {
 				ConfigManager::save();
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Stops the slow unpause but increases idle power usage.");
+				ImGui::SetTooltip("Stops the GPU from slowing down to save power when idle. Makes unpausing instant "
+								  "after a few seconds of being paused. Increases idle power usage.");
 			}
 		}
 
@@ -1935,7 +2925,7 @@ void UI::render_shortcuts() {
 		ImGui::Text("Simulation:");
 		ImGui::BulletText("Space: Toggle simulation");
 		ImGui::BulletText("F: Step simulation by one frame");
-		ImGui::BulletText("R: Clear grid");
+		ImGui::BulletText("Ctrl + Shift + R / Ctrl + Shift + Delete: Clear grid");
 
 		ImGui::Spacing();
 		ImGui::Text("General:");
@@ -1943,7 +2933,25 @@ void UI::render_shortcuts() {
 		ImGui::BulletText("Ctrl + Z: Undo last action");
 		ImGui::BulletText("Ctrl + Y / Ctrl + Shift + Z: Redo action");
 		ImGui::BulletText("F11: Toggle fullscreen");
-		ImGui::BulletText("Escape: Quit");
+		ImGui::BulletText("Escape: Cancel selection/paste/move, or Quit");
+
+		ImGui::Spacing();
+		ImGui::Text("Tools & Selection:");
+		ImGui::BulletText("B: Switch to Brush tool");
+		ImGui::BulletText("S: Switch to Select tool");
+		ImGui::BulletText("Left Mouse Drag (Select mode): Select box region");
+		ImGui::BulletText("Left Mouse Drag (inside box): Move selected cells");
+		ImGui::BulletText("Left Mouse Drag (handles): Resize selection (corners & midpoints)");
+		ImGui::BulletText("R: Rotate selection 90° clockwise");
+		ImGui::BulletText("Shift + R: Rotate selection 90° counter-clockwise");
+		ImGui::BulletText("Ctrl + C: Copy selected cells to clipboard");
+		ImGui::BulletText("Ctrl + X: Cut selected cells to clipboard");
+		ImGui::BulletText("Ctrl + V: Paste clipboard at cursor (Left click to stamp)");
+		ImGui::BulletText("Ctrl + D: Duplicate selected cells");
+		ImGui::BulletText("Ctrl + F: Fill selected cells with selected material");
+		ImGui::BulletText("Delete / Backspace: Delete selected cells");
+		ImGui::BulletText("Arrow Keys (Shift for 10x): Nudge selected cells");
+		ImGui::BulletText("Escape / Right Click: Deselect / Cancel move or paste");
 
 		ImGui::Spacing();
 		ImGui::Text("Grid:");

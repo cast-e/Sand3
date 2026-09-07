@@ -22,6 +22,9 @@ void UndoManager::push_snapshot(const std::string& action_name) {
 	snap.materials = MaterialManager::get_materials();
 	snap.selected_id = UI::get_selected_id();
 	snap.action_name = action_name;
+	snap.tool_mode = UI::get_tool_mode();
+	snap.selection_state = UI::get_selection_state();
+	snap.selection_box = UI::get_selection_box();
 
 	history.push_back(snap);
 	if (history.size() > MAX_HISTORY) {
@@ -55,6 +58,7 @@ void UndoManager::undo() {
 	if (!exists) {
 		UI::set_selected_id(snap.selected_id);
 	}
+	UI::restore_selection_state(snap.tool_mode, snap.selection_state, snap.selection_box);
 }
 
 void UndoManager::redo() {
@@ -78,6 +82,7 @@ void UndoManager::redo() {
 	if (!exists) {
 		UI::set_selected_id(snap.selected_id);
 	}
+	UI::restore_selection_state(snap.tool_mode, snap.selection_state, snap.selection_box);
 }
 
 void UndoManager::clear() {

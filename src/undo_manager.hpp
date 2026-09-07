@@ -7,12 +7,16 @@
 #include <vector>
 
 #include "material_manager.hpp"
+#include "ui.hpp"
 
 struct UndoSnapshot {
 	std::vector<uint8_t> grid_materials;
 	std::vector<MaterialDefinition> materials;
 	int selected_id = -1;
 	std::string action_name;
+	ToolMode tool_mode = ToolMode::Brush;
+	SelectionState selection_state = SelectionState::None;
+	SelectionBox selection_box = {};
 };
 
 class UndoManager {

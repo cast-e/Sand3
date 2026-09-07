@@ -14,9 +14,9 @@ struct Config {
 
 	bool vsync = false;
 	uint32_t target_fps = 500;
-	uint32_t quality_preset = 1;
+	uint32_t processing_mode = 0;
 	uint32_t thread_count = NUM_STRIPS_Y / 2;
-	bool prevent_downclock = false;
+	bool prevent_downclock = true;
 };
 
 class ConfigManager {
