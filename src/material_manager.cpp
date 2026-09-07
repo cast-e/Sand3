@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include "grid.hpp"
+#include "vulkan.hpp"
 
 namespace fs = std::filesystem;
 
@@ -381,6 +382,10 @@ void MaterialManager::update_material_color(uint8_t id, const MaterialDefinition
 	materials[idx].color = mat.color;
 	runtime_materials[idx].packed_color = pack_color(mat.color);
 
+	if (Vulkan::is_available()) {
+		Vulkan::update_rules();
+	}
+
 	Grid::draw_material(id);
 }
 
@@ -571,6 +576,13 @@ void MaterialManager::rebuild_compiled_rules() {
 		}
 
 		runtime_materials[m.id] = rm;
+	}
+
+	if (Vulkan::is_available()) {
+		Vulkan::update_rules();
+		if (Grid::get_quality_preset() == QualityPreset::GPU) {
+			Vulkan::refresh_display();
+		}
 	}
 }
 

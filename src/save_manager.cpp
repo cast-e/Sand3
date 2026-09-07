@@ -208,6 +208,9 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 			Grid::set_cell(x, y, block_raw[k]);
 		}
 	}
+	if (Grid::get_quality_preset() == QualityPreset::GPU) {
+		Grid::sync_to_gpu();
+	}
 	UndoManager::init();
 	return true;
 }

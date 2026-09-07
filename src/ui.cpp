@@ -18,6 +18,7 @@
 #include "save_manager.hpp"
 #include "set_manager.hpp"
 #include "undo_manager.hpp"
+#include "vulkan.hpp"
 #include "window.hpp"
 
 namespace fs = std::filesystem;
@@ -714,8 +715,8 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		ui_compact = !ui_compact;
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_R)) {
-		UndoManager::push_snapshot("Clear Grid");
 		Grid::clear();
+		UndoManager::push_snapshot("Clear Grid");
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
 		target_zoom *= 1.2f;
@@ -855,6 +856,7 @@ void UI::render_sim_content() {
 
 	if (ImGui::Button("Clear Grid", ImVec2(-1, 30))) {
 		Grid::clear();
+		UndoManager::push_snapshot("Clear Grid");
 	}
 	if (ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("Clears all cells on the grid.");
@@ -1216,7 +1218,6 @@ void UI::render_material_editor() {
 				}
 				rebuild_needed = true;
 				unsaved_changes = true;
-				ImGui::PopStyleColor(3);
 				ImGui::EndGroup();
 				ImGui::EndChild();
 				ImGui::PopID();
@@ -1859,8 +1860,7 @@ void UI::render_advanced_options() {
 			ConfigManager::save();
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Total accuracy for precise cellular automata (e.g. Sierpinski triangles or other fractal patterns).");
+			ImGui::SetTooltip("Slow but accurate. Ideal for precise cellular automata (e.g. Sierpinski triangles).");
 		}
 
 		if (ImGui::RadioButton("Fast (Multithreaded)", q == QualityPreset::Fast)) {
@@ -1872,25 +1872,55 @@ void UI::render_advanced_options() {
 				"Fast multithreaded simulation. Ideal for fast physics simulations (e.g. sand, fire, etc.)");
 		}
 
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		bool mt_active = (q != QualityPreset::Slow);
-		if (!mt_active) {
+		bool gpu_avail = Vulkan::is_available();
+		if (!gpu_avail) {
 			ImGui::BeginDisabled();
 		}
-		int thread_count = static_cast<int>(Grid::get_thread_count());
-		if (ImGui::SliderInt("Active Threads", &thread_count, 1, NUM_STRIPS_Y / 2)) {
-			Grid::configure_threads(static_cast<uint32_t>(thread_count));
+		if (ImGui::RadioButton("Fastest (GPU)", q == QualityPreset::GPU)) {
+			Grid::set_quality_preset(QualityPreset::GPU);
 			ConfigManager::save();
 		}
-		if (ImGui::IsItemHovered() && mt_active) {
-			ImGui::SetTooltip("Sets the size of the worker thread pool. Automatically set to the maximum number of\n"
-							  "parallelizable strips.");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Fastest simulation using hardware-accelerated GPU using Vulkan compute shaders.");
 		}
-		if (!mt_active) {
+		if (!gpu_avail) {
+			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+				ImGui::SetTooltip(
+					"GPU is not available. Please ensure you have a Vulkan-compatible GPU and drivers installed.");
+			}
 			ImGui::EndDisabled();
+		}
+
+		if (q == QualityPreset::Fast) {
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			int thread_count = static_cast<int>(Grid::get_thread_count());
+			if (ImGui::SliderInt("Active Threads", &thread_count, 1, NUM_STRIPS_Y / 2)) {
+				Grid::configure_threads(static_cast<uint32_t>(thread_count));
+				ConfigManager::save();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Sets the size of the worker thread pool. Automatically set to the maximum number of\n"
+					"parallelizable strips.");
+			}
+		}
+
+		if (q == QualityPreset::GPU && Vulkan::is_available()) {
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			bool prevent_downclock = Vulkan::is_prevent_downclock_enabled();
+			if (ImGui::Checkbox("Stop Downclocking", &prevent_downclock)) {
+				Vulkan::set_prevent_downclock(prevent_downclock);
+				ConfigManager::save();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Stops the slow unpause but increases idle power usage.");
+			}
 		}
 
 		ImGui::EndTabItem();

@@ -32,12 +32,19 @@ int main() {
 
 		Grid::draw();
 
-		if (UI::should_update() || UI::should_step()) {
+		bool running = (UI::should_update() || UI::should_step());
+		bool desired_vsync = running ? Window::get_vsync() : true;
+		static int active_vsync = -1;
+		if (active_vsync != static_cast<int>(desired_vsync)) {
+			active_vsync = static_cast<int>(desired_vsync);
+			SDL_SetRenderVSync(Window::get_renderer(), desired_vsync ? 1 : 0);
+		}
+
+		if (running) {
 			Grid::update();
 			UI::reset_step();
-			SDL_SetRenderVSync(Window::get_renderer(), Window::get_vsync());
 		} else {
-			SDL_SetRenderVSync(Window::get_renderer(), true);
+			Grid::keep_awake_gpu();
 		}
 
 		ImGui::Render();

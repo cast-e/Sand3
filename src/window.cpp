@@ -7,7 +7,9 @@
 #include <imgui_impl_sdlrenderer3.h>
 
 #include "const.hpp"
+#include "grid.hpp"
 #include "icon.h"
+#include "vulkan.hpp"
 
 SDL_Window* Window::window = nullptr;
 SDL_Renderer* Window::renderer = nullptr;
@@ -71,7 +73,15 @@ void Window::shutdown() {
 }
 
 void Window::present() {
-	SDL_UpdateTexture(texture, nullptr, buffer.data(), SIM_WIDTH * 4);
+	const void* pixels = buffer.data();
+	if (Grid::get_quality_preset() == QualityPreset::GPU && Vulkan::is_available()) {
+		uint32_t* gpu_pixels = Vulkan::get_display_buffer();
+		if (gpu_pixels) {
+			pixels = gpu_pixels;
+		}
+	}
+
+	SDL_UpdateTexture(texture, nullptr, pixels, SIM_WIDTH * 4);
 	SDL_RenderClear(renderer);
 	SDL_RenderTexture(renderer, texture, nullptr, &dst_rect);
 
@@ -115,7 +125,15 @@ void Window::present() {
 
 SDL_Window* Window::get_window() { return window; }
 SDL_Renderer* Window::get_renderer() { return renderer; }
-uint32_t* Window::get_buffer() { return buffer.data(); }
+uint32_t* Window::get_buffer() {
+	if (Grid::get_quality_preset() == QualityPreset::GPU && Vulkan::is_available()) {
+		uint32_t* gpu_pixels = Vulkan::get_display_buffer();
+		if (gpu_pixels) {
+			return gpu_pixels;
+		}
+	}
+	return buffer.data();
+}
 
 uint64_t Window::get_frame_count() { return frame_count; }
 

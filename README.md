@@ -8,6 +8,7 @@
 - Material editor for creating up to 255 materials with custom color and rules.
 - 5x5 neighborhood rules for complex behaviours and patterns.
 - Smooth zoom and panning controls for easy navigation.
+- Hardware-accelerated GPU simulation using Vulkan compute shaders for high performance.
 - Optimized multithreaded and single-threaded simulation for best performance on any device.
 - Multiplatform support (Windows, Linux).
 - Step-by-step simulation for debugging rules.
@@ -123,3 +124,5 @@ All dependencies are included as a submodule in the "third-party/" directory.
 - [nlohmann_json](https://github.com/nlohmann/json) - Modern JSON for C++.
 - [SDL3](https://github.com/libsdl-org/SDL) - Simple DirectMedia Layer.
 - [imgui](https://github.com/ocornut/imgui) - Dear ImGui.
+- [volk](https://github.com/zeux/volk) - Meta-loader for Vulkan API.
+- [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) - Vulkan API header files.

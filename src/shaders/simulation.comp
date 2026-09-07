@@ -1,0 +1,265 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    uint pass_type;    // 0 = simulation phase, 1 = render & finalize
+    uint phase_x;      // 0..4
+    uint phase_y;      // 0..4
+    uint frame_count;
+    uint sim_width;
+    uint sim_height;
+    uint reverse_x;    // 0 or 1
+    uint reverse_y;    // 0 or 1
+} pc;
+
+struct GpuRuleVariant {
+    uint when_bits[200]; // 25 neighbors * 8 uints (256-bit bitset)
+    uint then_val[25];   // 25 neighbor targets (255 = unchanged)
+    uint when_wildcard;  // bitmask of wildcard neighbors (all 256 bits set)
+    uint pad[6];         // align to 928 bytes
+};
+
+struct GpuRule {
+    uint variant_start;
+    uint variant_count;
+    uint chance_scaled; // 0..100000 (100000 = 100%)
+    uint pad;
+};
+
+struct GpuMaterial {
+    uint rule_start;
+    uint rule_count;
+    uint color;
+    uint pad;
+};
+
+layout(std430, set = 0, binding = 0) buffer CurrentGrid {
+    uint current_cells[];
+};
+
+layout(std430, set = 0, binding = 1) buffer NextGrid {
+    uint next_cells[];
+};
+
+layout(std430, set = 0, binding = 2) readonly buffer RulesBuffer {
+    GpuMaterial materials[256];
+    uint total_rules;
+    uint total_variants;
+    uint pad0;
+    uint pad1;
+    GpuRule rules[2048];
+    GpuRuleVariant variants[4096];
+};
+
+layout(std430, set = 0, binding = 3) writeonly buffer DisplayBuffer {
+    uint display_pixels[];
+};
+
+layout(std430, set = 0, binding = 4) buffer StatsBuffer {
+    uint changed_cells;
+};
+
+const uint perms[24] = uint[24](
+    0x3210u, 0x2310u, 0x3120u, 0x1320u, 0x2130u, 0x1230u,
+    0x3201u, 0x2301u, 0x3021u, 0x0321u, 0x2031u, 0x0231u,
+    0x3102u, 0x1302u, 0x3012u, 0x0312u, 0x1032u, 0x0132u,
+    0x2103u, 0x1203u, 0x2013u, 0x0213u, 0x1023u, 0x0123u
+);
+
+uint xorshift32(inout uint state) {
+    state ^= state << 13u;
+    state ^= state >> 17u;
+    state ^= state << 5u;
+    return state;
+}
+
+bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uint local_changed) {
+    // 1. Condition check ("when"):
+    for (uint n_id = 0u; n_id < 25u; ++n_id) {
+        if ((variants[var_idx].when_wildcard & (1u << n_id)) != 0u) {
+            continue;
+        }
+
+        int dx = int(n_id % 5u) - 2;
+        int dy = int(n_id / 5u) - 2;
+        int nx = int(cx) + dx;
+        int ny = int(cy) + dy;
+        if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
+            return false;
+        }
+        uint n_idx = uint(ny) * pc.sim_width + uint(nx);
+        uint n_mat = current_cells[n_idx] & 0xFFu;
+        uint word = variants[var_idx].when_bits[n_id * 8u + (n_mat >> 5u)];
+        if ((word & (1u << (n_mat & 31u))) == 0u) {
+            return false;
+        }
+    }
+
+    // 2. Conflict check ("updated" in next_cells):
+    for (uint n_id = 0u; n_id < 25u; ++n_id) {
+        uint then_m = variants[var_idx].then_val[n_id];
+        if (then_m != 255u) {
+            int dx = int(n_id % 5u) - 2;
+            int dy = int(n_id / 5u) - 2;
+            int nx = int(cx) + dx;
+            int ny = int(cy) + dy;
+            if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
+                return false;
+            }
+            uint target_id = uint(ny) * pc.sim_width + uint(nx);
+            if (((next_cells[target_id] >> 8u) & 1u) != 0u) {
+                return false;
+            }
+        }
+    }
+
+    // 3. Apply changes:
+    next_cells[center_id] = (next_cells[center_id] & 0xFFu) | (1u << 8u);
+    for (uint n_id = 0u; n_id < 25u; ++n_id) {
+        uint then_m = variants[var_idx].then_val[n_id];
+        if (then_m != 255u) {
+            int dx = int(n_id % 5u) - 2;
+            int dy = int(n_id / 5u) - 2;
+            int nx = int(cx) + dx;
+            int ny = int(cy) + dy;
+            if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
+                continue;
+            }
+            uint target_id = uint(ny) * pc.sim_width + uint(nx);
+            next_cells[target_id] = then_m | (1u << 8u);
+            if (target_id != center_id) {
+                local_changed++;
+            }
+        }
+    }
+    return true;
+}
+
+void main() {
+    if (pc.pass_type == 1u) {
+        // Render and finalize pass
+        uint cx = gl_GlobalInvocationID.x;
+        uint cy = gl_GlobalInvocationID.y;
+        if (cx >= pc.sim_width || cy >= pc.sim_height) {
+            return;
+        }
+
+        uint idx = cy * pc.sim_width + cx;
+        uint next_val = next_cells[idx];
+        uint mat_id = next_val & 0xFFu;
+
+        // Reset updated flag for current_cells to be ready for next frame
+        current_cells[idx] = mat_id;
+
+        // Output RGBA packed color
+        display_pixels[idx] = materials[mat_id].color;
+        return;
+    }
+
+    if (pc.pass_type == 2u) {
+        // Empty GPU loop to keep GPU active and prevent downclocking
+        uint dummy = gl_GlobalInvocationID.x ^ (gl_GlobalInvocationID.y << 16u);
+        for (uint i = 0u; i < 2000u; ++i) {
+            dummy = (dummy * 1664525u + 1013904223u) ^ i;
+        }
+        if (dummy == 0x12345678u) {
+            atomicAdd(changed_cells, dummy);
+        }
+        return;
+    }
+
+    // Pass 0: Simulation phase
+    uint kx = gl_GlobalInvocationID.x;
+    uint ky = gl_GlobalInvocationID.y;
+
+    uint num_kx = (pc.sim_width + 4u - pc.phase_x) / 5u;
+    uint num_ky = (pc.sim_height + 4u - pc.phase_y) / 5u;
+
+    if (kx >= num_kx || ky >= num_ky) {
+        return;
+    }
+
+    uint active_kx = (pc.reverse_x != 0u) ? ((num_kx - 1u) - kx) : kx;
+    uint active_ky = (pc.reverse_y != 0u) ? ((num_ky - 1u) - ky) : ky;
+
+    uint cx = pc.phase_x + active_kx * 5u;
+    uint cy = pc.phase_y + active_ky * 5u;
+
+    if (cx >= pc.sim_width || cy >= pc.sim_height) {
+        return;
+    }
+
+    uint center_id = cy * pc.sim_width + cx;
+    if (((next_cells[center_id] >> 8u) & 1u) != 0u) {
+        return;
+    }
+
+    uint center_mat = current_cells[center_id] & 0xFFu;
+    if (center_mat == 0u) {
+        return;
+    }
+
+    GpuMaterial mat = materials[center_mat];
+    if (mat.rule_count == 0u) {
+        return;
+    }
+
+    uint rng = (cx + 123456789u) * (cy + 123456789u) * (pc.frame_count + 123456789u);
+    if (rng == 0u) rng = 123456789u;
+
+    uint local_changed = 0u;
+
+    for (uint r = 0u; r < mat.rule_count; ++r) {
+        GpuRule rule = rules[mat.rule_start + r];
+        if ((xorshift32(rng) % 100000u) >= rule.chance_scaled) {
+            continue;
+        }
+
+        uint num_variants = rule.variant_count;
+        bool match_found = false;
+
+        if (num_variants == 1u) {
+            if (try_apply_variant(rule.variant_start, cx, cy, center_id, local_changed)) {
+                match_found = true;
+            }
+        } else if (num_variants == 2u) {
+            uint start_id = xorshift32(rng) & 1u;
+            for (uint step = 0u; step < 2u; ++step) {
+                uint var_idx = rule.variant_start + ((start_id + step) & 1u);
+                if (try_apply_variant(var_idx, cx, cy, center_id, local_changed)) {
+                    match_found = true;
+                    break;
+                }
+            }
+        } else if (num_variants == 4u) {
+            uint perm_id = xorshift32(rng) % 24u;
+            uint p = perms[perm_id];
+            for (uint step = 0u; step < 4u; ++step) {
+                uint v_sub = (p >> (step * 4u)) & 0xFu;
+                uint var_idx = rule.variant_start + v_sub;
+                if (try_apply_variant(var_idx, cx, cy, center_id, local_changed)) {
+                    match_found = true;
+                    break;
+                }
+            }
+        } else {
+            uint start_id = xorshift32(rng) % num_variants;
+            for (uint step = 0u; step < num_variants; ++step) {
+                uint var_idx = rule.variant_start + ((start_id + step) % num_variants);
+                if (try_apply_variant(var_idx, cx, cy, center_id, local_changed)) {
+                    match_found = true;
+                    break;
+                }
+            }
+        }
+
+        if (match_found) {
+            break;
+        }
+    }
+
+    if (local_changed > 0u) {
+        atomicAdd(changed_cells, local_changed);
+    }
+}

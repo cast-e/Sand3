@@ -7,9 +7,10 @@
 
 #include "grid.hpp"
 #include "sanitize.hpp"
+#include "vulkan.hpp"
 #include "window.hpp"
 
-AppConfig ConfigManager::config;
+Config ConfigManager::config;
 
 void ConfigManager::load() {
 	std::ifstream in("config.ini");
@@ -45,18 +46,20 @@ void ConfigManager::load() {
 				else if (key == "height")
 					config.window_height = std::stoi(val);
 				else if (key == "maximized")
-					config.is_maximized = (val == "true" || val == "1");
+					config.is_maximized = val == "true";
 				else if (key == "fullscreen")
-					config.is_fullscreen = (val == "true" || val == "1");
+					config.is_fullscreen = val == "true";
 			} else if (section == "Advanced") {
 				if (key == "vsync")
-					config.vsync = (val == "true" || val == "1");
+					config.vsync = val == "true";
 				else if (key == "target_fps")
 					config.target_fps = std::stoi(val);
 				else if (key == "quality_preset")
 					config.quality_preset = std::stoi(val);
 				else if (key == "thread_count")
 					config.thread_count = std::stoi(val);
+				else if (key == "prevent_downclock")
+					config.prevent_downclock = val == "true";
 			}
 		}
 
@@ -68,6 +71,7 @@ void ConfigManager::load() {
 	Window::set_target_fps(static_cast<uint32_t>(config.target_fps));
 	Grid::set_quality_preset(static_cast<QualityPreset>(config.quality_preset));
 	Grid::configure_threads(static_cast<uint32_t>(config.thread_count));
+	Vulkan::set_prevent_downclock(config.prevent_downclock);
 
 	// Apply window geometry
 	SDL_Window* window = Window::get_window();
@@ -95,14 +99,16 @@ void ConfigManager::save() {
 
 		if (!config.is_maximized && !config.is_fullscreen) {
 			SDL_GetWindowPosition(window, &config.window_x, &config.window_y);
-			SDL_GetWindowSize(window, &config.window_width, &config.window_height);
+			SDL_GetWindowSize(window, reinterpret_cast<int*>(&config.window_width),
+							  reinterpret_cast<int*>(&config.window_height));
 		}
 	}
 
 	config.vsync = Window::get_vsync();
-	config.target_fps = static_cast<int>(Window::get_target_fps());
-	config.quality_preset = static_cast<int>(Grid::get_quality_preset());
-	config.thread_count = static_cast<int>(Grid::get_thread_count());
+	config.target_fps = static_cast<uint32_t>(Window::get_target_fps());
+	config.quality_preset = static_cast<uint32_t>(Grid::get_quality_preset());
+	config.thread_count = static_cast<uint32_t>(Grid::get_thread_count());
+	config.prevent_downclock = Vulkan::is_prevent_downclock_enabled();
 
 	std::ofstream out("config.ini");
 	if (out.is_open()) {
@@ -119,6 +125,7 @@ void ConfigManager::save() {
 		out << "target_fps = " << config.target_fps << "\n";
 		out << "quality_preset = " << config.quality_preset << "\n";
 		out << "thread_count = " << config.thread_count << "\n";
+		out << "prevent_downclock = " << (config.prevent_downclock ? "true" : "false") << "\n";
 
 		out.close();
 	}

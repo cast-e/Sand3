@@ -36,12 +36,16 @@ set(SOURCES
     config_manager.hpp
     config_manager.cpp
 
+    vulkan.hpp
+    vulkan.cpp
+
     main.cpp
 )
 
 set(RESOURCES
     roboto.h
     icon.h
+    shaders/simulation_spv.h
 )
 
 find_package(Threads REQUIRED)
@@ -52,7 +56,8 @@ endif()
 
 add_executable(sand3 ${SOURCES} ${RESOURCES})
 
-target_link_libraries(sand3 PRIVATE fmt::fmt SDL3::SDL3-static Threads::Threads imgui nlohmann_json::nlohmann_json)
+target_link_libraries(sand3 PRIVATE fmt::fmt SDL3::SDL3-static Threads::Threads imgui nlohmann_json::nlohmann_json volk::volk)
+target_include_directories(sand3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} "${PROJECT_SOURCE_DIR}/third_party/volk")
 
 if(WIN32)
     target_link_options(sand3 PRIVATE -static)

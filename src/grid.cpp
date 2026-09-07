@@ -5,6 +5,7 @@
 
 #include "const.hpp"
 #include "material_manager.hpp"
+#include "vulkan.hpp"
 #include "window.hpp"
 
 thread_local uint32_t xorshift32_state = 123456789;
@@ -26,6 +27,8 @@ std::unique_ptr<std::barrier<>> Grid::phase_barrier;
 std::vector<std::thread> Grid::workers;
 std::atomic<bool> Grid::shutdown_flag{false};
 std::atomic<uint32_t> Grid::frame_changed{0};
+bool Grid::gpu_data_valid = true;
+bool Grid::gpu_needs_upload = true;
 
 void Grid::init() {
 	num_active_threads = NUM_STRIPS_Y / 2;
@@ -33,6 +36,11 @@ void Grid::init() {
 	next_cells.resize(SIM_SIZE);
 
 	clear();
+
+	// Initialize GPU simulation (Vulkan)
+	if (Vulkan::init(SIM_WIDTH, SIM_HEIGHT)) {
+		sync_to_gpu();
+	}
 
 	shutdown_flag = false;
 	frame_changed = 0;
@@ -48,6 +56,8 @@ void Grid::init() {
 }
 
 void Grid::shutdown() {
+	Vulkan::shutdown();
+
 	shutdown_flag = true;
 	if (start_barrier) {
 		start_barrier->arrive_and_wait();
@@ -61,6 +71,57 @@ void Grid::shutdown() {
 	start_barrier.reset();
 	done_barrier.reset();
 	phase_barrier.reset();
+}
+
+void Grid::set_quality_preset(QualityPreset preset) {
+	if (preset == quality_preset) {
+		return;
+	}
+	if (quality_preset == QualityPreset::GPU && preset != QualityPreset::GPU) {
+		if (!gpu_data_valid) {
+			sync_from_gpu();
+		}
+	} else if (preset == QualityPreset::GPU) {
+		sync_to_gpu();
+		if (Vulkan::is_available()) {
+			Vulkan::refresh_display();
+		}
+	}
+	quality_preset = preset;
+}
+
+void Grid::sync_to_gpu() {
+	if (!Vulkan::is_available()) {
+		return;
+	}
+	std::vector<uint8_t> mat_data(SIM_SIZE);
+	for (uint32_t i = 0; i < SIM_SIZE; ++i) {
+		mat_data[i] = cells[i].material;
+	}
+	Vulkan::upload_grid(mat_data.data(), SIM_SIZE);
+	gpu_needs_upload = false;
+	gpu_data_valid = true;
+}
+
+void Grid::sync_from_gpu() {
+	if (!Vulkan::is_available()) {
+		return;
+	}
+	std::vector<uint8_t> mat_data(SIM_SIZE);
+	Vulkan::download_grid(mat_data.data(), SIM_SIZE);
+	for (uint32_t i = 0; i < SIM_SIZE; ++i) {
+		cells[i].material = mat_data[i];
+		cells[i].updated = true;
+	}
+	gpu_data_valid = true;
+	gpu_needs_upload = false;
+	Grid::draw();
+}
+
+void Grid::keep_awake_gpu() {
+	if (quality_preset == QualityPreset::GPU && Vulkan::is_available() && Vulkan::is_prevent_downclock_enabled()) {
+		Vulkan::keep_awake();
+	}
 }
 
 void Grid::configure_threads(uint32_t thread_count) {
@@ -348,6 +409,20 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 void Grid::update() {
 	frame_changed = 0;
 
+	if (quality_preset == QualityPreset::GPU && Vulkan::is_available()) {
+		Vulkan::step(static_cast<uint32_t>(Window::get_frame_count()), gpu_needs_upload);
+		uint32_t* staging = Vulkan::get_staging_buffer();
+		if (staging) {
+			for (size_t i = 0; i < SIM_SIZE; ++i) {
+				cells[i].material = static_cast<uint8_t>(staging[i] & 0xFFu);
+			}
+		}
+		gpu_data_valid = true;
+		gpu_needs_upload = false;
+		frame_changed = Vulkan::get_changed_cells();
+		return;
+	}
+
 	next_cells = cells;
 	for (auto& cell : next_cells) {
 		cell.updated = false;
@@ -364,6 +439,10 @@ void Grid::update() {
 }
 
 void Grid::draw() {
+	if (quality_preset == QualityPreset::GPU && Vulkan::is_available()) {
+		return;
+	}
+
 	uint32_t* buffer = Window::get_buffer();
 
 	for (uint32_t id = 0; id < SIM_SIZE; ++id) {
@@ -376,6 +455,11 @@ void Grid::draw() {
 }
 
 void Grid::draw_material(uint32_t id) {
+	if (quality_preset == QualityPreset::GPU && Vulkan::is_available()) {
+		Vulkan::refresh_display();
+		return;
+	}
+
 	uint32_t* buffer = Window::get_buffer();
 
 	for (uint32_t i = 0; i < SIM_SIZE; ++i) {
@@ -386,9 +470,23 @@ void Grid::draw_material(uint32_t id) {
 }
 
 uint8_t& Grid::get_cell(const uint32_t x, const uint32_t y) { return cells[y * SIM_WIDTH + x].material; }
+
 void Grid::set_cell(const uint32_t x, const uint32_t y, uint8_t cell) {
-	cells[y * SIM_WIDTH + x].material = cell;
-	cells[y * SIM_WIDTH + x].updated = true;
+	const uint32_t idx = y * SIM_WIDTH + x;
+	cells[idx].material = cell;
+	cells[idx].updated = true;
+	gpu_needs_upload = true;
+
+	if (quality_preset == QualityPreset::GPU && Vulkan::is_available()) {
+		uint32_t* disp = Vulkan::get_display_buffer();
+		if (disp) {
+			disp[idx] = MaterialManager::get_runtime_material(cell).packed_color;
+		}
+		uint32_t* staging = Vulkan::get_staging_buffer();
+		if (staging) {
+			staging[idx] = static_cast<uint32_t>(cell);
+		}
+	}
 }
 
 uint32_t Grid::get_changed_cells() { return frame_changed.load(); }
@@ -401,6 +499,9 @@ void Grid::remap_materials(const std::vector<uint8_t>& old_to_new) {
 			cell.material = 0;
 		}
 	}
+	if (quality_preset == QualityPreset::GPU && Vulkan::is_available()) {
+		sync_to_gpu();
+	}
 }
 
 void Grid::clear() {
@@ -408,4 +509,41 @@ void Grid::clear() {
 		cell.material = 0;
 		cell.updated = true;
 	}
+	if (Vulkan::is_available()) {
+		Vulkan::clear();
+	}
+	gpu_needs_upload = false;
+	gpu_data_valid = true;
+}
+
+void Grid::restore_state(const std::vector<uint8_t>& state) {
+	if (state.size() != SIM_SIZE) {
+		return;
+	}
+
+	for (size_t i = 0; i < SIM_SIZE; ++i) {
+		cells[i].material = state[i];
+		cells[i].updated = true;
+	}
+
+	if (quality_preset == QualityPreset::GPU && Vulkan::is_available()) {
+		Vulkan::upload_grid(state.data(), SIM_SIZE);
+		gpu_needs_upload = false;
+		gpu_data_valid = true;
+	} else {
+		uint32_t* buffer = Window::get_buffer();
+		if (buffer) {
+			for (size_t i = 0; i < SIM_SIZE; ++i) {
+				buffer[i] = MaterialManager::get_runtime_material(state[i]).packed_color;
+			}
+		}
+	}
+}
+
+std::vector<uint8_t> Grid::get_all_cells() {
+	std::vector<uint8_t> state(SIM_SIZE);
+	for (size_t i = 0; i < SIM_SIZE; ++i) {
+		state[i] = cells[i].material;
+	}
+	return state;
 }

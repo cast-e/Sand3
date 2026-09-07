@@ -22,3 +22,5 @@ target_sources(imgui PRIVATE
 target_link_libraries(imgui PUBLIC SDL3::SDL3)
 
 add_subdirectory(fmt)
+add_subdirectory(Vulkan-Headers EXCLUDE_FROM_ALL)
+add_subdirectory(volk EXCLUDE_FROM_ALL)

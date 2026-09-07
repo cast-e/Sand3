@@ -1,6 +1,5 @@
 #include "undo_manager.hpp"
 
-#include "const.hpp"
 #include "grid.hpp"
 #include "ui.hpp"
 
@@ -8,25 +7,9 @@ std::deque<UndoSnapshot> UndoManager::history;
 int UndoManager::current_index = -1;
 std::vector<uint8_t> UndoManager::pending_grid_state;
 
-static std::vector<uint8_t> capture_grid_state() {
-	std::vector<uint8_t> state(SIM_SIZE);
-	for (uint32_t y = 0; y < SIM_HEIGHT; ++y) {
-		for (uint32_t x = 0; x < SIM_WIDTH; ++x) {
-			state[y * SIM_WIDTH + x] = Grid::get_cell(x, y);
-		}
-	}
-	return state;
-}
+static std::vector<uint8_t> capture_grid_state() { return Grid::get_all_cells(); }
 
-static void restore_grid_state(const std::vector<uint8_t>& state) {
-	if (state.size() != SIM_SIZE)
-		return;
-	for (uint32_t y = 0; y < SIM_HEIGHT; ++y) {
-		for (uint32_t x = 0; x < SIM_WIDTH; ++x) {
-			Grid::set_cell(x, y, state[y * SIM_WIDTH + x]);
-		}
-	}
-}
+static void restore_grid_state(const std::vector<uint8_t>& state) { Grid::restore_state(state); }
 
 void UndoManager::init() {
 	clear();
@@ -58,14 +41,11 @@ bool UndoManager::can_redo() { return current_index >= 0 && current_index < stat
 void UndoManager::undo() {
 	if (!can_undo())
 		return;
-	if (history[current_index].action_name == "Resume Simulation") {
-		UI::pause_simulation();
-	}
 	current_index--;
 	const auto& snap = history[current_index];
-	restore_grid_state(snap.grid_materials);
 	MaterialManager::get_materials() = snap.materials;
 	MaterialManager::rebuild_compiled_rules();
+	restore_grid_state(snap.grid_materials);
 
 	uint8_t current_id = UI::get_selected_id();
 	bool exists = false;
@@ -85,9 +65,9 @@ void UndoManager::redo() {
 		return;
 	current_index++;
 	const auto& snap = history[current_index];
-	restore_grid_state(snap.grid_materials);
 	MaterialManager::get_materials() = snap.materials;
 	MaterialManager::rebuild_compiled_rules();
+	restore_grid_state(snap.grid_materials);
 
 	uint8_t current_id = UI::get_selected_id();
 	bool exists = false;

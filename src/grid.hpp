@@ -26,7 +26,7 @@ inline constexpr std::array<int, NEIGHBOR_COUNT> compute_neighbor_offsets() {
 	return offsets;
 }
 
-enum class QualityPreset : int { Slow = 0, Fast = 1 };
+enum class QualityPreset : int { Slow = 0, Fast = 1, GPU = 2 };
 
 class Grid {
 public:
@@ -55,14 +55,20 @@ public:
 	static uint8_t& get_cell(const uint32_t x, const uint32_t y);
 	static void set_cell(const uint32_t x, const uint32_t y, const uint8_t material);
 	static void clear();
+	static void restore_state(const std::vector<uint8_t>& state);
+	static std::vector<uint8_t> get_all_cells();
 
 	static QualityPreset get_quality_preset() { return quality_preset; }
-	static void set_quality_preset(QualityPreset preset) { quality_preset = preset; }
+	static void set_quality_preset(QualityPreset preset);
 
 	static uint32_t get_thread_count() { return num_active_threads; }
 
 	static uint32_t get_changed_cells();
 	static void remap_materials(const std::vector<uint8_t>& old_to_new);
+
+	static void sync_to_gpu();
+	static void sync_from_gpu();
+	static void keep_awake_gpu();
 
 private:
 	static constexpr std::array<int, NEIGHBOR_COUNT> neighbor_offsets = compute_neighbor_offsets();
@@ -78,6 +84,9 @@ private:
 	static std::vector<std::thread> workers;
 	static std::atomic<bool> shutdown_flag;
 	static std::atomic<uint32_t> frame_changed;
+
+	static bool gpu_data_valid;
+	static bool gpu_needs_upload;
 
 	static constexpr uint32_t BG_COLOR = (255u << 24) | (64u << 16) | (64u << 8) | 64u;
 };
