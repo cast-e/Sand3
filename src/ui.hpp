@@ -19,6 +19,7 @@ public:
 
 	static void trigger_exit() { show_exit_popup = true; }
 	static bool should_update() { return update; }
+	static void pause_simulation() { update = false; }
 	static bool should_step() { return step_frame; }
 	static void reset_step() { step_frame = false; }
 

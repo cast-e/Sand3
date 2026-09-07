@@ -706,7 +706,6 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_F) && !update) {
 		step_frame = true;
-		UndoManager::push_snapshot("Step Simulation");
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_T)) {
 		brush_shape = static_cast<BrushShape>((static_cast<int>(brush_shape) + 1) % static_cast<int>(BrushShape::Size));
@@ -831,7 +830,6 @@ void UI::render_sim_content() {
 	} else {
 		if (ImGui::Button("Resume", ImVec2(-1, 30))) {
 			update = true;
-			UndoManager::push_snapshot("Resume Simulation");
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Resumes the simulation.");
