@@ -840,21 +840,21 @@ void UI::render_selection_controls() {
 		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.85f, 1.0f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 0.95f, 1.0f));
 	}
-	if (ImGui::Button("Select (S)", ImVec2(tool_w, 28.0f))) {
+	if (ImGui::Button("Select (C)", ImVec2(tool_w, 28.0f))) {
 		set_tool_mode(ToolMode::Select);
 	}
 	if (is_select) {
 		ImGui::PopStyleColor(2);
 	}
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Box selection and move/copy/paste tool (S)");
+		ImGui::SetTooltip("Box selection and move/copy/paste tool (Ctrl+C)");
 
 	if (current_tool == ToolMode::Brush) {
 		ImGui::Spacing();
 		ImGui::Text("Brush Settings:");
 		ImGui::SliderInt("Brush Size", &mouse_size, 1, 512);
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Adjust brush width (Scroll wheel or [ / ]).");
+			ImGui::SetTooltip("Adjust brush width (Scroll wheel).");
 		}
 
 		const char* shape_names[] = {"Square", "Circle"};
@@ -863,7 +863,7 @@ void UI::render_selection_controls() {
 			brush_shape = static_cast<BrushShape>(current_shape);
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Select brush shape (Square or Circle, toggle with Tab/T).");
+			ImGui::SetTooltip("Select brush shape (Square or Circle, toggle with T).");
 		}
 	} else if (current_tool == ToolMode::Select) {
 		ImGui::Spacing();
@@ -916,7 +916,7 @@ void UI::render_selection_controls() {
 		if (!has_selection)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Clear selected cells on grid (Del)");
+			ImGui::SetTooltip("Clear selected cells on grid (Delete)");
 
 		// Row 3: Fill and Deselect
 		if (!has_selection)
@@ -927,7 +927,7 @@ void UI::render_selection_controls() {
 		if (!has_selection)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Fill selected cells with current material (Ctrl+F)");
+			ImGui::SetTooltip("Fill selected cells with current material (F or Ctrl+F)");
 
 		ImGui::SameLine();
 		if (!has_selection)
@@ -945,24 +945,24 @@ void UI::render_selection_controls() {
 						   (selection_state == SelectionState::Pasting && !clipboard.empty()));
 		if (!can_rotate)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Rotate CW (R)##Sel", btn_sz)) {
+		if (ImGui::Button("Rotate CW (Q)##Sel", btn_sz)) {
 			rotate_selection(true);
 		}
 		if (!can_rotate)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Rotate selection 90° clockwise (R)");
+			ImGui::SetTooltip("Rotate selection 90° clockwise (Q)");
 
 		ImGui::SameLine();
 		if (!can_rotate)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Rotate CCW (Shift+R)##Sel", btn_sz)) {
+		if (ImGui::Button("Rotate CCW (E)##Sel", btn_sz)) {
 			rotate_selection(false);
 		}
 		if (!can_rotate)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Rotate selection 90° counter-clockwise (Shift+R)");
+			ImGui::SetTooltip("Rotate selection 90° counter-clockwise (E)");
 
 		// Row 5: Transparent Checkbox
 		ImGui::Spacing();
@@ -976,10 +976,10 @@ void UI::render_selection_controls() {
 		if (has_selection) {
 			ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "Selected: %dx%d (%d cells)", selection_box.width(),
 							   selection_box.height(), selection_box.width() * selection_box.height());
-			ImGui::TextDisabled("Drag inside: Move | Drag handles: Resize | Arrows: Nudge | R: Rotate");
+			ImGui::TextDisabled("Drag inside: Move | Drag handles: Resize | Arrows: Nudge | Q/E: Rotate");
 		} else if (selection_state == SelectionState::Pasting) {
 			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
-							   "Pasting: %dx%d (Click canvas to stamp, R to rotate, Esc to cancel)", clipboard.width,
+							   "Pasting: %dx%d (Click canvas to stamp, Q/E to rotate, Esc to cancel)", clipboard.width,
 							   clipboard.height);
 		} else {
 			ImGui::TextDisabled("Click & drag to select area | Click canvas to deselect");
@@ -1321,6 +1321,39 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 	}
 
 	float dt = std::min(io.DeltaTime, 0.1f);
+	if (dt <= 0.0f)
+		dt = 0.016f;
+
+	// WASD camera movement
+	if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt) {
+		float pan_dir_x = 0.0f;
+		float pan_dir_y = 0.0f;
+		if (ImGui::IsKeyDown(ImGuiKey_W))
+			pan_dir_y -= 1.0f;
+		if (ImGui::IsKeyDown(ImGuiKey_S))
+			pan_dir_y += 1.0f;
+		if (ImGui::IsKeyDown(ImGuiKey_A))
+			pan_dir_x -= 1.0f;
+		if (ImGui::IsKeyDown(ImGuiKey_D))
+			pan_dir_x += 1.0f;
+
+		if (pan_dir_x != 0.0f || pan_dir_y != 0.0f) {
+			float len = std::hypot(pan_dir_x, pan_dir_y);
+			if (len > 0.0f) {
+				pan_dir_x /= len;
+				pan_dir_y /= len;
+			}
+			float speed = 800.0f / std::max(zoom, 0.05f);
+			if (io.KeyShift) {
+				speed *= 2.5f;
+			}
+			target_pan_x += pan_dir_x * speed * dt;
+			target_pan_y += pan_dir_y * speed * dt;
+			target_pan_x = std::clamp(target_pan_x, -static_cast<float>(SIM_WIDTH), static_cast<float>(SIM_WIDTH));
+			target_pan_y = std::clamp(target_pan_y, -static_cast<float>(SIM_HEIGHT), static_cast<float>(SIM_HEIGHT));
+		}
+	}
+
 	float t = 1.0f - std::exp(-10.0f * dt);
 	zoom = zoom + (target_zoom - zoom) * t;
 	pan_x = pan_x + (target_pan_x - pan_x) * t;
@@ -1333,6 +1366,8 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 		ImVec2 delta = io.MouseDelta;
 		target_pan_x -= delta.x * (SIM_WIDTH / w_new);
 		target_pan_y -= delta.y * (SIM_HEIGHT / h_new);
+		target_pan_x = std::clamp(target_pan_x, -static_cast<float>(SIM_WIDTH), static_cast<float>(SIM_WIDTH));
+		target_pan_y = std::clamp(target_pan_y, -static_cast<float>(SIM_HEIGHT), static_cast<float>(SIM_HEIGHT));
 	}
 
 	pan_x = pan_x + (target_pan_x - pan_x) * 0.15f;
@@ -1355,51 +1390,50 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 	if (io.WantTextInput)
 		return;
 
-	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, true)) {
 		if (io.KeyShift) {
 			UndoManager::redo();
 		} else {
 			UndoManager::undo();
 		}
-	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
+	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, true)) {
 		UndoManager::redo();
-	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false)) {
-		copy_selection();
+	}
+
+	// Tool mode & Copy / Cut / Paste / Duplicate
+	if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+		if (io.KeyCtrl) {
+			if (current_tool != ToolMode::Select) {
+				set_tool_mode(ToolMode::Select);
+			}
+			copy_selection();
+		} else {
+			set_tool_mode(ToolMode::Select);
+		}
 	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+		if (selection_state != SelectionState::Selected) {
+			set_tool_mode(ToolMode::Select);
+		}
 		cut_selection();
 	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
-		paste_clipboard();
-	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) {
-		if (selection_state == SelectionState::Selected) {
-			copy_selection();
-			paste_clipboard();
+		if (selection_state != SelectionState::Selected) {
+			set_tool_mode(ToolMode::Select);
 		}
-	}
-
-	// Tool mode toggles
-	if (ImGui::IsKeyPressed(ImGuiKey_B)) {
+		paste_clipboard();
+	} else if (ImGui::IsKeyPressed(ImGuiKey_B, false)) {
 		set_tool_mode(ToolMode::Brush);
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_S)) {
-		set_tool_mode(ToolMode::Select);
-	}
-
-	// Delete selection
-	if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+	} else if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
 		if (selection_state == SelectionState::Selected) {
 			fill_selection(0);
 			deselect();
 		}
-	}
-
-	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) {
-		if (selection_state == SelectionState::Selected) {
+	} else if (!update && !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, true)) {
+		step_frame = true;
+	} else if (selection_state == SelectionState::Selected) {
+		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, true)) {
 			fill_selection(selected_id);
 		}
-	}
 
-	// Nudge selection with arrow keys
-	if (selection_state == SelectionState::Selected) {
 		int nudge_x = 0;
 		int nudge_y = 0;
 		int step = io.KeyShift ? 10 : 1;
@@ -1436,8 +1470,8 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 				selection_box.start_y = new_y;
 				selection_box.current_x = new_x + bw - 1;
 				selection_box.current_y = new_y + bh - 1;
-				UndoManager::push_snapshot("Nudge Selection");
 			}
+			UndoManager::push_snapshot("Nudge Selection");
 		}
 	}
 
@@ -1446,48 +1480,46 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		if (update) {
 			UndoManager::push_snapshot("Resume Simulation");
 		}
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_F) && !update && !io.KeyCtrl) {
-		step_frame = true;
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_T)) {
+	} else if (ImGui::IsKeyPressed(ImGuiKey_T, false)) {
 		brush_shape = static_cast<BrushShape>((static_cast<int>(brush_shape) + 1) % static_cast<int>(BrushShape::Size));
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_Q)) {
+	} else if (ImGui::IsKeyPressed(ImGuiKey_V, false)) {
 		ui_compact = !ui_compact;
 	}
-	// Rotate selection: R for 90° Clockwise, Shift+R for 90° Counter-Clockwise
-	if (ImGui::IsKeyPressed(ImGuiKey_R, false) && !io.KeyCtrl) {
-		bool can_rotate = (selection_state == SelectionState::Selected ||
-						   selection_state == SelectionState::Moving ||
-						   (selection_state == SelectionState::Pasting && !clipboard.empty()));
-		if (can_rotate) {
-			rotate_selection(!io.KeyShift);
+
+	// Rotate selection: Q for Clockwise, E for Counter-Clockwise
+	bool can_rotate = (selection_state == SelectionState::Selected || selection_state == SelectionState::Moving ||
+					   (selection_state == SelectionState::Pasting && !clipboard.empty()));
+	if (can_rotate) {
+		if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
+			rotate_selection(true);
+		}
+		if (ImGui::IsKeyPressed(ImGuiKey_E, false)) {
+			rotate_selection(false);
 		}
 	}
-	// Clear grid: Ctrl + Shift + R or Ctrl + Shift + Delete
-	if ((io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_R, false)) ||
+
+	// Reset / Clear grid: R (plain R or with Ctrl/Shift)
+	if (ImGui::IsKeyPressed(ImGuiKey_R, false) ||
 		(io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Delete, false))) {
 		Grid::clear();
 		UndoManager::push_snapshot("Clear Grid");
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
+	} else if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
 		target_zoom *= 1.2f;
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) {
+	} else if (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) {
 		target_zoom /= 1.2f;
 	}
+
 	uint8_t material_count = MaterialManager::get_material_count();
 	for (int i = 1; i <= 9; ++i) {
 		if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_1 + (i - 1))) && material_count > i) {
 			selected_id = MaterialManager::get_materials()[i].id;
 		}
 	}
-	if (ImGui::IsKeyPressed(ImGuiKey_F11)) {
+
+	if (ImGui::IsKeyPressed(ImGuiKey_F11, false)) {
 		SDL_Window* window = Window::get_window();
 		SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
-	}
-	if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+	} else if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
 		if (selection_state == SelectionState::Moving) {
 			deselect();
 		} else if (selection_state == SelectionState::Pasting) {
@@ -1862,12 +1894,12 @@ void UI::render_sim_content() {
 
 	ImGui::Spacing();
 
-	if (ImGui::Button("Clear Grid", ImVec2(-1, 30))) {
+	if (ImGui::Button("Clear Grid (R)", ImVec2(-1, 30))) {
 		Grid::clear();
 		UndoManager::push_snapshot("Clear Grid");
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Clears all cells on the grid.");
+		ImGui::SetTooltip("Clears all cells on the grid (R).");
 	}
 
 	ImGui::Separator();
@@ -2924,12 +2956,18 @@ void UI::render_shortcuts() {
 
 		ImGui::Text("Simulation:");
 		ImGui::BulletText("Space: Toggle simulation");
-		ImGui::BulletText("F: Step simulation by one frame");
-		ImGui::BulletText("Ctrl + Shift + R / Ctrl + Shift + Delete: Clear grid");
+		ImGui::BulletText("F: Step simulation by one frame (when paused)");
+		ImGui::BulletText("R: Clear / Reset grid");
+
+		ImGui::Spacing();
+		ImGui::Text("Camera:");
+		ImGui::BulletText("W / A / S / D: Move camera (Hold Shift for fast pan)");
+		ImGui::BulletText("Middle Mouse Drag: Pan camera");
+		ImGui::BulletText("Shift + Scroll / PageUp/PageDown / +/-: Zoom camera");
 
 		ImGui::Spacing();
 		ImGui::Text("General:");
-		ImGui::BulletText("Q: Toggle compact UI");
+		ImGui::BulletText("V: Toggle compact UI");
 		ImGui::BulletText("Ctrl + Z: Undo last action");
 		ImGui::BulletText("Ctrl + Y / Ctrl + Shift + Z: Redo action");
 		ImGui::BulletText("F11: Toggle fullscreen");
@@ -2938,18 +2976,16 @@ void UI::render_shortcuts() {
 		ImGui::Spacing();
 		ImGui::Text("Tools & Selection:");
 		ImGui::BulletText("B: Switch to Brush tool");
-		ImGui::BulletText("S: Switch to Select tool");
 		ImGui::BulletText("Left Mouse Drag (Select mode): Select box region");
 		ImGui::BulletText("Left Mouse Drag (inside box): Move selected cells");
 		ImGui::BulletText("Left Mouse Drag (handles): Resize selection (corners & midpoints)");
-		ImGui::BulletText("R: Rotate selection 90° clockwise");
-		ImGui::BulletText("Shift + R: Rotate selection 90° counter-clockwise");
-		ImGui::BulletText("Ctrl + C: Copy selected cells to clipboard");
+		ImGui::BulletText("Q: Rotate selection 90° clockwise");
+		ImGui::BulletText("E: Rotate selection 90° counter-clockwise");
+		ImGui::BulletText("Ctrl + C: Copy selection");
 		ImGui::BulletText("Ctrl + X: Cut selected cells to clipboard");
 		ImGui::BulletText("Ctrl + V: Paste clipboard at cursor (Left click to stamp)");
-		ImGui::BulletText("Ctrl + D: Duplicate selected cells");
 		ImGui::BulletText("Ctrl + F: Fill selected cells with selected material");
-		ImGui::BulletText("Delete / Backspace: Delete selected cells");
+		ImGui::BulletText("Delete: Delete selected cells");
 		ImGui::BulletText("Arrow Keys (Shift for 10x): Nudge selected cells");
 		ImGui::BulletText("Escape / Right Click: Deselect / Cancel move or paste");
 
@@ -2962,14 +2998,10 @@ void UI::render_shortcuts() {
 		ImGui::BulletText("Middle Mouse Button: Eyedropper (pick material)");
 
 		ImGui::Text("Brush:");
+		ImGui::BulletText("C: Switch to Selection tool");
 		ImGui::BulletText("T: Next brush shape (Square, Circle)");
 		ImGui::BulletText("Scroll Up/Down: Adjust brush size");
 		ImGui::BulletText("Ctrl + Scroll Up/Down: Faster brush size adjust");
-		ImGui::Spacing();
-
-		ImGui::Text("Camera:");
-		ImGui::BulletText("Shift + Middle Mouse Drag: Pan camera");
-		ImGui::BulletText("Shift + Scroll / PageUp/PageDown / +/-: Zoom camera");
 		ImGui::Spacing();
 
 		ImGui::Text("Rule Grid:");

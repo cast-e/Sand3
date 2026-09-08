@@ -1,7 +1,7 @@
 # Sand3
  Fast celullar automaton with fully customizable materials and rules.
 
-![Sand3](./sand3.png)
+![Sand3](./src/resources/sand3.png)
 
 ## Features
 
@@ -23,15 +23,36 @@
 
 ### Simulation
 - **Space**: Toggle simulation
-- **F**: Step simulation by one frame
-- **R**: Clear grid
+- **F**: Step simulation by one frame (when paused)
+- **R**: Clear / Reset grid
+
+### Camera
+- **W / A / S / D**: Move camera (Hold Shift for fast pan)
+- **Shift Middle Mouse Drag**: Pan camera
+- **Shift + Scroll / PageUp / PageDown / +/-**: Zoom camera
 
 ### General
-- **Q**: Toggle compact UI
+- **V**: Toggle compact UI
 - **Ctrl + Z**: Undo last action
-- **Ctrl + Y** / **Ctrl + Shift + Z**: Redo action
+- **Ctrl + Y / Ctrl + Shift + Z**: Redo action
 - **F11**: Toggle fullscreen
-- **Escape**: Quit
+- **Escape**: Cancel selection/paste/move, or Quit
+
+### Tools & Selection
+- **B**: Switch to Brush tool
+- **Left Mouse Drag (Select mode)**: Select box region
+- **Left Mouse Drag (inside box)**: Move selected cells
+- **Left Mouse Drag (handles)**: Resize selection (corners & midpoints)
+- **Q**: Rotate selection 90º clockwise
+- **E**: Rotate selection 90º counter-clockwise
+- **Ctrl + C**: Copy selection
+- **Ctrl + X**: Cut selected cells to clipboard
+- **Ctrl + V**: Paste clipboard at cursor (Left click to stamp)
+- **Ctrl + X**: Cut selected cells to clipboard
+- **Ctrl + F**: Fill selected cells with selected material
+- **Delete**: Delete selected cells
+- **Arrow Keys (Shift for 10x)**: Nudge selected cells
+- **Escape / Right Click**: Deselect / Cancel move or paste
 
 ### Grid
 - **Left Mouse Drag**: Draw material
@@ -41,13 +62,10 @@
 - **Middle Click**: Eyedropper (pick material)
 
 ### Brush
-- **Mouse Wheel**: Adjust brush size
-- **Ctrl + Mouse Wheel**: Faster brush size adjust
-- **T**: Next brush shape (square, circle)
-
-### Camera
-- **Shift + Middle Mouse Drag**: Pan camera
-- **Shift + Mouse Wheel / PageUp / PageDown / +/-**: Zoom camera
+- **C**: Switch to Selection tool
+- **T**: Next brush shape (Square, Circle)
+- **Scroll Up/Down**: Adjust brush size
+- **Ctrl + Scroll Up/Down**: Faster brush size adjust
 
 ### Rule Grid
 - **Left Click**: Select material(s)
