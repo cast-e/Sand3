@@ -27,6 +27,9 @@ set(SOURCES
     grid.hpp
     grid.cpp
 
+    icon_manager.hpp
+    icon_manager.cpp
+
     ui.hpp
     ui.cpp
 
@@ -36,6 +39,9 @@ set(SOURCES
     config_manager.hpp
     config_manager.cpp
 
+    shortcut_manager.hpp
+    shortcut_manager.cpp
+
     vulkan.hpp
     vulkan.cpp
 
@@ -43,6 +49,7 @@ set(SOURCES
 )
 
 set(RESOURCES
+    resources/icons_embedded.h
     resources/roboto_ttf.h
     resources/sand3_png.h
     resources/simulation_spv.h

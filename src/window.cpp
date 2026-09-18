@@ -6,7 +6,6 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
 
-#include "const.hpp"
 #include "grid.hpp"
 #include "resources/sand3_png.h"
 #include "vulkan.hpp"
@@ -43,13 +42,14 @@ void Window::init(uint32_t t_width, uint32_t t_height) {
 		fmt::print("SDL_CreateRenderer failed: {}\n", SDL_GetError());
 	}
 
-	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, SIM_WIDTH, SIM_HEIGHT);
+	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, Grid::get_width(),
+								Grid::get_height());
 	if (texture == NULL) {
 		fmt::print("SDL_CreateTexture failed: {}\n", SDL_GetError());
 	}
 	SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
 
-	buffer.resize(SIM_SIZE, 0);
+	buffer.resize(Grid::get_size(), 0);
 }
 
 void Window::shutdown() {
@@ -73,6 +73,19 @@ void Window::shutdown() {
 	SDL_Quit();
 }
 
+void Window::resize_texture_and_buffer(uint32_t new_width, uint32_t new_height) {
+	if (texture) {
+		SDL_DestroyTexture(texture);
+		texture = nullptr;
+	}
+	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, new_width, new_height);
+	if (texture == NULL) {
+		fmt::print("SDL_CreateTexture failed: {}\n", SDL_GetError());
+	}
+	SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
+	buffer.assign(new_width * new_height, 0);
+}
+
 void Window::present() {
 	const void* pixels = buffer.data();
 	if (Grid::get_processing_mode() == ProcessingMode::GPU && Vulkan::is_available()) {
@@ -82,7 +95,7 @@ void Window::present() {
 		}
 	}
 
-	SDL_UpdateTexture(texture, nullptr, pixels, SIM_WIDTH * 4);
+	SDL_UpdateTexture(texture, nullptr, pixels, Grid::get_width() * 4);
 	SDL_RenderClear(renderer);
 	SDL_RenderTexture(renderer, texture, nullptr, &dst_rect);
 

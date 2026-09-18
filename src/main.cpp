@@ -12,8 +12,8 @@
 int main() {
 	Window::init(1600, 900);
 	Grid::init();
-	UI::init();
 	ConfigManager::load();
+	UI::init();
 
 	SetManager::set_current_set(SetManager::get_sets()[0]);
 

@@ -408,6 +408,97 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 	return true;
 }
 
+bool Vulkan::resize(uint32_t new_width, uint32_t new_height) {
+	if (!initialized || !device) {
+		return false;
+	}
+
+	vkDeviceWaitIdle(device);
+
+	width = new_width;
+	height = new_height;
+
+	// Destroy old size-dependent buffers
+	if (staging_memory) {
+		vkUnmapMemory(device, staging_memory);
+		vkFreeMemory(device, staging_memory, nullptr);
+		vkDestroyBuffer(device, staging_buffer, nullptr);
+		staging_memory = VK_NULL_HANDLE;
+		staging_buffer = VK_NULL_HANDLE;
+		staging_mapped = nullptr;
+	}
+	if (display_memory) {
+		vkUnmapMemory(device, display_memory);
+		vkFreeMemory(device, display_memory, nullptr);
+		vkDestroyBuffer(device, display_buffer, nullptr);
+		display_memory = VK_NULL_HANDLE;
+		display_buffer = VK_NULL_HANDLE;
+		display_mapped = nullptr;
+	}
+	if (next_grid_memory) {
+		vkFreeMemory(device, next_grid_memory, nullptr);
+		vkDestroyBuffer(device, next_grid_buffer, nullptr);
+		next_grid_memory = VK_NULL_HANDLE;
+		next_grid_buffer = VK_NULL_HANDLE;
+	}
+	if (current_grid_memory) {
+		vkFreeMemory(device, current_grid_memory, nullptr);
+		vkDestroyBuffer(device, current_grid_buffer, nullptr);
+		current_grid_memory = VK_NULL_HANDLE;
+		current_grid_buffer = VK_NULL_HANDLE;
+	}
+
+	// Recreate size-dependent buffers
+	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
+
+	create_buffer(grid_size_bytes,
+				  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+					  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+				  VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, current_grid_buffer,
+				  current_grid_memory);
+
+	create_buffer(
+		grid_size_bytes,
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, next_grid_buffer, next_grid_memory);
+
+	create_buffer(
+		grid_size_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, display_buffer, display_memory);
+	vkMapMemory(device, display_memory, 0, grid_size_bytes, 0, reinterpret_cast<void**>(&display_mapped));
+	std::memset(display_mapped, 0, grid_size_bytes);
+
+	create_buffer(
+		grid_size_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging_buffer, staging_memory);
+	vkMapMemory(device, staging_memory, 0, grid_size_bytes, 0, reinterpret_cast<void**>(&staging_mapped));
+	std::memset(staging_mapped, 0, grid_size_bytes);
+
+	// Update descriptor set
+	std::array<VkDescriptorBufferInfo, 5> buffer_infos{};
+	buffer_infos[0] = {current_grid_buffer, 0, grid_size_bytes};
+	buffer_infos[1] = {next_grid_buffer, 0, grid_size_bytes};
+	buffer_infos[2] = {rules_buffer, 0, sizeof(GpuRulesHeader)};
+	buffer_infos[3] = {display_buffer, 0, grid_size_bytes};
+	buffer_infos[4] = {stats_buffer, 0, sizeof(uint32_t) * 4};
+
+	std::array<VkWriteDescriptorSet, 5> writes{};
+	for (uint32_t i = 0; i < 5; ++i) {
+		writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[i].dstSet = descriptor_set;
+		writes[i].dstBinding = i;
+		writes[i].dstArrayElement = 0;
+		writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		writes[i].descriptorCount = 1;
+		writes[i].pBufferInfo = &buffer_infos[i];
+	}
+
+	vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+	return true;
+}
+
 void Vulkan::shutdown() {
 	if (!instance) {
 		return;

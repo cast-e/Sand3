@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -7,6 +8,11 @@ struct SetMetadata {
 	std::string name;
 	std::string author;
 	std::string description;
+	uint32_t width = 0;           // Recommended canvas width (0 = inherit/use global)
+	uint32_t height = 0;          // Recommended canvas height (0 = inherit/use global)
+	uint32_t target_fps = 0;      // Target FPS for this set (0 = inherit/use global)
+	int processing_mode = -1;     // Recommended mode (-1 = inherit, 0 = CPU, 1 = GPU)
+	bool prevent_downclock = true;
 };
 
 class SetManager {

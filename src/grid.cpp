@@ -17,6 +17,10 @@ inline static uint32_t xorshift32() {
 	return xorshift32_state;
 }
 
+uint32_t Grid::width = DEFAULT_SIM_WIDTH;
+uint32_t Grid::height = DEFAULT_SIM_HEIGHT;
+std::array<int, NEIGHBOR_COUNT> Grid::neighbor_offsets{};
+
 ProcessingMode Grid::processing_mode = ProcessingMode::CPU;
 std::vector<Cell> Grid::cells;
 std::vector<Cell> Grid::next_cells;
@@ -30,15 +34,25 @@ std::atomic<uint32_t> Grid::frame_changed{0};
 bool Grid::gpu_data_valid = true;
 bool Grid::gpu_needs_upload = true;
 
+void Grid::recompute_neighbor_offsets() {
+	for (int dy = -static_cast<int>(HALF_NEIGHBOR_SIZE); dy <= static_cast<int>(HALF_NEIGHBOR_SIZE); ++dy) {
+		for (int dx = -static_cast<int>(HALF_NEIGHBOR_SIZE); dx <= static_cast<int>(HALF_NEIGHBOR_SIZE); ++dx) {
+			uint32_t idx = (dy + HALF_NEIGHBOR_SIZE) * NEIGHBOR_SIZE + (dx + HALF_NEIGHBOR_SIZE);
+			neighbor_offsets[idx] = dy * static_cast<int>(width) + dx;
+		}
+	}
+}
+
 void Grid::init() {
-	num_active_threads = NUM_STRIPS_Y / 2;
-	cells.resize(SIM_SIZE);
-	next_cells.resize(SIM_SIZE);
+	recompute_neighbor_offsets();
+	num_active_threads = Grid::get_num_strips_y() / 2;
+	cells.resize(Grid::get_size());
+	next_cells.resize(Grid::get_size());
 
 	clear();
 
 	// Initialize GPU simulation (Vulkan)
-	if (Vulkan::init(SIM_WIDTH, SIM_HEIGHT)) {
+	if (Vulkan::init(width, height)) {
 		sync_to_gpu();
 	}
 
@@ -53,6 +67,96 @@ void Grid::init() {
 	for (uint32_t t = 0; t < num_active_threads; ++t) {
 		workers.emplace_back(&Grid::worker_thread, t);
 	}
+}
+
+bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content) {
+	if (new_width == 0 || new_height == 0) {
+		return false;
+	}
+	// Snap to multiple of 16 for GPU workgroup (16x16) and CPU strips (STRIP_HEIGHT=16)
+	new_width = ((new_width + 15) / 16) * 16;
+	new_height = ((new_height + 15) / 16) * 16;
+
+	if (new_width == width && new_height == height) {
+		return true;
+	}
+
+	// 1. If currently using GPU and GPU has updated data, sync down first so CPU has current cells
+	if (processing_mode == ProcessingMode::GPU && !gpu_needs_upload) {
+		sync_from_gpu();
+	}
+
+	// 2. Stop CPU worker threads
+	shutdown_flag = true;
+	if (start_barrier) {
+		start_barrier->arrive_and_wait();
+	}
+	for (auto& worker : workers) {
+		if (worker.joinable()) {
+			worker.join();
+		}
+	}
+	workers.clear();
+	start_barrier.reset();
+	done_barrier.reset();
+	phase_barrier.reset();
+
+	// 3. Prepare new cell buffers
+	std::vector<Cell> new_cells(new_width * new_height, Cell{0, false});
+	if (preserve_content) {
+		uint32_t copy_w = std::min(width, new_width);
+		uint32_t copy_h = std::min(height, new_height);
+		for (uint32_t y = 0; y < copy_h; ++y) {
+			for (uint32_t x = 0; x < copy_w; ++x) {
+				new_cells[y * new_width + x] = cells[y * width + x];
+			}
+		}
+	}
+
+	width = new_width;
+	height = new_height;
+	cells = std::move(new_cells);
+	next_cells.assign(width * height, Cell{0, false});
+
+	// 4. Recompute neighbor offsets for new width
+	recompute_neighbor_offsets();
+
+	// 5. Restart CPU worker threads
+	shutdown_flag = false;
+	frame_changed = 0;
+	uint32_t max_threads = get_num_strips_y() / 2;
+	if (num_active_threads == 0 || num_active_threads > max_threads) {
+		num_active_threads = std::max(1u, max_threads);
+	}
+
+	start_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
+	done_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
+	phase_barrier = std::make_unique<std::barrier<>>(num_active_threads);
+
+	workers.reserve(num_active_threads);
+	for (uint32_t t = 0; t < num_active_threads; ++t) {
+		workers.emplace_back(&Grid::worker_thread, t);
+	}
+
+	// 6. Resize Vulkan buffers
+	if (Vulkan::is_available()) {
+		Vulkan::resize(width, height);
+	}
+
+	// 7. Resize Window texture and buffer
+	Window::resize_texture_and_buffer(width, height);
+
+	// 8. Sync display
+	if (processing_mode == ProcessingMode::GPU) {
+		sync_to_gpu();
+		if (Vulkan::is_available()) {
+			Vulkan::refresh_display();
+		}
+	} else {
+		draw();
+	}
+
+	return true;
 }
 
 void Grid::shutdown() {
@@ -94,11 +198,11 @@ void Grid::sync_to_gpu() {
 	if (!Vulkan::is_available()) {
 		return;
 	}
-	std::vector<uint8_t> mat_data(SIM_SIZE);
-	for (uint32_t i = 0; i < SIM_SIZE; ++i) {
+	std::vector<uint8_t> mat_data(Grid::get_size());
+	for (uint32_t i = 0; i < Grid::get_size(); ++i) {
 		mat_data[i] = cells[i].material;
 	}
-	Vulkan::upload_grid(mat_data.data(), SIM_SIZE);
+	Vulkan::upload_grid(mat_data.data(), Grid::get_size());
 	gpu_needs_upload = false;
 	gpu_data_valid = true;
 }
@@ -107,9 +211,9 @@ void Grid::sync_from_gpu() {
 	if (!Vulkan::is_available()) {
 		return;
 	}
-	std::vector<uint8_t> mat_data(SIM_SIZE);
-	Vulkan::download_grid(mat_data.data(), SIM_SIZE);
-	for (uint32_t i = 0; i < SIM_SIZE; ++i) {
+	std::vector<uint8_t> mat_data(Grid::get_size());
+	Vulkan::download_grid(mat_data.data(), Grid::get_size());
+	for (uint32_t i = 0; i < Grid::get_size(); ++i) {
 		cells[i].material = mat_data[i];
 		cells[i].updated = true;
 	}
@@ -171,8 +275,8 @@ void Grid::worker_thread(const uint32_t thread_id) {
 			const uint32_t target_sy_mod = swap_phases ? (1 - p_id) : p_id;
 
 			uint32_t strip_idx_in_phase = 0;
-			for (int sy_id = 0; sy_id < NUM_STRIPS_Y; ++sy_id) {
-				const uint32_t sy = reverse_y ? (NUM_STRIPS_Y - 1 - sy_id) : sy_id;
+			for (int sy_id = 0; sy_id < Grid::get_num_strips_y(); ++sy_id) {
+				const uint32_t sy = reverse_y ? (Grid::get_num_strips_y() - 1 - sy_id) : sy_id;
 				if (sy % 2 != target_sy_mod) {
 					continue;
 				}
@@ -202,7 +306,7 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 		if (num_variants == 1) {
 			const CompiledRuleVariant& rule = cur.variants[0];
 			if (is_fast_path) {
-				match_found = Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed);
+				match_found = Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed);
 			} else {
 				match_found = Grid::try_apply_rule_safe(rule, cx, cy, local_changed);
 			}
@@ -211,7 +315,7 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 			for (uint32_t step = 0; step < 2; ++step) {
 				const CompiledRuleVariant& rule = cur.variants[(start_id + step) & 1];
 				if (is_fast_path) {
-					if (Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
+					if (Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed)) {
 						match_found = true;
 						break;
 					}
@@ -232,7 +336,7 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 			for (uint32_t step = 0; step < 4; ++step) {
 				const CompiledRuleVariant& rule = cur.variants[perms[perm_id][step]];
 				if (is_fast_path) {
-					if (Grid::try_apply_rule_fast(rule, cy * SIM_WIDTH + cx, local_changed)) {
+					if (Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed)) {
 						match_found = true;
 						break;
 					}
@@ -253,21 +357,22 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 
 void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool reverse_y, uint32_t& local_changed) {
 	const uint32_t y_start = sy * STRIP_HEIGHT;
-	const uint32_t y_end = std::min(SIM_HEIGHT, y_start + STRIP_HEIGHT);
+	const uint32_t y_end = std::min(Grid::get_height(), y_start + STRIP_HEIGHT);
 
 	for (uint32_t y = 0; y < (y_end - y_start); ++y) {
-		for (uint32_t x = 0; x < SIM_WIDTH; ++x) {
-			const uint32_t cx = reverse_x ? (SIM_WIDTH - 1 - x) : x;
+		for (uint32_t x = 0; x < Grid::get_width(); ++x) {
+			const uint32_t cx = reverse_x ? (Grid::get_width() - 1 - x) : x;
 			const uint32_t cy = reverse_y ? (y_end - 1 - y) : (y_start + y);
 
-			if (next_cells[cy * SIM_WIDTH + cx].updated)
+			if (next_cells[cy * Grid::get_width() + cx].updated)
 				continue;
 
-			const auto& rules = MaterialManager::get_runtime_material(cells[cy * SIM_WIDTH + cx].material).rules;
+			const auto& rules =
+				MaterialManager::get_runtime_material(cells[cy * Grid::get_width() + cx].material).rules;
 			if (rules.empty())
 				continue;
 
-			const bool is_fast_path = (cx >= 2 && cx < SIM_WIDTH - 2 && cy >= 2 && cy < SIM_HEIGHT - 2);
+			const bool is_fast_path = (cx >= 2 && cx < Grid::get_width() - 2 && cy >= 2 && cy < Grid::get_height() - 2);
 
 			apply_compiled_rules(rules, cx, cy, is_fast_path, local_changed);
 		}
@@ -319,11 +424,11 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 		const uint32_t tx = x + dx;
 		const uint32_t ty = y + dy;
 
-		if (tx >= SIM_WIDTH || ty >= SIM_HEIGHT) {
+		if (tx >= Grid::get_width() || ty >= Grid::get_height()) {
 			return false;
 		}
 
-		if (!rule.when[n_id].test(cells[ty * SIM_WIDTH + tx].material)) {
+		if (!rule.when[n_id].test(cells[ty * Grid::get_width() + tx].material)) {
 			return false;
 		}
 	}
@@ -335,17 +440,17 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 			const uint32_t tx = x + dx;
 			const uint32_t ty = y + dy;
 
-			if (tx >= SIM_WIDTH || ty >= SIM_HEIGHT) {
+			if (tx >= Grid::get_width() || ty >= Grid::get_height()) {
 				continue;
 			}
 
-			if (next_cells[ty * SIM_WIDTH + tx].updated) {
+			if (next_cells[ty * Grid::get_width() + tx].updated) {
 				return false;
 			}
 		}
 	}
 
-	next_cells[y * SIM_WIDTH + x].updated = true;
+	next_cells[y * Grid::get_width() + x].updated = true;
 	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
 		if (rule.then[n_id] != 255) {
 			const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
@@ -353,11 +458,11 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 			const uint32_t tx = x + dx;
 			const uint32_t ty = y + dy;
 
-			if (tx >= SIM_WIDTH || ty >= SIM_HEIGHT) {
+			if (tx >= Grid::get_width() || ty >= Grid::get_height()) {
 				continue;
 			}
 
-			const uint32_t target_id = ty * SIM_WIDTH + tx;
+			const uint32_t target_id = ty * Grid::get_width() + tx;
 			next_cells[target_id].material = rule.then[n_id];
 			next_cells[target_id].updated = true;
 			if (tx != x || ty != y) {
@@ -375,7 +480,7 @@ void Grid::update() {
 		Vulkan::step(static_cast<uint32_t>(Window::get_frame_count()), gpu_needs_upload);
 		uint32_t* staging = Vulkan::get_staging_buffer();
 		if (staging) {
-			for (size_t i = 0; i < SIM_SIZE; ++i) {
+			for (size_t i = 0; i < Grid::get_size(); ++i) {
 				cells[i].material = static_cast<uint8_t>(staging[i] & 0xFFu);
 			}
 		}
@@ -405,7 +510,7 @@ void Grid::draw() {
 
 	uint32_t* buffer = Window::get_buffer();
 
-	for (uint32_t id = 0; id < SIM_SIZE; ++id) {
+	for (uint32_t id = 0; id < Grid::get_size(); ++id) {
 		if (!cells[id].updated) {
 			continue;
 		}
@@ -422,17 +527,17 @@ void Grid::draw_material(uint32_t id) {
 
 	uint32_t* buffer = Window::get_buffer();
 
-	for (uint32_t i = 0; i < SIM_SIZE; ++i) {
+	for (uint32_t i = 0; i < Grid::get_size(); ++i) {
 		if (cells[i].material == id) {
 			buffer[i] = MaterialManager::get_runtime_material(cells[i].material).packed_color;
 		}
 	}
 }
 
-uint8_t& Grid::get_cell(const uint32_t x, const uint32_t y) { return cells[y * SIM_WIDTH + x].material; }
+uint8_t& Grid::get_cell(const uint32_t x, const uint32_t y) { return cells[y * Grid::get_width() + x].material; }
 
 void Grid::set_cell(const uint32_t x, const uint32_t y, uint8_t cell) {
-	const uint32_t idx = y * SIM_WIDTH + x;
+	const uint32_t idx = y * Grid::get_width() + x;
 	cells[idx].material = cell;
 	cells[idx].updated = true;
 	gpu_needs_upload = true;
@@ -477,23 +582,23 @@ void Grid::clear() {
 }
 
 void Grid::restore_state(const std::vector<uint8_t>& state) {
-	if (state.size() != SIM_SIZE) {
+	if (state.size() != Grid::get_size()) {
 		return;
 	}
 
-	for (size_t i = 0; i < SIM_SIZE; ++i) {
+	for (size_t i = 0; i < Grid::get_size(); ++i) {
 		cells[i].material = state[i];
 		cells[i].updated = true;
 	}
 
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
-		Vulkan::upload_grid(state.data(), SIM_SIZE);
+		Vulkan::upload_grid(state.data(), Grid::get_size());
 		gpu_needs_upload = false;
 		gpu_data_valid = true;
 	} else {
 		uint32_t* buffer = Window::get_buffer();
 		if (buffer) {
-			for (size_t i = 0; i < SIM_SIZE; ++i) {
+			for (size_t i = 0; i < Grid::get_size(); ++i) {
 				buffer[i] = MaterialManager::get_runtime_material(state[i]).packed_color;
 			}
 		}
@@ -501,8 +606,8 @@ void Grid::restore_state(const std::vector<uint8_t>& state) {
 }
 
 std::vector<uint8_t> Grid::get_all_cells() {
-	std::vector<uint8_t> state(SIM_SIZE);
-	for (size_t i = 0; i < SIM_SIZE; ++i) {
+	std::vector<uint8_t> state(Grid::get_size());
+	for (size_t i = 0; i < Grid::get_size(); ++i) {
 		state[i] = cells[i].material;
 	}
 	return state;

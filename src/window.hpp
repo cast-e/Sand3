@@ -12,6 +12,7 @@ public:
 
 	static void init(uint32_t t_width = 1280, uint32_t t_height = 720);
 	static void shutdown();
+	static void resize_texture_and_buffer(uint32_t new_width, uint32_t new_height);
 
 	static void present();
 

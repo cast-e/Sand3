@@ -18,8 +18,15 @@
 - Inherit rules from other materials for easier material creation.
 - Square and circle brushes with support for straight lines and flood fill.
 - Simple undo/redo system to help creating complex saves.
+- Fully customizable keyboard shortcuts and UI theme colors.
+
+## Configuration
+
+All keybinds, graphics settings, simulation backend, and UI theme colors are fully customizable.
+See [CONFIG.md](CONFIG.md) for the complete reference of `config.ini` and `set_config.ini` settings and delta-only saving.
 
 ## Shortcuts
+
 
 ### Simulation
 - **Space**: Toggle simulation
@@ -28,10 +35,11 @@
 
 ### Camera
 - **W / A / S / D**: Move camera (Hold Shift for fast pan)
-- **Shift Middle Mouse Drag**: Pan camera
+- **Middle Mouse Drag**: Pan camera
 - **Shift + Scroll / PageUp / PageDown / +/-**: Zoom camera
 
 ### General
+- **1 - 9**: Quick select material (slots 1 to 9)
 - **V**: Toggle compact UI
 - **Ctrl + Z**: Undo last action
 - **Ctrl + Y / Ctrl + Shift + Z**: Redo action
@@ -43,12 +51,11 @@
 - **Left Mouse Drag (Select mode)**: Select box region
 - **Left Mouse Drag (inside box)**: Move selected cells
 - **Left Mouse Drag (handles)**: Resize selection (corners & midpoints)
-- **Q**: Rotate selection 90º clockwise
-- **E**: Rotate selection 90º counter-clockwise
+- **Q**: Rotate selection 90° clockwise
+- **E**: Rotate selection 90° counter-clockwise
 - **Ctrl + C**: Copy selection
 - **Ctrl + X**: Cut selected cells to clipboard
 - **Ctrl + V**: Paste clipboard at cursor (Left click to stamp)
-- **Ctrl + X**: Cut selected cells to clipboard
 - **Ctrl + F**: Fill selected cells with selected material
 - **Delete**: Delete selected cells
 - **Arrow Keys (Shift for 10x)**: Nudge selected cells
@@ -69,7 +76,7 @@
 
 ### Rule Grid
 - **Left Click**: Select material(s)
-- **Shift + Left Click / Mouse Drag**: Paint copied material(s)
+- **Shift + Left Click / Mouse Drag**: Paint material(s)
 - **Middle Click**: Copy material(s)
 - **Right Click**: Clear cell(s)
 

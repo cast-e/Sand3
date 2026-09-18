@@ -7,6 +7,7 @@
 #include "grid.hpp"
 #include "material_manager.hpp"
 #include "sanitize.hpp"
+#include "ui.hpp"
 #include "undo_manager.hpp"
 
 namespace fs = std::filesystem;
@@ -39,8 +40,13 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 	meta.name = name;
 	meta.author = "";
 	meta.description = "";
+	meta.width = 0;
+	meta.height = 0;
+	meta.target_fps = 0;
+	meta.processing_mode = -1;
+	meta.prevent_downclock = true;
 
-	std::string cfg_path = SETS_DIRECTORY + name + "/set.cfg";
+	std::string cfg_path = SETS_DIRECTORY + name + "/set_config.ini";
 	std::ifstream file(cfg_path);
 	if (!file.is_open()) {
 		return meta;
@@ -49,7 +55,7 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 	std::string line;
 	while (std::getline(file, line)) {
 		std::string trimmed = trim(line);
-		if (trimmed.empty() || trimmed[0] == '#' || trimmed.rfind("//", 0) == 0) {
+		if (trimmed.empty() || trimmed[0] == '#' || trimmed[0] == ';' || trimmed.rfind("//", 0) == 0) {
 			continue;
 		}
 		size_t eq_pos = trimmed.find('=');
@@ -57,11 +63,23 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 			std::string key = trim(trimmed.substr(0, eq_pos));
 			std::string val = trim(trimmed.substr(eq_pos + 1));
 
-			if (key == "author") {
-				meta.author = val;
-			} else if (key == "description") {
-				meta.description = val;
-			}
+			try {
+				if (key == "author") {
+					meta.author = val;
+				} else if (key == "description") {
+					meta.description = val;
+				} else if (key == "width") {
+					meta.width = static_cast<uint32_t>(std::stoul(val));
+				} else if (key == "height") {
+					meta.height = static_cast<uint32_t>(std::stoul(val));
+				} else if (key == "target_fps") {
+					meta.target_fps = static_cast<uint32_t>(std::stoul(val));
+				} else if (key == "processing_mode") {
+					meta.processing_mode = std::stoi(val);
+				} else if (key == "prevent_downclock") {
+					meta.prevent_downclock = (val == "true" || val == "1");
+				}
+			} catch (...) {}
 		}
 	}
 
@@ -71,18 +89,47 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 void SetManager::save_set_metadata(const std::string& name, const SetMetadata& metadata) {
 	std::string set_dir = SETS_DIRECTORY + name;
 	fs::create_directories(set_dir);
-	std::string cfg_path = set_dir + "/set.cfg";
+	std::string cfg_path = set_dir + "/set_config.ini";
+
+	bool has_overrides = !metadata.author.empty() || !metadata.description.empty() || metadata.width > 0 ||
+						 metadata.height > 0 || metadata.target_fps > 0 || metadata.processing_mode >= 0 ||
+						 !metadata.prevent_downclock;
+
+	if (!has_overrides) {
+		// Nothing overridden: remove set_config.ini or leave empty
+		if (fs::exists(cfg_path)) {
+			std::error_code ec;
+			fs::remove(cfg_path, ec);
+		}
+		return;
+	}
 
 	std::ofstream file(cfg_path);
 	if (!file.is_open()) {
 		return;
 	}
 
+	// Only save overridden (non-default) settings
 	if (!metadata.author.empty()) {
 		file << "author = " << metadata.author << "\n";
 	}
 	if (!metadata.description.empty()) {
 		file << "description = " << metadata.description << "\n";
+	}
+	if (metadata.width > 0) {
+		file << "width = " << metadata.width << "\n";
+	}
+	if (metadata.height > 0) {
+		file << "height = " << metadata.height << "\n";
+	}
+	if (metadata.target_fps > 0) {
+		file << "target_fps = " << metadata.target_fps << "\n";
+	}
+	if (metadata.processing_mode >= 0) {
+		file << "processing_mode = " << metadata.processing_mode << "\n";
+	}
+	if (!metadata.prevent_downclock) {
+		file << "prevent_downclock = false\n";
 	}
 }
 
@@ -95,8 +142,18 @@ void SetManager::set_current_set(const std::string& name) {
 	current_metadata = load_set_metadata(name);
 	fs::create_directories(SETS_DIRECTORY + name);
 	MaterialManager::load_all_materials(SETS_DIRECTORY + name);
+
+	// If set specifies custom simulation dimensions, resize active grid to match
+	if (current_metadata.width > 0 && current_metadata.height > 0) {
+		if (current_metadata.width != Grid::get_width() || current_metadata.height != Grid::get_height()) {
+			Grid::resize(current_metadata.width, current_metadata.height, false);
+		}
+	}
+
 	Grid::clear();
 	UndoManager::init();
+	UI::clear_clipboard();
+	UI::deselect();
 }
 
 void SetManager::create_new_empty_set(const std::string& name) {
@@ -112,6 +169,8 @@ void SetManager::create_new_empty_set(const std::string& name) {
 	MaterialManager::load_all_materials(set_path);
 	Grid::clear();
 	UndoManager::init();
+	UI::clear_clipboard();
+	UI::deselect();
 }
 
 void SetManager::copy_set(const std::string& source_name, const std::string& new_name) {

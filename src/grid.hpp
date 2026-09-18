@@ -15,17 +15,6 @@ struct Cell {
 	bool updated = false;
 };
 
-inline constexpr std::array<int, NEIGHBOR_COUNT> compute_neighbor_offsets() {
-	std::array<int, NEIGHBOR_COUNT> offsets{};
-	uint32_t id = 0;
-	for (int dy = -2; dy <= 2; ++dy) {
-		for (int dx = -2; dx <= 2; ++dx) {
-			offsets[id++] = dy * SIM_WIDTH + dx;
-		}
-	}
-	return offsets;
-}
-
 enum class ProcessingMode : int { CPU = 0, GPU = 1 };
 
 class Grid {
@@ -34,6 +23,13 @@ public:
 
 	static void init();
 	static void shutdown();
+
+	static uint32_t get_width() { return width; }
+	static uint32_t get_height() { return height; }
+	static uint32_t get_size() { return width * height; }
+	static uint32_t get_num_strips_y() { return (height + STRIP_HEIGHT - 1) / STRIP_HEIGHT; }
+
+	static bool resize(uint32_t new_width, uint32_t new_height, bool preserve_content = true);
 
 	static void configure_threads(uint32_t thread_count);
 
@@ -70,7 +66,10 @@ public:
 	static void keep_awake_gpu();
 
 private:
-	static constexpr std::array<int, NEIGHBOR_COUNT> neighbor_offsets = compute_neighbor_offsets();
+	static uint32_t width;
+	static uint32_t height;
+	static std::array<int, NEIGHBOR_COUNT> neighbor_offsets;
+	static void recompute_neighbor_offsets();
 
 	static ProcessingMode processing_mode;
 	static std::vector<Cell> cells;

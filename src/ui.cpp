@@ -1,5 +1,6 @@
 #include "ui.hpp"
 
+#include <fmt/format.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
@@ -7,31 +8,34 @@
 
 #include <algorithm>
 #include <cmath>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 #include "config_manager.hpp"
 #include "grid.hpp"
+#include "icon_manager.hpp"
 #include "material_manager.hpp"
 #include "resources/roboto_ttf.h"
 #include "sanitize.hpp"
 #include "save_manager.hpp"
 #include "set_manager.hpp"
+#include "shortcut_manager.hpp"
 #include "undo_manager.hpp"
 #include "vulkan.hpp"
 #include "window.hpp"
 
-namespace fs = std::filesystem;
+static ImVec4 default_colors[ImGuiCol_COUNT];
+static bool default_colors_initialized = false;
 
 static void init_style() {
+	const auto& cfg = ConfigManager::get_config();
 	ImGuiStyle& style = ImGui::GetStyle();
-	style.WindowRounding = 6.0f;
-	style.ChildRounding = 4.0f;
-	style.FrameRounding = 4.0f;
-	style.PopupRounding = 4.0f;
-	style.GrabRounding = 4.0f;
-	style.TabRounding = 4.0f;
+	style.WindowRounding = cfg.ui.window_rounding;
+	style.ChildRounding = cfg.ui.frame_rounding;
+	style.FrameRounding = cfg.ui.frame_rounding;
+	style.PopupRounding = cfg.ui.frame_rounding;
+	style.GrabRounding = cfg.ui.frame_rounding;
+	style.TabRounding = cfg.ui.frame_rounding;
 
 	style.ItemSpacing = ImVec2(8, 6);
 	style.ItemInnerSpacing = ImVec2(6, 6);
@@ -92,6 +96,37 @@ static void init_style() {
 	colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
 	colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
 	colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.05f, 0.05f, 0.05f, 0.60f);
+
+	if (!default_colors_initialized) {
+		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
+			default_colors[i] = colors[i];
+		}
+		default_colors_initialized = true;
+	}
+
+	// Apply any customized colors loaded from config.ini
+	for (const auto& [name, val] : ConfigManager::get_color_overrides()) {
+		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
+			if (name == ImGui::GetStyleColorName(i)) {
+				ImVec4 col;
+				if (ConfigManager::parse_color_string(val, col)) {
+					colors[i] = col;
+				}
+				break;
+			}
+		}
+	}
+}
+
+const ImVec4* UI::get_default_colors() { return default_colors; }
+
+void UI::reset_theme_colors() {
+	ImGuiStyle& style = ImGui::GetStyle();
+	for (int i = 0; i < ImGuiCol_COUNT; ++i) {
+		style.Colors[i] = default_colors[i];
+	}
+	ConfigManager::get_color_overrides().clear();
+	ConfigManager::save();
 }
 
 struct GridRect {
@@ -106,7 +141,7 @@ static ImVec2 screen_to_grid_pos(ImVec2 screen_pos) {
 	SDL_FRect dst_rect = Window::get_dst_rect();
 	float norm_x = (screen_pos.x - dst_rect.x) / dst_rect.w;
 	float norm_y = (screen_pos.y - dst_rect.y) / dst_rect.h;
-	return ImVec2(norm_x * SIM_WIDTH, norm_y * SIM_HEIGHT);
+	return ImVec2(norm_x * Grid::get_width(), norm_y * Grid::get_height());
 }
 
 static std::pair<float, float> screen_to_grid(float sx, float sy) {
@@ -116,19 +151,19 @@ static std::pair<float, float> screen_to_grid(float sx, float sy) {
 
 static ScreenRect grid_to_screen_rect(int start_x, int start_y, int size) {
 	SDL_FRect dst_rect = Window::get_dst_rect();
-	float sx1 = dst_rect.x + (static_cast<float>(start_x) / SIM_WIDTH) * dst_rect.w;
-	float sy1 = dst_rect.y + (static_cast<float>(start_y) / SIM_HEIGHT) * dst_rect.h;
-	float sx2 = dst_rect.x + (static_cast<float>(start_x + size) / SIM_WIDTH) * dst_rect.w;
-	float sy2 = dst_rect.y + (static_cast<float>(start_y + size) / SIM_HEIGHT) * dst_rect.h;
+	float sx1 = dst_rect.x + (static_cast<float>(start_x) / Grid::get_width()) * dst_rect.w;
+	float sy1 = dst_rect.y + (static_cast<float>(start_y) / Grid::get_height()) * dst_rect.h;
+	float sx2 = dst_rect.x + (static_cast<float>(start_x + size) / Grid::get_width()) * dst_rect.w;
+	float sy2 = dst_rect.y + (static_cast<float>(start_y + size) / Grid::get_height()) * dst_rect.h;
 	return {sx1, sy1, sx2, sy2};
 }
 
 static ScreenRect grid_to_screen_rect_wh(int start_x, int start_y, int w, int h) {
 	SDL_FRect dst_rect = Window::get_dst_rect();
-	float sx1 = dst_rect.x + (static_cast<float>(start_x) / SIM_WIDTH) * dst_rect.w;
-	float sy1 = dst_rect.y + (static_cast<float>(start_y) / SIM_HEIGHT) * dst_rect.h;
-	float sx2 = dst_rect.x + (static_cast<float>(start_x + w) / SIM_WIDTH) * dst_rect.w;
-	float sy2 = dst_rect.y + (static_cast<float>(start_y + h) / SIM_HEIGHT) * dst_rect.h;
+	float sx1 = dst_rect.x + (static_cast<float>(start_x) / Grid::get_width()) * dst_rect.w;
+	float sy1 = dst_rect.y + (static_cast<float>(start_y) / Grid::get_height()) * dst_rect.h;
+	float sx2 = dst_rect.x + (static_cast<float>(start_x + w) / Grid::get_width()) * dst_rect.w;
+	float sy2 = dst_rect.y + (static_cast<float>(start_y + h) / Grid::get_height()) * dst_rect.h;
 	return {sx1, sy1, sx2, sy2};
 }
 
@@ -261,10 +296,10 @@ static void parallel_for_rows(int min_y, int max_y, Func&& func) {
 }
 
 static void paint_brush_at(int start_x, int start_y, int brush_size, uint8_t mat_id, BrushShape shape) {
-	int min_x = std::clamp(start_x, 0, static_cast<int>(SIM_WIDTH));
-	int max_x = std::clamp(start_x + brush_size, 0, static_cast<int>(SIM_WIDTH));
-	int min_y = std::clamp(start_y, 0, static_cast<int>(SIM_HEIGHT));
-	int max_y = std::clamp(start_y + brush_size, 0, static_cast<int>(SIM_HEIGHT));
+	int min_x = std::clamp(start_x, 0, static_cast<int>(Grid::get_width()));
+	int max_x = std::clamp(start_x + brush_size, 0, static_cast<int>(Grid::get_width()));
+	int min_y = std::clamp(start_y, 0, static_cast<int>(Grid::get_height()));
+	int max_y = std::clamp(start_y + brush_size, 0, static_cast<int>(Grid::get_height()));
 
 	if (min_x >= max_x || min_y >= max_y)
 		return;
@@ -305,8 +340,8 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 		int x1_start = static_cast<int>(end_grid.x - half_brush + 0.5f);
 		int y1_start = static_cast<int>(end_grid.y - half_brush + 0.5f);
 
-		int min_y = std::clamp(std::min(y0_start, y1_start), 0, static_cast<int>(SIM_HEIGHT));
-		int max_y = std::clamp(std::max(y0_start, y1_start) + brush_size, 0, static_cast<int>(SIM_HEIGHT));
+		int min_y = std::clamp(std::min(y0_start, y1_start), 0, static_cast<int>(Grid::get_height()));
+		int max_y = std::clamp(std::max(y0_start, y1_start) + brush_size, 0, static_cast<int>(Grid::get_height()));
 
 		if (min_y >= max_y)
 			return;
@@ -315,7 +350,7 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 		float dx = end_grid.x - start_grid.x;
 
 		parallel_for_rows(min_y, max_y, [&](int y) {
-			int row_min_x = static_cast<int>(SIM_WIDTH);
+			int row_min_x = static_cast<int>(Grid::get_width());
 			int row_max_x = -1;
 
 			if (std::abs(dy) < 0.0001f) {
@@ -338,8 +373,8 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 				row_max_x = std::max(x_a, x_b) + brush_size;
 			}
 
-			row_min_x = std::clamp(row_min_x, 0, static_cast<int>(SIM_WIDTH));
-			row_max_x = std::clamp(row_max_x, 0, static_cast<int>(SIM_WIDTH));
+			row_min_x = std::clamp(row_min_x, 0, static_cast<int>(Grid::get_width()));
+			row_max_x = std::clamp(row_max_x, 0, static_cast<int>(Grid::get_width()));
 
 			for (int x = row_min_x; x < row_max_x; ++x) {
 				Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
@@ -357,8 +392,10 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 		float p1x = static_cast<float>(b1.x) + r;
 		float p1y = static_cast<float>(b1.y) + r;
 
-		int min_y = std::clamp(static_cast<int>(std::floor(std::min(p0y, p1y) - r)), 0, static_cast<int>(SIM_HEIGHT));
-		int max_y = std::clamp(static_cast<int>(std::ceil(std::max(p0y, p1y) + r)), 0, static_cast<int>(SIM_HEIGHT));
+		int min_y =
+			std::clamp(static_cast<int>(std::floor(std::min(p0y, p1y) - r)), 0, static_cast<int>(Grid::get_height()));
+		int max_y =
+			std::clamp(static_cast<int>(std::ceil(std::max(p0y, p1y) + r)), 0, static_cast<int>(Grid::get_height()));
 
 		if (min_y >= max_y)
 			return;
@@ -370,7 +407,7 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 		parallel_for_rows(min_y, max_y, [&](int y) {
 			float cy_row = static_cast<float>(y) + 0.5f;
 
-			float row_left = static_cast<float>(SIM_WIDTH);
+			float row_left = static_cast<float>(Grid::get_width());
 			float row_right = -1.0f;
 			bool has_span = false;
 
@@ -422,8 +459,8 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 			}
 
 			if (has_span) {
-				int rx_min = std::clamp(static_cast<int>(std::floor(row_left)), 0, static_cast<int>(SIM_WIDTH));
-				int rx_max = std::clamp(static_cast<int>(std::ceil(row_right)), 0, static_cast<int>(SIM_WIDTH));
+				int rx_min = std::clamp(static_cast<int>(std::floor(row_left)), 0, static_cast<int>(Grid::get_width()));
+				int rx_max = std::clamp(static_cast<int>(std::ceil(row_right)), 0, static_cast<int>(Grid::get_width()));
 
 				for (int x = rx_min; x < rx_max; ++x) {
 					Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
@@ -434,7 +471,7 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 }
 
 static void flood_fill(uint32_t start_x, uint32_t start_y, uint8_t fill_mat) {
-	if (start_x >= SIM_WIDTH || start_y >= SIM_HEIGHT)
+	if (start_x >= Grid::get_width() || start_y >= Grid::get_height())
 		return;
 	uint8_t target_mat = Grid::get_cell(start_x, start_y);
 	if (target_mat == fill_mat)
@@ -456,7 +493,8 @@ static void flood_fill(uint32_t start_x, uint32_t start_y, uint8_t fill_mat) {
 			int nx = static_cast<int>(x) + dx[i];
 			int ny = static_cast<int>(y) + dy[i];
 
-			if (nx >= 0 && nx < static_cast<int>(SIM_WIDTH) && ny >= 0 && ny < static_cast<int>(SIM_HEIGHT)) {
+			if (nx >= 0 && nx < static_cast<int>(Grid::get_width()) && ny >= 0 &&
+				ny < static_cast<int>(Grid::get_height())) {
 				uint32_t unx = static_cast<uint32_t>(nx);
 				uint32_t uny = static_cast<uint32_t>(ny);
 				if (Grid::get_cell(unx, uny) == target_mat) {
@@ -473,6 +511,9 @@ char UI::save_as_buf[64] = "";
 char UI::new_set_name_buf[64] = "";
 
 int UI::selected_save_id = -1;
+int UI::selected_stamp_id = -1;
+bool UI::open_diff_size_save_popup = false;
+SaveFileInfo UI::pending_diff_save{};
 uint8_t UI::selected_id = 0;
 int UI::mouse_size = 5;
 BrushShape UI::brush_shape = BrushShape::Square;
@@ -508,6 +549,11 @@ ResizeHandle UI::active_resize_handle = ResizeHandle::None;
 SelectionBox UI::selection_box = {};
 ClipboardData UI::clipboard = {};
 std::vector<uint8_t> UI::floating_cells = {};
+std::vector<uint8_t> UI::move_initial_cells = {};
+int UI::floating_width = 0;
+int UI::floating_height = 0;
+int UI::move_initial_width = 0;
+int UI::move_initial_height = 0;
 int UI::move_origin_x = 0;
 int UI::move_origin_y = 0;
 int UI::move_grab_offset_x = 0;
@@ -520,24 +566,33 @@ void UI::init() {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO();
-	(void)io;
+	io.IniFilename = nullptr;  // Completely disable imgui.ini saving/loading
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigInputTrickleEventQueue = false;
 	io.ConfigWindowsMoveFromTitleBarOnly = true;
 
+	const auto& cfg = ConfigManager::get_config();
+	float font_sz = std::clamp(cfg.ui.font_size, 10.0f, 48.0f);
 	ImFontConfig font_cfg;
 	font_cfg.FontDataOwnedByAtlas = false;
-	io.Fonts->AddFontFromMemoryTTF(const_cast<uint8_t*>(roboto_ttf), roboto_ttf_len, 16.0f, &font_cfg);
+	io.Fonts->AddFontFromMemoryTTF(const_cast<uint8_t*>(roboto_ttf), roboto_ttf_len, font_sz, &font_cfg);
 
 	init_style();
+
+	if (cfg.ui.ui_scale != 1.0f && cfg.ui.ui_scale >= 0.5f && cfg.ui.ui_scale <= 3.0f) {
+		ImGui::GetStyle().ScaleAllSizes(cfg.ui.ui_scale);
+	}
 
 	ImGui_ImplSDL3_InitForSDLRenderer(Window::get_window(), Window::get_renderer());
 	ImGui_ImplSDLRenderer3_Init(Window::get_renderer());
 
 	UndoManager::init();
+	IconManager::init();
 }
 
 void UI::shutdown() {
+	ConfigManager::save();
+	IconManager::shutdown();
 	if (ImGui::GetCurrentContext()) {
 		ImGui_ImplSDLRenderer3_Shutdown();
 		ImGui_ImplSDL3_Shutdown();
@@ -551,18 +606,39 @@ void UI::render() {
 	ImGui::NewFrame();
 
 	ImGuiIO& io = ImGui::GetIO();
+	auto& cfg = ConfigManager::get_config();
 
 	if (ui_compact) {
-		ImGui::SetNextWindowPos(ImVec2(2.0f, 2.0f), ImGuiCond_FirstUseEver);
-		ImGui::SetNextWindowSize(ImVec2(280.0f, 400.0f), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowPos(ImVec2(static_cast<float>(cfg.ui.compact_x), static_cast<float>(cfg.ui.compact_y)),
+								ImGuiCond_Once);
+		ImGui::SetNextWindowSize(
+			ImVec2(static_cast<float>(cfg.ui.compact_width), static_cast<float>(cfg.ui.compact_height)),
+			ImGuiCond_Once);
 		if (ImGui::Begin("Simulation Controls")) {
+			ImVec2 pos = ImGui::GetWindowPos();
+			ImVec2 sz = ImGui::GetWindowSize();
+			cfg.ui.compact_x = static_cast<int>(pos.x);
+			cfg.ui.compact_y = static_cast<int>(pos.y);
+			cfg.ui.compact_width = static_cast<int>(sz.x);
+			cfg.ui.compact_height = static_cast<int>(sz.y);
 			render_sim_content();
 		}
 		ImGui::End();
 	} else {
-		ImGui::SetNextWindowPos(ImVec2(2.0f, 2.0f), ImGuiCond_FirstUseEver);
-		ImGui::SetNextWindowSize(ImVec2(570.0f, Window::get_size().second - 4.0f), ImGuiCond_FirstUseEver);
+		float screen_h = io.DisplaySize.y > 0.0f ? io.DisplaySize.y : static_cast<float>(Window::get_size().second);
+		float sidebar_y = (cfg.ui.sidebar_y <= 2) ? 0.0f : static_cast<float>(cfg.ui.sidebar_y);
+		float sidebar_x = (cfg.ui.sidebar_x <= 2) ? 0.0f : static_cast<float>(cfg.ui.sidebar_x);
+		float target_h = std::max(100.0f, screen_h - sidebar_y);
+
+		ImGui::SetNextWindowPos(ImVec2(sidebar_x, sidebar_y), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSizeConstraints(ImVec2(200.0f, target_h), ImVec2(FLT_MAX, target_h));
+		ImGui::SetNextWindowSize(ImVec2(static_cast<float>(cfg.ui.sidebar_width), target_h), ImGuiCond_FirstUseEver);
 		if (ImGui::Begin("Simulation Editor", nullptr)) {
+			ImVec2 pos = ImGui::GetWindowPos();
+			ImVec2 sz = ImGui::GetWindowSize();
+			cfg.ui.sidebar_x = static_cast<int>(pos.x);
+			cfg.ui.sidebar_y = static_cast<int>(pos.y);
+			cfg.ui.sidebar_width = static_cast<int>(sz.x);
 			render_header(io);
 
 			if (ImGui::BeginTabBar("SidebarTabs")) {
@@ -570,6 +646,7 @@ void UI::render() {
 				render_manage_sets();
 				render_save_load();
 				render_shortcuts();
+				render_theme_editor();
 				render_advanced_options();
 				ImGui::EndTabBar();
 			}
@@ -605,18 +682,22 @@ void UI::set_tool_mode(ToolMode mode) {
 
 void UI::deselect() {
 	if (selection_state == SelectionState::Moving) {
-		int bw = selection_box.width();
-		int bh = selection_box.height();
-		for (int y = 0; y < bh; ++y) {
-			for (int x = 0; x < bw; ++x) {
+		for (int y = 0; y < move_initial_height; ++y) {
+			for (int x = 0; x < move_initial_width; ++x) {
 				int gx = move_origin_x + x;
 				int gy = move_origin_y + y;
-				if (gx >= 0 && gx < static_cast<int>(SIM_WIDTH) && gy >= 0 && gy < static_cast<int>(SIM_HEIGHT)) {
-					Grid::set_cell(gx, gy, floating_cells[y * bw + x]);
+				if (gx >= 0 && gx < static_cast<int>(Grid::get_width()) && gy >= 0 &&
+					gy < static_cast<int>(Grid::get_height())) {
+					Grid::set_cell(gx, gy, move_initial_cells[y * move_initial_width + x]);
 				}
 			}
 		}
 		floating_cells.clear();
+		move_initial_cells.clear();
+		floating_width = 0;
+		floating_height = 0;
+		move_initial_width = 0;
+		move_initial_height = 0;
 	}
 	active_resize_handle = ResizeHandle::None;
 	selection_state = SelectionState::None;
@@ -625,6 +706,11 @@ void UI::deselect() {
 void UI::restore_selection_state(ToolMode mode, SelectionState state, const SelectionBox& box) {
 	if (selection_state == SelectionState::Moving) {
 		floating_cells.clear();
+		move_initial_cells.clear();
+		floating_width = 0;
+		floating_height = 0;
+		move_initial_width = 0;
+		move_initial_height = 0;
 	}
 	active_resize_handle = ResizeHandle::None;
 	current_tool = mode;
@@ -703,7 +789,9 @@ void UI::rotate_selection(bool clockwise) {
 
 		for (int y = 0; y < h; ++y) {
 			for (int x = 0; x < w; ++x) {
-				Grid::set_cell(min_x + x, min_y + y, 0);
+				if (!transparent_mode || old_cells[y * w + x] != 0) {
+					Grid::set_cell(min_x + x, min_y + y, 0);
+				}
 			}
 		}
 
@@ -726,12 +814,15 @@ void UI::rotate_selection(bool clockwise) {
 
 		int cx = min_x + w / 2;
 		int cy = min_y + h / 2;
-		int new_min_x = std::clamp(cx - new_w / 2, 0, std::max(0, static_cast<int>(SIM_WIDTH) - new_w));
-		int new_min_y = std::clamp(cy - new_h / 2, 0, std::max(0, static_cast<int>(SIM_HEIGHT) - new_h));
+		int new_min_x = std::clamp(cx - new_w / 2, 0, std::max(0, static_cast<int>(Grid::get_width()) - new_w));
+		int new_min_y = std::clamp(cy - new_h / 2, 0, std::max(0, static_cast<int>(Grid::get_height()) - new_h));
 
 		for (int ny = 0; ny < new_h; ++ny) {
 			for (int nx = 0; nx < new_w; ++nx) {
-				Grid::set_cell(new_min_x + nx, new_min_y + ny, new_cells[ny * new_w + nx]);
+				uint8_t c = new_cells[ny * new_w + nx];
+				if (!transparent_mode || c != 0) {
+					Grid::set_cell(new_min_x + nx, new_min_y + ny, c);
+				}
 			}
 		}
 
@@ -742,8 +833,8 @@ void UI::rotate_selection(bool clockwise) {
 
 		UndoManager::push_snapshot(clockwise ? "Rotate Selection CW" : "Rotate Selection CCW");
 	} else if (selection_state == SelectionState::Moving) {
-		int w = selection_box.width();
-		int h = selection_box.height();
+		int w = floating_width;
+		int h = floating_height;
 		if (w <= 0 || h <= 0 || floating_cells.size() < static_cast<size_t>(w * h))
 			return;
 
@@ -764,6 +855,8 @@ void UI::rotate_selection(bool clockwise) {
 			}
 		}
 		floating_cells = std::move(new_cells);
+		floating_width = new_w;
+		floating_height = new_h;
 
 		int old_gx = move_grab_offset_x;
 		int old_gy = move_grab_offset_y;
@@ -774,6 +867,14 @@ void UI::rotate_selection(bool clockwise) {
 			move_grab_offset_x = old_gy;
 			move_grab_offset_y = (w - 1) - old_gx;
 		}
+
+		int cx = current_floating_x + w / 2;
+		int cy = current_floating_y + h / 2;
+		current_floating_x = std::clamp(cx - new_w / 2, 0, std::max(0, static_cast<int>(Grid::get_width()) - new_w));
+		current_floating_y = std::clamp(cy - new_h / 2, 0, std::max(0, static_cast<int>(Grid::get_height()) - new_h));
+
+		move_grab_offset_x = std::clamp(move_grab_offset_x, 0, new_w - 1);
+		move_grab_offset_y = std::clamp(move_grab_offset_y, 0, new_h - 1);
 
 		selection_box.start_x = current_floating_x;
 		selection_box.start_y = current_floating_y;
@@ -804,6 +905,11 @@ void UI::rotate_selection(bool clockwise) {
 		clipboard.cells = std::move(new_cells);
 		clipboard.width = new_w;
 		clipboard.height = new_h;
+
+		int cx = current_floating_x + w / 2;
+		int cy = current_floating_y + h / 2;
+		current_floating_x = std::clamp(cx - new_w / 2, 0, std::max(0, static_cast<int>(Grid::get_width()) - new_w));
+		current_floating_y = std::clamp(cy - new_h / 2, 0, std::max(0, static_cast<int>(Grid::get_height()) - new_h));
 	}
 }
 
@@ -814,47 +920,209 @@ void UI::paste_clipboard() {
 	selection_state = SelectionState::Pasting;
 }
 
+void UI::clear_clipboard() {
+	clipboard.cells.clear();
+	clipboard.width = 0;
+	clipboard.height = 0;
+}
+
+void UI::load_stamp(const std::vector<uint8_t>& cells, uint32_t w, uint32_t h) {
+	if (cells.empty() || w == 0 || h == 0)
+		return;
+	clipboard.cells = cells;
+	clipboard.width = static_cast<int>(w);
+	clipboard.height = static_cast<int>(h);
+	paste_clipboard();
+}
+
+void UI::start_moving_selection(int gx, int gy) {
+	if (selection_state != SelectionState::Selected)
+		return;
+	int min_x = selection_box.min_x();
+	int min_y = selection_box.min_y();
+	int bw = selection_box.width();
+	int bh = selection_box.height();
+	floating_width = bw;
+	floating_height = bh;
+	move_initial_width = bw;
+	move_initial_height = bh;
+	floating_cells.resize(bw * bh);
+	move_initial_cells.resize(bw * bh);
+	for (int y = 0; y < bh; ++y) {
+		for (int x = 0; x < bw; ++x) {
+			uint8_t c = Grid::get_cell(min_x + x, min_y + y);
+			floating_cells[y * bw + x] = c;
+			move_initial_cells[y * bw + x] = c;
+			if (!transparent_mode || c != 0) {
+				Grid::set_cell(min_x + x, min_y + y, 0);
+			}
+		}
+	}
+	move_origin_x = min_x;
+	move_origin_y = min_y;
+	move_grab_offset_x = gx - min_x;
+	move_grab_offset_y = gy - min_y;
+	current_floating_x = min_x;
+	current_floating_y = min_y;
+	selection_state = SelectionState::Moving;
+}
+
+void UI::move_floating_selection(int gx, int gy) {
+	if (selection_state != SelectionState::Moving)
+		return;
+	int bw = floating_width;
+	int bh = floating_height;
+	current_floating_x = std::clamp(gx - move_grab_offset_x, 0, std::max(0, static_cast<int>(Grid::get_width()) - bw));
+	current_floating_y = std::clamp(gy - move_grab_offset_y, 0, std::max(0, static_cast<int>(Grid::get_height()) - bh));
+	selection_box.start_x = current_floating_x;
+	selection_box.start_y = current_floating_y;
+	selection_box.current_x = current_floating_x + bw - 1;
+	selection_box.current_y = current_floating_y + bh - 1;
+}
+
+void UI::drop_moving_selection() {
+	if (selection_state != SelectionState::Moving)
+		return;
+	int bw = floating_width;
+	int bh = floating_height;
+	for (int y = 0; y < bh; ++y) {
+		for (int x = 0; x < bw; ++x) {
+			int fgx = current_floating_x + x;
+			int fgy = current_floating_y + y;
+			if (fgx >= 0 && fgx < static_cast<int>(Grid::get_width()) && fgy >= 0 &&
+				fgy < static_cast<int>(Grid::get_height())) {
+				uint8_t cell = floating_cells[y * bw + x];
+				if (!transparent_mode || cell != 0) {
+					Grid::set_cell(fgx, fgy, cell);
+				}
+			}
+		}
+	}
+	floating_cells.clear();
+	move_initial_cells.clear();
+	floating_width = 0;
+	floating_height = 0;
+	move_initial_width = 0;
+	move_initial_height = 0;
+	if (current_floating_x != move_origin_x || current_floating_y != move_origin_y) {
+		UndoManager::push_snapshot("Move Selection");
+	}
+	selection_box.start_x = current_floating_x;
+	selection_box.start_y = current_floating_y;
+	selection_box.current_x = current_floating_x + bw - 1;
+	selection_box.current_y = current_floating_y + bh - 1;
+	selection_state = SelectionState::Selected;
+}
+
+bool UI::button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& size_arg) {
+	ImGuiWindow* window = ImGui::GetCurrentWindow();
+	if (window->SkipItems)
+		return false;
+
+	ImGuiContext& g = *GImGui;
+	const ImGuiStyle& style = g.Style;
+	const ImGuiID id = window->GetID(label);
+	const char* label_end = ImGui::FindRenderedTextEnd(label);
+	const ImVec2 text_size = ImGui::CalcTextSize(label, label_end, false);
+
+	const float icon_w = icon ? 16.0f : 0.0f;
+	const float icon_h = icon ? 16.0f : 0.0f;
+	const float spacing = (icon && text_size.x > 0.0f) ? 6.0f : 0.0f;
+	const float total_content_w = icon_w + spacing + text_size.x;
+	const float total_content_h = std::max(icon_h, text_size.y);
+
+	ImVec2 pos = window->DC.CursorPos;
+	ImVec2 size = ImGui::CalcItemSize(size_arg, total_content_w + style.FramePadding.x * 2.0f,
+									  total_content_h + style.FramePadding.y * 2.0f);
+
+	const ImRect bb(pos, ImVec2(pos.x + size.x, pos.y + size.y));
+	ImGui::ItemSize(size, style.FramePadding.y);
+	if (!ImGui::ItemAdd(bb, id))
+		return false;
+
+	bool hovered, held;
+	bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, ImGuiButtonFlags_None);
+
+	// Render button frame
+	const ImU32 col = ImGui::GetColorU32((held && hovered) ? ImGuiCol_ButtonActive
+										 : hovered		   ? ImGuiCol_ButtonHovered
+														   : ImGuiCol_Button);
+	ImGui::RenderNavCursor(bb, id);
+	ImGui::RenderFrame(bb.Min, bb.Max, col, true, style.FrameRounding);
+
+	// Center content horizontally
+	float content_start_x = bb.Min.x + (bb.GetWidth() - total_content_w) * 0.5f;
+	if (content_start_x < bb.Min.x + style.FramePadding.x)
+		content_start_x = bb.Min.x + style.FramePadding.x;
+
+	if (icon) {
+		float icon_x = std::floor(content_start_x);
+		float icon_y = std::floor(bb.Min.y + (bb.GetHeight() - icon_h) * 0.5f);
+		ImVec2 icon_min(icon_x, icon_y);
+		ImVec2 icon_max(icon_x + icon_w, icon_y + icon_h);
+		bool is_disabled = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
+		ImU32 icon_tint = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, is_disabled ? 0.45f : 1.0f));
+		window->DrawList->AddImage((ImTextureID)(intptr_t)icon, icon_min, icon_max, ImVec2(0, 0), ImVec2(1, 1),
+								   icon_tint);
+	}
+
+	if (text_size.x > 0.0f) {
+		float text_x = std::floor(content_start_x + (icon ? (icon_w + spacing) : 0.0f));
+		float text_y = std::floor(bb.Min.y + (bb.GetHeight() - text_size.y) * 0.5f);
+		ImVec2 text_min(text_x, text_y);
+		ImVec2 text_max(bb.Max.x - style.FramePadding.x, bb.Max.y);
+		ImGui::RenderTextClipped(text_min, text_max, label, label_end, &text_size, ImVec2(0.0f, 0.5f), &bb);
+	}
+
+	return pressed;
+}
+
 void UI::render_selection_controls() {
+	const auto& cfg = ConfigManager::get_config();
 	bool is_brush = (current_tool == ToolMode::Brush);
 	bool is_select = (current_tool == ToolMode::Select);
 
 	float avail_w = ImGui::GetContentRegionAvail().x;
 	float spacing_x = ImGui::GetStyle().ItemSpacing.x;
-	float tool_w = (avail_w - spacing_x) * 0.5f;
+	float btn = (cfg.ui.button_height > 0) ? static_cast<float>(cfg.ui.button_height) : 28.0f;
 
 	if (is_brush) {
 		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.85f, 1.0f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 0.95f, 1.0f));
 	}
-	if (ImGui::Button("Brush (B)", ImVec2(tool_w, 28.0f))) {
+	if (button_with_icon("##BrushTool", IconManager::get(IconID::Brush), ImVec2(btn, btn))) {
 		set_tool_mode(ToolMode::Brush);
 	}
 	if (is_brush) {
 		ImGui::PopStyleColor(2);
 	}
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Drawing brush tool (B)");
+		ImGui::SetTooltip("Drawing brush tool (%s)\nDraw cells on canvas",
+						  ShortcutManager::get_key_string(ShortcutAction::ToolBrush).c_str());
 
 	ImGui::SameLine();
 	if (is_select) {
 		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.85f, 1.0f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 0.95f, 1.0f));
 	}
-	if (ImGui::Button("Select (C)", ImVec2(tool_w, 28.0f))) {
+	if (button_with_icon("##SelectTool", IconManager::get(IconID::Select), ImVec2(btn, btn))) {
 		set_tool_mode(ToolMode::Select);
 	}
 	if (is_select) {
 		ImGui::PopStyleColor(2);
 	}
 	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Box selection and move/copy/paste tool (Ctrl+C)");
+		ImGui::SetTooltip(
+			"Box selection and transform tool (%s / %s)\nSelect rectangular regions to move, copy, cut, or rotate",
+			ShortcutManager::get_key_string(ShortcutAction::ToolSelect).c_str(),
+			ShortcutManager::get_key_string(ShortcutAction::Copy).c_str());
 
 	if (current_tool == ToolMode::Brush) {
 		ImGui::Spacing();
 		ImGui::Text("Brush Settings:");
 		ImGui::SliderInt("Brush Size", &mouse_size, 1, 512);
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Adjust brush width (Scroll wheel).");
+			ImGui::SetTooltip("Adjust brush width (Scroll wheel)");
 		}
 
 		const char* shape_names[] = {"Square", "Circle"};
@@ -863,108 +1131,116 @@ void UI::render_selection_controls() {
 			brush_shape = static_cast<BrushShape>(current_shape);
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Select brush shape (Square or Circle, toggle with T).");
+			ImGui::SetTooltip("Select brush shape (Square or Circle, toggle with %s)",
+							  ShortcutManager::get_key_string(ShortcutAction::BrushShape).c_str());
 		}
 	} else if (current_tool == ToolMode::Select) {
 		ImGui::Spacing();
 		bool has_selection = (selection_state == SelectionState::Selected);
 		bool has_clipboard = !clipboard.empty();
+		bool can_rotate = (has_selection || selection_state == SelectionState::Moving ||
+						   (selection_state == SelectionState::Pasting && !clipboard.empty()));
 
-		float col_w = (avail_w - spacing_x) * 0.5f;
-		ImVec2 btn_sz(col_w, 28.0f);
+		float col_w = (avail_w - spacing_x * 3.0f) / 4.0f;
+		ImVec2 btn_sz(col_w, btn);
 
-		// Row 1: Copy and Cut
+		// Grid Row 1: Copy, Cut, Paste, Delete
 		if (!has_selection)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Copy (Ctrl+C)##Sel", btn_sz)) {
+		if (button_with_icon("##CopySel", IconManager::get(IconID::Copy), btn_sz)) {
 			copy_selection();
 		}
 		if (!has_selection)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Copy selected cells to clipboard (Ctrl+C)");
+			ImGui::SetTooltip("Copy selection (%s)", ShortcutManager::get_key_string(ShortcutAction::Copy).c_str());
 
 		ImGui::SameLine();
 		if (!has_selection)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Cut (Ctrl+X)##Sel", btn_sz)) {
+		if (button_with_icon("##CutSel", IconManager::get(IconID::Cut), btn_sz)) {
 			cut_selection();
 		}
 		if (!has_selection)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Cut selected cells to clipboard (Ctrl+X)");
+			ImGui::SetTooltip("Cut selected cells to clipboard (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::Cut).c_str());
 
-		// Row 2: Paste and Delete
+		ImGui::SameLine();
 		if (!has_clipboard)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Paste (Ctrl+V)##Sel", btn_sz)) {
+		if (button_with_icon("##PasteSel", IconManager::get(IconID::Paste), btn_sz)) {
 			paste_clipboard();
 		}
 		if (!has_clipboard)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Paste clipboard at cursor (Ctrl+V)");
+			ImGui::SetTooltip("Paste clipboard at cursor (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::Paste).c_str());
 
 		ImGui::SameLine();
 		if (!has_selection)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Delete (Del)##Sel", btn_sz)) {
+		if (button_with_icon("##DeleteSel", IconManager::get(IconID::Delete), btn_sz)) {
 			fill_selection(0);
 			deselect();
 		}
 		if (!has_selection)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Clear selected cells on grid (Delete)");
+			ImGui::SetTooltip("Delete selected cells (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::Delete).c_str());
 
-		// Row 3: Fill and Deselect
+		// Grid Row 2: Fill, Deselect, Rotate CW, Rotate CCW
 		if (!has_selection)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Fill (Ctrl+F)##Sel", btn_sz)) {
+		if (button_with_icon("##FillSel", IconManager::get(IconID::Fill), btn_sz)) {
 			fill_selection(selected_id);
 		}
 		if (!has_selection)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Fill selected cells with current material (F or Ctrl+F)");
+			ImGui::SetTooltip("Fill selected cells with current material (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::Fill).c_str());
 
 		ImGui::SameLine();
 		if (!has_selection)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Deselect (Esc)##Sel", btn_sz)) {
+		if (button_with_icon("##DeselectSel", IconManager::get(IconID::Cross), btn_sz)) {
 			deselect();
 		}
 		if (!has_selection)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Clear active selection (Esc)");
+			ImGui::SetTooltip("Clear active selection (%s / Right Click)",
+							  ShortcutManager::get_key_string(ShortcutAction::CancelOrQuit).c_str());
 
-		// Row 4: Rotate CW and Rotate CCW
-		bool can_rotate = (has_selection || selection_state == SelectionState::Moving ||
-						   (selection_state == SelectionState::Pasting && !clipboard.empty()));
+		ImGui::SameLine();
 		if (!can_rotate)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Rotate CW (Q)##Sel", btn_sz)) {
+		if (button_with_icon("##RotateCWSel", IconManager::get(IconID::RotateCW), btn_sz)) {
 			rotate_selection(true);
 		}
 		if (!can_rotate)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Rotate selection 90° clockwise (Q)");
+			ImGui::SetTooltip("Rotate selection 90° clockwise (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::RotateCW).c_str());
 
 		ImGui::SameLine();
 		if (!can_rotate)
 			ImGui::BeginDisabled();
-		if (ImGui::Button("Rotate CCW (E)##Sel", btn_sz)) {
+		if (button_with_icon("##RotateCCWSel", IconManager::get(IconID::RotateCCW), btn_sz)) {
 			rotate_selection(false);
 		}
 		if (!can_rotate)
 			ImGui::EndDisabled();
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Rotate selection 90° counter-clockwise (E)");
+			ImGui::SetTooltip("Rotate selection 90° counter-clockwise (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::RotateCCW).c_str());
 
-		// Row 5: Transparent Checkbox
+		// Transparent Checkbox
 		ImGui::Spacing();
 		ImGui::Checkbox("Transparent", &transparent_mode);
 		if (ImGui::IsItemHovered()) {
@@ -972,17 +1248,97 @@ void UI::render_selection_controls() {
 				"When enabled, air/empty cells in clipboard or moved selection will not overwrite existing cells.");
 		}
 
+		// Stamp Prefabs
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Text("Stamp Prefabs:");
+		float stamp_col_w = (avail_w - spacing_x) * 0.5f;
+		ImVec2 stamp_btn_sz(stamp_col_w, btn);
+
+		bool can_save_stamp = has_selection;
+		if (!can_save_stamp)
+			ImGui::BeginDisabled();
+		if (button_with_icon("Save Stamp##Sel", IconManager::get(IconID::Save), stamp_btn_sz)) {
+			ImGui::OpenPopup("SaveStampPopup");
+		}
+		if (!can_save_stamp)
+			ImGui::EndDisabled();
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			ImGui::SetTooltip("Save current selection as a reusable stamp prefab");
+		}
+
+		ImGui::SameLine();
+		if (button_with_icon("Load Stamp##Sel", IconManager::get(IconID::Folder), stamp_btn_sz)) {
+			ImGui::OpenPopup("LoadStampQuickPicker");
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Pick a stamp prefab to paste");
+		}
+
+		if (ImGui::BeginPopup("SaveStampPopup")) {
+			ImGui::Text("Save Stamp Name:");
+			static char stamp_name_buf[64] = "";
+			ImGui::InputText("##stamp_name", stamp_name_buf, sizeof(stamp_name_buf));
+			if (ImGui::Button("Save##StampBtn", ImVec2(80, 24))) {
+				std::string sname = stamp_name_buf;
+				if (!sname.empty()) {
+					int sx = selection_box.min_x();
+					int sy = selection_box.min_y();
+					int sw = selection_box.width();
+					int sh = selection_box.height();
+					std::vector<uint8_t> stamp_cells(sw * sh);
+					for (int y = 0; y < sh; ++y) {
+						for (int x = 0; x < sw; ++x) {
+							stamp_cells[y * sw + x] = Grid::get_cell(sx + x, sy + y);
+						}
+					}
+					SaveManager::save_stamp_to_file(sname, SetManager::get_current_set(), stamp_cells, sw, sh);
+					stamp_name_buf[0] = '\0';
+					ImGui::CloseCurrentPopup();
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel##StampBtn", ImVec2(80, 24))) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
+		if (ImGui::BeginPopup("LoadStampQuickPicker")) {
+			ImGui::Text("Select Stamp Prefab:");
+			ImGui::Separator();
+			auto stamps = SaveManager::get_stamp_files(SetManager::get_current_set());
+			if (stamps.empty()) {
+				ImGui::TextDisabled("No stamps found in current set.");
+			} else {
+				for (const auto& s : stamps) {
+					std::string label = fmt::format("{} ({}x{})", s.name, s.width, s.height);
+					if (ImGui::Selectable(label.c_str())) {
+						std::vector<uint8_t> cells;
+						uint32_t sw = 0, sh = 0;
+						if (SaveManager::load_stamp_from_file(s.filename, SetManager::get_current_set(), cells, sw,
+															  sh)) {
+							load_stamp(cells, sw, sh);
+						}
+						ImGui::CloseCurrentPopup();
+					}
+				}
+			}
+			ImGui::EndPopup();
+		}
+
 		ImGui::Spacing();
 		if (has_selection) {
 			ImGui::TextColored(ImVec4(0.5f, 0.9f, 0.5f, 1.0f), "Selected: %dx%d (%d cells)", selection_box.width(),
 							   selection_box.height(), selection_box.width() * selection_box.height());
-			ImGui::TextDisabled("Drag inside: Move | Drag handles: Resize | Arrows: Nudge | Q/E: Rotate");
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Drag inside: Move\nDrag handles: Resize\nArrows: Nudge\nQ / E: Rotate");
+			}
 		} else if (selection_state == SelectionState::Pasting) {
-			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f),
-							   "Pasting: %dx%d (Click canvas to stamp, Q/E to rotate, Esc to cancel)", clipboard.width,
-							   clipboard.height);
-		} else {
-			ImGui::TextDisabled("Click & drag to select area | Click canvas to deselect");
+			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Pasting: %dx%d", clipboard.width, clipboard.height);
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Click canvas: Stamp\nQ / E: Rotate\nEsc: Cancel");
+			}
 		}
 	}
 }
@@ -1059,8 +1415,8 @@ void UI::render_mouse_overlay() {
 								   dim_buf);
 			}
 		} else if (selection_state == SelectionState::Moving) {
-			int bw = selection_box.width();
-			int bh = selection_box.height();
+			int bw = floating_width;
+			int bh = floating_height;
 			ScreenRect srect = grid_to_screen_rect_wh(current_floating_x, current_floating_y, bw, bh);
 
 			for (int y = 0; y < bh; ++y) {
@@ -1307,7 +1663,7 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 	auto [win_w, win_h] = Window::get_size();
 	float rem_w = static_cast<float>(win_w);
 	float rem_h = static_cast<float>(win_h);
-	float sim_aspect = static_cast<float>(SIM_WIDTH) / SIM_HEIGHT;
+	float sim_aspect = static_cast<float>(Grid::get_width()) / Grid::get_height();
 
 	float target_w = rem_w;
 	float target_h = rem_w / sim_aspect;
@@ -1324,17 +1680,17 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 	if (dt <= 0.0f)
 		dt = 0.016f;
 
-	// WASD camera movement
+	// Configurable camera movement
 	if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt) {
 		float pan_dir_x = 0.0f;
 		float pan_dir_y = 0.0f;
-		if (ImGui::IsKeyDown(ImGuiKey_W))
+		if (ShortcutManager::is_action_down(ShortcutAction::CameraUp))
 			pan_dir_y -= 1.0f;
-		if (ImGui::IsKeyDown(ImGuiKey_S))
+		if (ShortcutManager::is_action_down(ShortcutAction::CameraDown))
 			pan_dir_y += 1.0f;
-		if (ImGui::IsKeyDown(ImGuiKey_A))
+		if (ShortcutManager::is_action_down(ShortcutAction::CameraLeft))
 			pan_dir_x -= 1.0f;
-		if (ImGui::IsKeyDown(ImGuiKey_D))
+		if (ShortcutManager::is_action_down(ShortcutAction::CameraRight))
 			pan_dir_x += 1.0f;
 
 		if (pan_dir_x != 0.0f || pan_dir_y != 0.0f) {
@@ -1349,8 +1705,10 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 			}
 			target_pan_x += pan_dir_x * speed * dt;
 			target_pan_y += pan_dir_y * speed * dt;
-			target_pan_x = std::clamp(target_pan_x, -static_cast<float>(SIM_WIDTH), static_cast<float>(SIM_WIDTH));
-			target_pan_y = std::clamp(target_pan_y, -static_cast<float>(SIM_HEIGHT), static_cast<float>(SIM_HEIGHT));
+			target_pan_x =
+				std::clamp(target_pan_x, -static_cast<float>(Grid::get_width()), static_cast<float>(Grid::get_width()));
+			target_pan_y = std::clamp(target_pan_y, -static_cast<float>(Grid::get_height()),
+									  static_cast<float>(Grid::get_height()));
 		}
 	}
 
@@ -1364,17 +1722,19 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 
 	if (!io.WantCaptureMouse && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
 		ImVec2 delta = io.MouseDelta;
-		target_pan_x -= delta.x * (SIM_WIDTH / w_new);
-		target_pan_y -= delta.y * (SIM_HEIGHT / h_new);
-		target_pan_x = std::clamp(target_pan_x, -static_cast<float>(SIM_WIDTH), static_cast<float>(SIM_WIDTH));
-		target_pan_y = std::clamp(target_pan_y, -static_cast<float>(SIM_HEIGHT), static_cast<float>(SIM_HEIGHT));
+		target_pan_x -= delta.x * (Grid::get_width() / w_new);
+		target_pan_y -= delta.y * (Grid::get_height() / h_new);
+		target_pan_x =
+			std::clamp(target_pan_x, -static_cast<float>(Grid::get_width()), static_cast<float>(Grid::get_width()));
+		target_pan_y =
+			std::clamp(target_pan_y, -static_cast<float>(Grid::get_height()), static_cast<float>(Grid::get_height()));
 	}
 
 	pan_x = pan_x + (target_pan_x - pan_x) * 0.15f;
 	pan_y = pan_y + (target_pan_y - pan_y) * 0.15f;
 
-	float offset_screen_x = pan_x * (w_new / SIM_WIDTH);
-	float offset_screen_y = pan_y * (h_new / SIM_HEIGHT);
+	float offset_screen_x = pan_x * (w_new / Grid::get_width());
+	float offset_screen_y = pan_y * (h_new / Grid::get_height());
 	float center_x_shifted = rem_w / 2.0f - offset_screen_x;
 	float center_y_shifted = rem_h / 2.0f - offset_screen_y;
 
@@ -1390,47 +1750,41 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 	if (io.WantTextInput)
 		return;
 
-	if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, true)) {
-		if (io.KeyShift) {
-			UndoManager::redo();
-		} else {
-			UndoManager::undo();
-		}
-	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y, true)) {
+	if (ShortcutManager::is_action_pressed(ShortcutAction::Undo)) {
+		UndoManager::undo();
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::Redo)) {
 		UndoManager::redo();
 	}
 
 	// Tool mode & Copy / Cut / Paste / Duplicate
-	if (ImGui::IsKeyPressed(ImGuiKey_C, false)) {
-		if (io.KeyCtrl) {
-			if (current_tool != ToolMode::Select) {
-				set_tool_mode(ToolMode::Select);
-			}
-			copy_selection();
-		} else {
+	if (ShortcutManager::is_action_pressed(ShortcutAction::Copy)) {
+		if (current_tool != ToolMode::Select) {
 			set_tool_mode(ToolMode::Select);
 		}
-	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X, false)) {
+		copy_selection();
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::Cut)) {
 		if (selection_state != SelectionState::Selected) {
 			set_tool_mode(ToolMode::Select);
 		}
 		cut_selection();
-	} else if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::Paste)) {
 		if (selection_state != SelectionState::Selected) {
 			set_tool_mode(ToolMode::Select);
 		}
 		paste_clipboard();
-	} else if (ImGui::IsKeyPressed(ImGuiKey_B, false)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ToolBrush)) {
 		set_tool_mode(ToolMode::Brush);
-	} else if (ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ToolSelect)) {
+		set_tool_mode(ToolMode::Select);
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::Delete)) {
 		if (selection_state == SelectionState::Selected) {
 			fill_selection(0);
 			deselect();
 		}
-	} else if (!update && !io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, true)) {
+	} else if (!update && ShortcutManager::is_action_pressed(ShortcutAction::StepFrame)) {
 		step_frame = true;
 	} else if (selection_state == SelectionState::Selected) {
-		if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, true)) {
+		if (ShortcutManager::is_action_pressed(ShortcutAction::Fill)) {
 			fill_selection(selected_id);
 		}
 
@@ -1451,8 +1805,8 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 			int min_y = selection_box.min_y();
 			int bw = selection_box.width();
 			int bh = selection_box.height();
-			int new_x = std::clamp(min_x + nudge_x, 0, static_cast<int>(SIM_WIDTH) - bw);
-			int new_y = std::clamp(min_y + nudge_y, 0, static_cast<int>(SIM_HEIGHT) - bh);
+			int new_x = std::clamp(min_x + nudge_x, 0, static_cast<int>(Grid::get_width()) - bw);
+			int new_y = std::clamp(min_y + nudge_y, 0, static_cast<int>(Grid::get_height()) - bh);
 			if (new_x != min_x || new_y != min_y) {
 				std::vector<uint8_t> temp(bw * bh);
 				for (int y = 0; y < bh; ++y) {
@@ -1475,14 +1829,14 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		}
 	}
 
-	if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
+	if (ShortcutManager::is_action_pressed(ShortcutAction::ToggleSimulation)) {
 		update = !update;
 		if (update) {
 			UndoManager::push_snapshot("Resume Simulation");
 		}
-	} else if (ImGui::IsKeyPressed(ImGuiKey_T, false)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::BrushShape)) {
 		brush_shape = static_cast<BrushShape>((static_cast<int>(brush_shape) + 1) % static_cast<int>(BrushShape::Size));
-	} else if (ImGui::IsKeyPressed(ImGuiKey_V, false)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ToggleCompact)) {
 		ui_compact = !ui_compact;
 	}
 
@@ -1490,36 +1844,36 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 	bool can_rotate = (selection_state == SelectionState::Selected || selection_state == SelectionState::Moving ||
 					   (selection_state == SelectionState::Pasting && !clipboard.empty()));
 	if (can_rotate) {
-		if (ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
+		if (ShortcutManager::is_action_pressed(ShortcutAction::RotateCW)) {
 			rotate_selection(true);
 		}
-		if (ImGui::IsKeyPressed(ImGuiKey_E, false)) {
+		if (ShortcutManager::is_action_pressed(ShortcutAction::RotateCCW)) {
 			rotate_selection(false);
 		}
 	}
 
-	// Reset / Clear grid: R (plain R or with Ctrl/Shift)
-	if (ImGui::IsKeyPressed(ImGuiKey_R, false) ||
-		(io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Delete, false))) {
+	// Reset / Clear grid
+	if (ShortcutManager::is_action_pressed(ShortcutAction::ClearGrid)) {
 		Grid::clear();
 		UndoManager::push_snapshot("Clear Grid");
-	} else if (ImGui::IsKeyPressed(ImGuiKey_PageUp) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ZoomIn)) {
 		target_zoom *= 1.2f;
-	} else if (ImGui::IsKeyPressed(ImGuiKey_PageDown) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ZoomOut)) {
 		target_zoom /= 1.2f;
 	}
 
 	uint8_t material_count = MaterialManager::get_material_count();
 	for (int i = 1; i <= 9; ++i) {
-		if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_1 + (i - 1))) && material_count > i) {
+		ShortcutAction act = static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (i - 1));
+		if (ShortcutManager::is_action_pressed(act) && material_count > i) {
 			selected_id = MaterialManager::get_materials()[i].id;
 		}
 	}
 
-	if (ImGui::IsKeyPressed(ImGuiKey_F11, false)) {
+	if (ShortcutManager::is_action_pressed(ShortcutAction::Fullscreen)) {
 		SDL_Window* window = Window::get_window();
 		SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
-	} else if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::CancelOrQuit)) {
 		if (selection_state == SelectionState::Moving) {
 			deselect();
 		} else if (selection_state == SelectionState::Pasting) {
@@ -1553,7 +1907,7 @@ void UI::handle_canvas_interaction() {
 		if (drag_delta.x * drag_delta.x + drag_delta.y * drag_delta.y < 25.0f) {
 			uint32_t x_cell = static_cast<uint32_t>(grid_pos.x);
 			uint32_t y_cell = static_cast<uint32_t>(grid_pos.y);
-			if (x_cell < SIM_WIDTH && y_cell < SIM_HEIGHT) {
+			if (x_cell < Grid::get_width() && y_cell < Grid::get_height()) {
 				uint8_t cell = Grid::get_cell(x_cell, y_cell);
 				selected_id = MaterialManager::get_material(cell).id;
 			}
@@ -1569,16 +1923,17 @@ void UI::handle_canvas_interaction() {
 			}
 			int px = static_cast<int>(grid_pos.x) - clipboard.width / 2;
 			int py = static_cast<int>(grid_pos.y) - clipboard.height / 2;
-			current_floating_x = std::clamp(px, 0, std::max(0, static_cast<int>(SIM_WIDTH) - clipboard.width));
-			current_floating_y = std::clamp(py, 0, std::max(0, static_cast<int>(SIM_HEIGHT) - clipboard.height));
+			current_floating_x = std::clamp(px, 0, std::max(0, static_cast<int>(Grid::get_width()) - clipboard.width));
+			current_floating_y =
+				std::clamp(py, 0, std::max(0, static_cast<int>(Grid::get_height()) - clipboard.height));
 
 			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 				for (int y = 0; y < clipboard.height; ++y) {
 					for (int x = 0; x < clipboard.width; ++x) {
 						int gx = current_floating_x + x;
 						int gy = current_floating_y + y;
-						if (gx >= 0 && gx < static_cast<int>(SIM_WIDTH) && gy >= 0 &&
-							gy < static_cast<int>(SIM_HEIGHT)) {
+						if (gx >= 0 && gx < static_cast<int>(Grid::get_width()) && gy >= 0 &&
+							gy < static_cast<int>(Grid::get_height())) {
 							uint8_t cell = clipboard.cells[y * clipboard.width + x];
 							if (!transparent_mode || cell != 0) {
 								Grid::set_cell(gx, gy, cell);
@@ -1600,36 +1955,12 @@ void UI::handle_canvas_interaction() {
 
 		// Moving state
 		if (selection_state == SelectionState::Moving) {
-			int bw = selection_box.width();
-			int bh = selection_box.height();
 			int gx = static_cast<int>(grid_pos.x);
 			int gy = static_cast<int>(grid_pos.y);
-			current_floating_x = std::clamp(gx - move_grab_offset_x, 0, std::max(0, static_cast<int>(SIM_WIDTH) - bw));
-			current_floating_y = std::clamp(gy - move_grab_offset_y, 0, std::max(0, static_cast<int>(SIM_HEIGHT) - bh));
+			move_floating_selection(gx, gy);
 
 			if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-				for (int y = 0; y < bh; ++y) {
-					for (int x = 0; x < bw; ++x) {
-						int fgx = current_floating_x + x;
-						int fgy = current_floating_y + y;
-						if (fgx >= 0 && fgx < static_cast<int>(SIM_WIDTH) && fgy >= 0 &&
-							fgy < static_cast<int>(SIM_HEIGHT)) {
-							uint8_t cell = floating_cells[y * bw + x];
-							if (!transparent_mode || cell != 0) {
-								Grid::set_cell(fgx, fgy, cell);
-							}
-						}
-					}
-				}
-				floating_cells.clear();
-				if (current_floating_x != move_origin_x || current_floating_y != move_origin_y) {
-					UndoManager::push_snapshot("Move Selection");
-				}
-				selection_box.start_x = current_floating_x;
-				selection_box.start_y = current_floating_y;
-				selection_box.current_x = current_floating_x + bw - 1;
-				selection_box.current_y = current_floating_y + bh - 1;
-				selection_state = SelectionState::Selected;
+				drop_moving_selection();
 			} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
 				deselect();
 			}
@@ -1638,8 +1969,8 @@ void UI::handle_canvas_interaction() {
 
 		// Resizing state
 		if (selection_state == SelectionState::Resizing) {
-			int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(SIM_WIDTH) - 1);
-			int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(SIM_HEIGHT) - 1);
+			int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(Grid::get_width()) - 1);
+			int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(Grid::get_height()) - 1);
 
 			if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
 				if (active_resize_handle == ResizeHandle::Top || active_resize_handle == ResizeHandle::Bottom) {
@@ -1686,8 +2017,8 @@ void UI::handle_canvas_interaction() {
 		}
 
 		// None, Selecting, Selected
-		int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(SIM_WIDTH) - 1);
-		int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(SIM_HEIGHT) - 1);
+		int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(Grid::get_width()) - 1);
+		int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(Grid::get_height()) - 1);
 
 		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 			if (selection_state == SelectionState::Selected) {
@@ -1747,24 +2078,7 @@ void UI::handle_canvas_interaction() {
 
 				if (selection_box.contains(gx, gy)) {
 					// Start moving
-					int min_x = selection_box.min_x();
-					int min_y = selection_box.min_y();
-					int bw = selection_box.width();
-					int bh = selection_box.height();
-					floating_cells.resize(bw * bh);
-					for (int y = 0; y < bh; ++y) {
-						for (int x = 0; x < bw; ++x) {
-							floating_cells[y * bw + x] = Grid::get_cell(min_x + x, min_y + y);
-							Grid::set_cell(min_x + x, min_y + y, 0);
-						}
-					}
-					move_origin_x = min_x;
-					move_origin_y = min_y;
-					move_grab_offset_x = gx - min_x;
-					move_grab_offset_y = gy - min_y;
-					current_floating_x = min_x;
-					current_floating_y = min_y;
-					selection_state = SelectionState::Moving;
+					start_moving_selection(gx, gy);
 					return;
 				}
 			}
@@ -1852,54 +2166,70 @@ void UI::handle_interaction() {
 }
 
 void UI::render_header(ImGuiIO& io) {
+	const auto& cfg = ConfigManager::get_config();
 	ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "SAND3 SIMULATOR");
-	ImGui::Text("FPS: %.1f (%.3f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
-	ImGui::Text("Active cells: %u", Grid::get_changed_cells());
+	if (cfg.ui.show_fps) {
+		ImGui::Text("FPS: %.1f (%.3f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
+	}
+	if (cfg.ui.show_active_cells) {
+		ImGui::Text("Active cells: %u", Grid::get_changed_cells());
+	}
 	ImGui::Separator();
 	render_selection_controls();
 	ImGui::Separator();
 }
 
 void UI::render_sim_content() {
+	const auto& cfg = ConfigManager::get_config();
+	float avail_w = ImGui::GetContentRegionAvail().x;
+	float spacing_x = ImGui::GetStyle().ItemSpacing.x;
+	float sim_col_w = (avail_w - spacing_x * 2.0f) / 3.0f;
+	float btn_h = (cfg.ui.button_height > 0) ? static_cast<float>(cfg.ui.button_height) : 30.0f;
+	ImVec2 sim_btn_sz(sim_col_w, btn_h);
+
 	ImGui::Spacing();
 	if (update) {
-		if (ImGui::Button("Pause", ImVec2(-1, 30))) {
+		if (button_with_icon("##SimPause", IconManager::get(IconID::Pause), sim_btn_sz)) {
 			update = false;
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Pauses the simulation.");
+			ImGui::SetTooltip("Pause simulation (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::ToggleSimulation).c_str());
 		}
 	} else {
-		if (ImGui::Button("Resume", ImVec2(-1, 30))) {
+		if (button_with_icon("##SimResume", IconManager::get(IconID::Play), sim_btn_sz)) {
 			update = true;
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Resumes the simulation.");
+			ImGui::SetTooltip("Resume simulation (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::ToggleSimulation).c_str());
 		}
 	}
 
+	ImGui::SameLine();
 	if (update) {
 		ImGui::BeginDisabled();
 	}
-	if (ImGui::Button("Step Frame", ImVec2(-1, 30))) {
+	if (button_with_icon("##SimStep", IconManager::get(IconID::Step), sim_btn_sz)) {
 		step_frame = true;
 		UndoManager::push_snapshot("Step Simulation");
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Steps the simulation by one frame (F).");
+		ImGui::SetTooltip("Step simulation by one frame (%s)",
+						  ShortcutManager::get_key_string(ShortcutAction::StepFrame).c_str());
 	}
 	if (update) {
 		ImGui::EndDisabled();
 	}
 
-	ImGui::Spacing();
-
-	if (ImGui::Button("Clear Grid (R)", ImVec2(-1, 30))) {
+	ImGui::SameLine();
+	if (button_with_icon("##SimClear", IconManager::get(IconID::Clear), sim_btn_sz)) {
 		Grid::clear();
 		UndoManager::push_snapshot("Clear Grid");
 	}
 	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Clears all cells on the grid (R).");
+		ImGui::SetTooltip("Clear / Reset grid (%s)",
+						  ShortcutManager::get_key_string(ShortcutAction::ClearGrid).c_str());
 	}
 
 	ImGui::Separator();
@@ -2009,7 +2339,7 @@ void UI::render_material_editor() {
 			if (at_max) {
 				ImGui::BeginDisabled();
 			}
-			if (ImGui::Button("New", ImVec2(80, 25))) {
+			if (button_with_icon("New", IconManager::get(IconID::Add), ImVec2(80, 25))) {
 				UndoManager::push_snapshot("New Material");
 				MaterialDefinition new_mat;
 				new_mat.name = "material_" + std::to_string(materials.size());
@@ -2034,7 +2364,7 @@ void UI::render_material_editor() {
 			if (at_max) {
 				ImGui::BeginDisabled();
 			}
-			if (ImGui::Button("Copy", ImVec2(80, 25))) {
+			if (button_with_icon("Copy", IconManager::get(IconID::Copy), ImVec2(80, 25))) {
 				UndoManager::push_snapshot("Copy Material");
 				MaterialDefinition duplicated_mat = MaterialManager::get_material(selected_id);
 				duplicated_mat.name = duplicated_mat.name + "_copy";
@@ -2061,7 +2391,7 @@ void UI::render_material_editor() {
 			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-			if (ImGui::Button("Delete", ImVec2(80, 25))) {
+			if (button_with_icon("Delete", IconManager::get(IconID::Clear), ImVec2(80, 25))) {
 				UndoManager::push_snapshot("Delete Material");
 				MaterialManager::remove_material(selected_id);
 				selected_id = 0;
@@ -2147,7 +2477,7 @@ void UI::render_material_editor() {
 
 		mat.sync_rule_order();
 
-		if (ImGui::Button("Add Rule")) {
+		if (button_with_icon("Add Rule", IconManager::get(IconID::Add))) {
 			if (selected_id == 0) {
 				open_empty_rule_warning_popup = true;
 			} else {
@@ -2207,7 +2537,7 @@ void UI::render_material_editor() {
 			}
 			ImGui::SameLine(0.0f, 10.0f);
 
-			if (ImGui::Button("Copy", ImVec2(45, 0))) {
+			if (button_with_icon("##CopyRule", IconManager::get(IconID::Copy), ImVec2(btn_size, btn_size))) {
 				UndoManager::push_snapshot("Copy Rule");
 				RuleDefinition duplicated_rule = rule;
 				mat.rules.push_back(duplicated_rule);
@@ -2228,7 +2558,13 @@ void UI::render_material_editor() {
 			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-			if (ImGui::Button("X", ImVec2(btn_size, btn_size))) {
+			bool delete_rule_clicked =
+				button_with_icon("##DeleteRule", IconManager::get(IconID::Cross), ImVec2(btn_size, btn_size));
+			ImGui::PopStyleColor(3);
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Delete this rule.");
+			}
+			if (delete_rule_clicked) {
 				UndoManager::push_snapshot("Delete Rule");
 				if (!reference.is_inherited) {
 					size_t target_idx = reference.index;
@@ -2250,10 +2586,6 @@ void UI::render_material_editor() {
 				ImGui::EndChild();
 				ImGui::PopID();
 				break;
-			}
-			ImGui::PopStyleColor(3);
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Delete this rule.");
 			}
 
 			if (reference.is_inherited) {
@@ -2613,7 +2945,7 @@ void UI::render_manage_sets() {
 		ImGui::EndChild();
 
 		ImGui::Spacing();
-		if (ImGui::Button("New", ImVec2(80, 25))) {
+		if (button_with_icon("New", IconManager::get(IconID::Add), ImVec2(80, 25))) {
 			open_create_set_popup = true;
 			duplicate_set_checkbox = false;
 		}
@@ -2622,7 +2954,7 @@ void UI::render_manage_sets() {
 		}
 
 		ImGui::SameLine();
-		if (ImGui::Button("Copy", ImVec2(80, 25))) {
+		if (button_with_icon("Copy", IconManager::get(IconID::Copy), ImVec2(80, 25))) {
 			open_create_set_popup = true;
 			duplicate_set_checkbox = true;
 		}
@@ -2635,7 +2967,7 @@ void UI::render_manage_sets() {
 			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-			if (ImGui::Button("Delete", ImVec2(80, 25))) {
+			if (button_with_icon("Delete", IconManager::get(IconID::Clear), ImVec2(80, 25))) {
 				open_delete_set_popup = true;
 			}
 			ImGui::PopStyleColor(3);
@@ -2644,7 +2976,7 @@ void UI::render_manage_sets() {
 			}
 		} else {
 			ImGui::BeginDisabled();
-			ImGui::Button("Delete", ImVec2(80, 25));
+			button_with_icon("Delete", IconManager::get(IconID::Clear), ImVec2(80, 25));
 			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
 				ImGui::SetTooltip("Cannot delete the only set.");
 			}
@@ -2709,7 +3041,7 @@ void UI::render_manage_sets() {
 		}
 
 		ImGui::Spacing();
-		if (ImGui::Button("Save Current Set", ImVec2(-1, 30))) {
+		if (button_with_icon("Save Current Set", IconManager::get(IconID::Save), ImVec2(-1, 30))) {
 			SetManager::update_current_metadata(meta);
 			MaterialManager::save_all_materials(SETS_DIRECTORY + current_set);
 			unsaved_changes = false;
@@ -2728,117 +3060,260 @@ void UI::render_save_load() {
 	if (ImGui::BeginTabItem("Saves")) {
 		ImGui::Spacing();
 
-		ImGui::Text("Save Current Simulation:");
-		ImGui::InputText("Save Name##save_name", save_file_name_buf, sizeof(save_file_name_buf));
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Input a name for the save file.");
-		}
-
-		if (ImGui::Button("Save Simulation", ImVec2(-1, 30))) {
-			std::string s_name = save_file_name_buf;
-			if (!s_name.empty()) {
-				if (SaveManager::save_to_file(s_name, current_set)) {
-					save_file_name_buf[0] = '\0';
+		if (ImGui::BeginTabBar("SavesSubTabBar")) {
+			if (ImGui::BeginTabItem("World Saves")) {
+				ImGui::Spacing();
+				ImGui::Text("Save Current Simulation:");
+				ImGui::InputText("Save Name##save_name", save_file_name_buf, sizeof(save_file_name_buf));
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Input a name for the save file.");
 				}
-			}
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Saves grid state to a .save file.");
-		}
 
-		ImGui::Separator();
-		ImGui::Text("Available Saves in current set folder:");
-
-		std::vector<std::string> save_files;
-		std::string set_dir = SETS_DIRECTORY + current_set;
-		if (fs::exists(set_dir) && fs::is_directory(set_dir)) {
-			for (const auto& entry : fs::directory_iterator(set_dir)) {
-				if (entry.is_regular_file() && entry.path().extension() == ".save") {
-					save_files.push_back(entry.path().filename().string());
-				}
-			}
-		}
-
-		ImGui::BeginChild("SavesListScroll", ImVec2(0, 180), true);
-		for (uint32_t i = 0; i < static_cast<uint32_t>(save_files.size()); ++i) {
-			bool is_selected = (selected_save_id == i);
-			if (ImGui::Selectable(save_files[i].c_str(), selected_save_id == i)) {
-				selected_save_id = static_cast<int>(i);
-			}
-			if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
-				if (unsaved_changes) {
-					pending_save_load = save_files[i];
-					open_switch_popup = true;
-				} else {
-					std::string loaded_set;
-					if (SaveManager::load_from_file(save_files[i], current_set, loaded_set)) {
-						selected_id = 0;
-						unsaved_changes = false;
+				if (button_with_icon("Save Simulation", IconManager::get(IconID::Save), ImVec2(-1, 30))) {
+					std::string s_name = save_file_name_buf;
+					if (!s_name.empty()) {
+						if (SaveManager::save_to_file(s_name, current_set)) {
+							save_file_name_buf[0] = '\0';
+						}
 					}
 				}
-			}
-		}
-		ImGui::EndChild();
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Double click to load. Switches current material set.");
-		}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Saves grid state to sets/<set>/saves/*.save");
+				}
 
-		ImGui::Spacing();
-		if (selected_save_id >= 0 && selected_save_id < static_cast<int>(save_files.size())) {
-			if (ImGui::Button("Load", ImVec2(80, 25))) {
-				if (unsaved_changes) {
-					pending_save_load = save_files[selected_save_id];
-					open_switch_popup = true;
-				} else {
-					std::string loaded_set;
-					if (SaveManager::load_from_file(save_files[selected_save_id], current_set, loaded_set)) {
-						selected_id = 0;
-						unsaved_changes = false;
+				ImGui::Separator();
+				ImGui::Text("Available Saves in sets/%s/saves/:", current_set.c_str());
+
+				auto save_files = SaveManager::get_save_files(current_set);
+
+				ImGui::BeginChild("SavesListScroll", ImVec2(0, 180), true);
+				for (uint32_t i = 0; i < static_cast<uint32_t>(save_files.size()); ++i) {
+					bool is_selected = (selected_save_id == static_cast<int>(i));
+					std::string label =
+						fmt::format("{} ({}x{}){}", save_files[i].name, save_files[i].width, save_files[i].height,
+									save_files[i].dimensions_differ ? " [Diff Size]" : "");
+					if (ImGui::Selectable(label.c_str(), is_selected)) {
+						selected_save_id = static_cast<int>(i);
+					}
+					if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
+						if (save_files[i].dimensions_differ) {
+							pending_diff_save = save_files[i];
+							open_diff_size_save_popup = true;
+						} else {
+							if (unsaved_changes) {
+								pending_save_load = save_files[i].filename;
+								open_switch_popup = true;
+							} else {
+								std::string loaded_set;
+								if (SaveManager::load_from_file(save_files[i].filename, current_set, loaded_set)) {
+									selected_id = 0;
+									unsaved_changes = false;
+								}
+							}
+						}
 					}
 				}
+				ImGui::EndChild();
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Double click to load. Handles different canvas dimensions.");
+				}
+
+				ImGui::Spacing();
+				if (selected_save_id >= 0 && selected_save_id < static_cast<int>(save_files.size())) {
+					if (button_with_icon("Load", IconManager::get(IconID::Folder), ImVec2(80, 25))) {
+						if (save_files[selected_save_id].dimensions_differ) {
+							pending_diff_save = save_files[selected_save_id];
+							open_diff_size_save_popup = true;
+						} else {
+							if (unsaved_changes) {
+								pending_save_load = save_files[selected_save_id].filename;
+								open_switch_popup = true;
+							} else {
+								std::string loaded_set;
+								if (SaveManager::load_from_file(save_files[selected_save_id].filename, current_set,
+																loaded_set)) {
+									selected_id = 0;
+									unsaved_changes = false;
+								}
+							}
+						}
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Load the selected save file.");
+					}
+
+					ImGui::SameLine();
+					if (button_with_icon("Copy", IconManager::get(IconID::Copy), ImVec2(80, 25))) {
+						std::string new_name = save_files[selected_save_id].name + "_copy";
+						SaveManager::duplicate_save_file(save_files[selected_save_id].filename, new_name, current_set);
+						selected_save_id = -1;
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Duplicate the selected save file.");
+					}
+
+					ImGui::SameLine();
+					ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+					ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+					if (button_with_icon("Delete", IconManager::get(IconID::Clear), ImVec2(80, 25))) {
+						SaveManager::delete_save_file(save_files[selected_save_id].filename, current_set);
+						selected_save_id = -1;
+					}
+					ImGui::PopStyleColor(3);
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Delete the selected save file.");
+					}
+				} else {
+					ImGui::TextDisabled("Select a save file to load/copy/delete");
+				}
+
+				ImGui::EndTabItem();
+			}
+
+			if (ImGui::BeginTabItem("Stamps")) {
+				ImGui::Spacing();
+				bool has_selection = (selection_state == SelectionState::Selected);
+				if (has_selection) {
+					ImGui::Text("Save Active Selection as Stamp Prefab:");
+					static char stamp_tab_name[64] = "";
+					ImGui::InputText("Stamp Name##tab_stamp", stamp_tab_name, sizeof(stamp_tab_name));
+					if (button_with_icon("Save Selection as Stamp", IconManager::get(IconID::Save), ImVec2(-1, 28))) {
+						std::string sname = stamp_tab_name;
+						if (!sname.empty()) {
+							int sx = selection_box.min_x();
+							int sy = selection_box.min_y();
+							int sw = selection_box.width();
+							int sh = selection_box.height();
+							std::vector<uint8_t> stamp_cells(sw * sh);
+							for (int y = 0; y < sh; ++y) {
+								for (int x = 0; x < sw; ++x) {
+									stamp_cells[y * sw + x] = Grid::get_cell(sx + x, sy + y);
+								}
+							}
+							SaveManager::save_stamp_to_file(sname, current_set, stamp_cells, sw, sh);
+							stamp_tab_name[0] = '\0';
+						}
+					}
+					ImGui::Separator();
+				}
+
+				ImGui::Text("Available Stamps in sets/%s/saves/:", current_set.c_str());
+				auto stamp_files = SaveManager::get_stamp_files(current_set);
+				ImGui::BeginChild("StampsListScroll", ImVec2(0, 180), true);
+				for (uint32_t i = 0; i < static_cast<uint32_t>(stamp_files.size()); ++i) {
+					bool is_selected = (selected_stamp_id == static_cast<int>(i));
+					std::string label =
+						fmt::format("{} ({}x{})", stamp_files[i].name, stamp_files[i].width, stamp_files[i].height);
+					if (ImGui::Selectable(label.c_str(), is_selected)) {
+						selected_stamp_id = static_cast<int>(i);
+					}
+					if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
+						std::vector<uint8_t> cells;
+						uint32_t sw = 0, sh = 0;
+						if (SaveManager::load_stamp_from_file(stamp_files[i].filename, current_set, cells, sw, sh)) {
+							load_stamp(cells, sw, sh);
+						}
+					}
+				}
+				ImGui::EndChild();
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Double click to stamp/paste onto canvas.");
+				}
+
+				ImGui::Spacing();
+				if (selected_stamp_id >= 0 && selected_stamp_id < static_cast<int>(stamp_files.size())) {
+					if (button_with_icon("Stamp / Paste", IconManager::get(IconID::Paste), ImVec2(100, 25))) {
+						std::vector<uint8_t> cells;
+						uint32_t sw = 0, sh = 0;
+						if (SaveManager::load_stamp_from_file(stamp_files[selected_stamp_id].filename, current_set,
+															  cells, sw, sh)) {
+							load_stamp(cells, sw, sh);
+						}
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Load into clipboard and start pasting.");
+					}
+
+					ImGui::SameLine();
+					ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+					ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+					ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+					if (button_with_icon("Delete##StampDel", IconManager::get(IconID::Clear), ImVec2(80, 25))) {
+						SaveManager::delete_stamp_file(stamp_files[selected_stamp_id].filename, current_set);
+						selected_stamp_id = -1;
+					}
+					ImGui::PopStyleColor(3);
+				} else {
+					ImGui::TextDisabled("Select a stamp to paste or delete");
+				}
+
+				ImGui::EndTabItem();
+			}
+
+			ImGui::EndTabBar();
+		}
+
+		// Modal for differently sized saves
+		if (open_diff_size_save_popup) {
+			ImGui::OpenPopup("Differently Sized Save Detected");
+			open_diff_size_save_popup = false;
+		}
+
+		if (ImGui::BeginPopupModal("Differently Sized Save Detected", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::Text("Save file: '%s'", pending_diff_save.name.c_str());
+			ImGui::Text("Save Dimensions: %u x %u", pending_diff_save.width, pending_diff_save.height);
+			ImGui::Text("Current Grid: %u x %u", Grid::get_width(), Grid::get_height());
+			ImGui::Spacing();
+			ImGui::Text("Choose how to load this save into the simulation:");
+			ImGui::Spacing();
+
+			if (ImGui::Button("Place in Center", ImVec2(180, 32))) {
+				std::string loaded_set;
+				SaveManager::load_from_file(pending_diff_save.filename, current_set, loaded_set, LoadPlacement::Center);
+				selected_id = 0;
+				unsaved_changes = false;
+				ImGui::CloseCurrentPopup();
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Load the selected save file.");
+				ImGui::SetTooltip("Places the saved content centered in the current canvas.");
 			}
 
 			ImGui::SameLine();
-			if (ImGui::Button("Copy", ImVec2(80, 25))) {
-				const std::string old_name = save_files[selected_save_id];
-				std::string new_name = old_name;
-				const size_t dot = new_name.find_last_of('.');
-				if (dot != std::string::npos) {
-					new_name = new_name.substr(0, dot) + "_copy" + new_name.substr(dot);
-				} else {
-					new_name += "_copy";
-				}
-				const std::string old_path = SETS_DIRECTORY + current_set + "/" + old_name;
-				const std::string new_path = SETS_DIRECTORY + current_set + "/" + new_name;
-				try {
-					fs::copy(old_path, new_path);
-				} catch (...) {}
-				selected_save_id = -1;
+			if (ImGui::Button("Crop / Top-Left", ImVec2(180, 32))) {
+				std::string loaded_set;
+				SaveManager::load_from_file(pending_diff_save.filename, current_set, loaded_set,
+											LoadPlacement::TopLeft);
+				selected_id = 0;
+				unsaved_changes = false;
+				ImGui::CloseCurrentPopup();
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Duplicate the selected save file.");
+				ImGui::SetTooltip("Places at (0,0), cropping if larger or leaving air if smaller.");
 			}
 
-			ImGui::SameLine();
-			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
-			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-			if (ImGui::Button("Delete", ImVec2(80, 25))) {
-				std::string filepath = SETS_DIRECTORY + current_set + "/" + save_files[selected_save_id];
-				try {
-					fs::remove(filepath);
-				} catch (...) {}
-				selected_save_id = -1;
+			ImGui::Spacing();
+			if (ImGui::Button("Resize Grid to Match Save", ImVec2(368, 32))) {
+				std::string loaded_set;
+				SaveManager::load_from_file(pending_diff_save.filename, current_set, loaded_set,
+											LoadPlacement::ResizeGrid);
+				selected_id = 0;
+				unsaved_changes = false;
+				ImGui::CloseCurrentPopup();
 			}
-			ImGui::PopStyleColor(3);
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Delete the selected save file.");
+				ImGui::SetTooltip("Resizes canvas to %u x %u.", pending_diff_save.width, pending_diff_save.height);
 			}
-		} else {
-			ImGui::TextDisabled("Select a save file to load/copy/delete");
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Warning: Resizing grid resets undo/redo history!");
+
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			if (ImGui::Button("Cancel", ImVec2(100, 25))) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
 		}
 
 		ImGui::EndTabItem();
@@ -2916,7 +3391,7 @@ void UI::render_advanced_options() {
 			ImGui::Spacing();
 
 			int thread_count = static_cast<int>(Grid::get_thread_count());
-			if (ImGui::SliderInt("Active Threads", &thread_count, 1, NUM_STRIPS_Y / 2)) {
+			if (ImGui::SliderInt("Active Threads", &thread_count, 1, Grid::get_num_strips_y() / 2)) {
 				Grid::configure_threads(static_cast<uint32_t>(thread_count));
 				ConfigManager::save();
 			}
@@ -2943,6 +3418,126 @@ void UI::render_advanced_options() {
 			}
 		}
 
+		// Simulation Canvas Size
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+
+		ImGui::Text("Simulation Canvas Size");
+		uint32_t current_w = Grid::get_width();
+		uint32_t current_h = Grid::get_height();
+		uint64_t current_cells = static_cast<uint64_t>(current_w) * current_h;
+		ImGui::TextDisabled("Current Size: %u x %u (%lu cells)", current_w, current_h, current_cells);
+
+		static int target_sim_w = static_cast<int>(current_w);
+		static int target_sim_h = static_cast<int>(current_h);
+		static bool resize_preserve_content = true;
+		static bool open_resize_confirm_popup = false;
+
+		// Sync with actual grid dimensions if changed externally
+		static uint32_t last_known_w = current_w;
+		static uint32_t last_known_h = current_h;
+		if (last_known_w != current_w || last_known_h != current_h) {
+			target_sim_w = static_cast<int>(current_w);
+			target_sim_h = static_cast<int>(current_h);
+			last_known_w = current_w;
+			last_known_h = current_h;
+		}
+
+		ImGui::Text("Presets:");
+		if (ImGui::Button("256x256")) {
+			target_sim_w = 256;
+			target_sim_h = 256;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("512x512")) {
+			target_sim_w = 512;
+			target_sim_h = 512;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("1024x1024")) {
+			target_sim_w = 1024;
+			target_sim_h = 1024;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("1536x1536")) {
+			target_sim_w = 1536;
+			target_sim_h = 1536;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("2048x2048")) {
+			target_sim_w = 2048;
+			target_sim_h = 2048;
+		}
+
+		ImGui::InputInt("Width##SimW", &target_sim_w, 16, 64);
+		ImGui::InputInt("Height##SimH", &target_sim_h, 16, 64);
+		if (target_sim_w < 128)
+			target_sim_w = 128;
+		if (target_sim_w > 4096)
+			target_sim_w = 4096;
+		if (target_sim_h < 128)
+			target_sim_h = 128;
+		if (target_sim_h > 4096)
+			target_sim_h = 4096;
+		target_sim_w = ((target_sim_w + 15) / 16) * 16;
+		target_sim_h = ((target_sim_h + 15) / 16) * 16;
+
+		uint64_t target_cells = static_cast<uint64_t>(target_sim_w) * target_sim_h;
+		if (target_cells > 1024 * 1024) {
+			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+							   "Warning: Large canvas (>1024x1024 / >1M cells) can significantly reduce performance!");
+		}
+
+		ImGui::Checkbox("Preserve existing canvas cells (crop / pad)", &resize_preserve_content);
+
+		bool size_differs =
+			(target_sim_w != static_cast<int>(current_w) || target_sim_h != static_cast<int>(current_h));
+		if (!size_differs)
+			ImGui::BeginDisabled();
+		if (ImGui::Button("Apply Simulation Size", ImVec2(-1, 30))) {
+			open_resize_confirm_popup = true;
+		}
+		if (!size_differs)
+			ImGui::EndDisabled();
+
+		if (open_resize_confirm_popup) {
+			ImGui::OpenPopup("Confirm Canvas Resize");
+			open_resize_confirm_popup = false;
+		}
+
+		if (ImGui::BeginPopupModal("Confirm Canvas Resize", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::Text("Are you sure you want to resize the simulation canvas?");
+			ImGui::Text("Target size: %d x %d (%lu cells)", target_sim_w, target_sim_h, target_cells);
+			ImGui::Spacing();
+			if (target_cells > 1024 * 1024) {
+				ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.1f, 1.0f),
+								   "Performance Warning: Canvas exceeds 1,048,576 cells.\nFrame rates on CPU and GPU "
+								   "may drop.");
+				ImGui::Spacing();
+			}
+			ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
+							   "Warning: Resizing the simulation will reset undo/redo history!");
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			if (ImGui::Button("Confirm Resize", ImVec2(130, 30))) {
+				deselect();
+				Grid::resize(static_cast<uint32_t>(target_sim_w), static_cast<uint32_t>(target_sim_h),
+							 resize_preserve_content);
+				UndoManager::clear();
+				UndoManager::init();
+				last_known_w = target_sim_w;
+				last_known_h = target_sim_h;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(100, 30))) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
 		ImGui::EndTabItem();
 	}
 }
@@ -2950,65 +3545,226 @@ void UI::render_advanced_options() {
 void UI::render_shortcuts() {
 	if (ImGui::BeginTabItem("Shortcuts")) {
 		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "Keyboard & Mouse Shortcuts");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::Text("Simulation:");
-		ImGui::BulletText("Space: Toggle simulation");
-		ImGui::BulletText("F: Step simulation by one frame (when paused)");
-		ImGui::BulletText("R: Clear / Reset grid");
-
-		ImGui::Spacing();
-		ImGui::Text("Camera:");
-		ImGui::BulletText("W / A / S / D: Move camera (Hold Shift for fast pan)");
-		ImGui::BulletText("Middle Mouse Drag: Pan camera");
-		ImGui::BulletText("Shift + Scroll / PageUp/PageDown / +/-: Zoom camera");
+		if (ImGui::Button("Reset All Shortcuts to Default", ImVec2(240, 26))) {
+			ShortcutManager::reset_all_to_defaults();
+			ConfigManager::save();
+		}
+		ImGui::SameLine();
+		static char shortcut_filter_buf[64] = "";
+		ImGui::SetNextItemWidth(180);
+		ImGui::InputTextWithHint("##shortcut_filter", "Search shortcuts...", shortcut_filter_buf,
+								 sizeof(shortcut_filter_buf));
 
 		ImGui::Spacing();
-		ImGui::Text("General:");
-		ImGui::BulletText("V: Toggle compact UI");
-		ImGui::BulletText("Ctrl + Z: Undo last action");
-		ImGui::BulletText("Ctrl + Y / Ctrl + Shift + Z: Redo action");
-		ImGui::BulletText("F11: Toggle fullscreen");
-		ImGui::BulletText("Escape: Cancel selection/paste/move, or Quit");
+		ImGui::BeginChild("ShortcutsEditorScroll", ImVec2(0, -1), true);
+
+		std::string filter = shortcut_filter_buf;
+		std::transform(filter.begin(), filter.end(), filter.begin(),
+					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		std::string last_cat = "";
+		for (const auto& s : ShortcutManager::get_all()) {
+			std::string name_lower = s.display_name;
+			std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string cat_lower = s.category;
+			std::transform(cat_lower.begin(), cat_lower.end(), cat_lower.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string key_lower = s.current_key;
+			std::transform(key_lower.begin(), key_lower.end(), key_lower.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string def_lower = s.default_key;
+			std::transform(def_lower.begin(), def_lower.end(), def_lower.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			if (!filter.empty() && name_lower.find(filter) == std::string::npos &&
+				cat_lower.find(filter) == std::string::npos && key_lower.find(filter) == std::string::npos &&
+				def_lower.find(filter) == std::string::npos) {
+				continue;
+			}
+
+			if (s.category != last_cat) {
+				if (!last_cat.empty())
+					ImGui::Spacing();
+				ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "%s", s.category.c_str());
+				ImGui::Separator();
+				last_cat = s.category;
+			}
+
+			ImGui::PushID(s.id.c_str());
+			bool mod = ShortcutManager::is_modified(s.action);
+			if (mod) {
+				ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "*");
+				ImGui::SameLine();
+			}
+			ImGui::Text("%s:", s.display_name.c_str());
+			ImGui::SameLine(240);
+
+			char key_buf[32];
+			std::snprintf(key_buf, sizeof(key_buf), "%s", s.current_key.c_str());
+			ImGui::SetNextItemWidth(120);
+			if (ImGui::InputText("##key", key_buf, sizeof(key_buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+				if (ShortcutManager::set_key_string(s.action, key_buf)) {
+					ConfigManager::save();
+				}
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Key combo (e.g. Space, F, Ctrl+Z, Shift+A, PageUp). Press Enter to apply.\nDefault: %s",
+					s.default_key.c_str());
+			}
+
+			if (mod) {
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Reset##key")) {
+					ShortcutManager::reset_to_default(s.action);
+					ConfigManager::save();
+				}
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndChild();
+		ImGui::EndTabItem();
+	}
+}
+
+void UI::render_theme_editor() {
+	if (ImGui::BeginTabItem("Theme Editor")) {
+		ImGui::Spacing();
+
+		auto& cfg = ConfigManager::get_config();
+		const auto& def_cfg = ConfigManager::get_default_config();
+		ImGuiStyle& style = ImGui::GetStyle();
 
 		ImGui::Spacing();
-		ImGui::Text("Tools & Selection:");
-		ImGui::BulletText("B: Switch to Brush tool");
-		ImGui::BulletText("Left Mouse Drag (Select mode): Select box region");
-		ImGui::BulletText("Left Mouse Drag (inside box): Move selected cells");
-		ImGui::BulletText("Left Mouse Drag (handles): Resize selection (corners & midpoints)");
-		ImGui::BulletText("Q: Rotate selection 90° clockwise");
-		ImGui::BulletText("E: Rotate selection 90° counter-clockwise");
-		ImGui::BulletText("Ctrl + C: Copy selection");
-		ImGui::BulletText("Ctrl + X: Cut selected cells to clipboard");
-		ImGui::BulletText("Ctrl + V: Paste clipboard at cursor (Left click to stamp)");
-		ImGui::BulletText("Ctrl + F: Fill selected cells with selected material");
-		ImGui::BulletText("Delete: Delete selected cells");
-		ImGui::BulletText("Arrow Keys (Shift for 10x): Nudge selected cells");
-		ImGui::BulletText("Escape / Right Click: Deselect / Cancel move or paste");
+		if (ImGui::Button("Reset Style to Defaults", ImVec2(200, 26))) {
+			cfg.ui.window_rounding = def_cfg.ui.window_rounding;
+			cfg.ui.frame_rounding = def_cfg.ui.frame_rounding;
+			cfg.ui.button_height = def_cfg.ui.button_height;
+			cfg.ui.ui_scale = def_cfg.ui.ui_scale;
+			cfg.ui.font_size = def_cfg.ui.font_size;
+			cfg.ui.show_fps = def_cfg.ui.show_fps;
+			cfg.ui.show_active_cells = def_cfg.ui.show_active_cells;
 
-		ImGui::Spacing();
-		ImGui::Text("Grid:");
-		ImGui::BulletText("Left Mouse Button: Draw material");
-		ImGui::BulletText("Right Mouse Button: Erase material");
-		ImGui::BulletText("Shift + Mouse Drag: Draw straight line or erase");
-		ImGui::BulletText("Shift + Alt + Mouse Click: Flood fill or erase");
-		ImGui::BulletText("Middle Mouse Button: Eyedropper (pick material)");
+			style.WindowRounding = cfg.ui.window_rounding;
+			style.FrameRounding = cfg.ui.frame_rounding;
+			style.ChildRounding = cfg.ui.frame_rounding;
+			style.PopupRounding = cfg.ui.frame_rounding;
+			style.GrabRounding = cfg.ui.frame_rounding;
+			style.TabRounding = cfg.ui.frame_rounding;
 
-		ImGui::Text("Brush:");
-		ImGui::BulletText("C: Switch to Selection tool");
-		ImGui::BulletText("T: Next brush shape (Square, Circle)");
-		ImGui::BulletText("Scroll Up/Down: Adjust brush size");
-		ImGui::BulletText("Ctrl + Scroll Up/Down: Faster brush size adjust");
+			ConfigManager::save();
+		}
 		ImGui::Spacing();
 
-		ImGui::Text("Rule Grid:");
-		ImGui::BulletText("Left Click: Select material(s)");
-		ImGui::BulletText("Shift + Left Click / Drag: Paint material(s)");
-		ImGui::BulletText("Middle Click: Copy material(s)");
-		ImGui::BulletText("Right Click: Clear cell(s)");
+		// Window Rounding
+		float win_round = cfg.ui.window_rounding;
+		if (ImGui::SliderFloat("Window Rounding", &win_round, 0.0f, 20.0f, "%.1f px")) {
+			cfg.ui.window_rounding = win_round;
+			style.WindowRounding = win_round;
+			ConfigManager::save();
+		}
+
+		// Widget Rounding
+		float frame_round = cfg.ui.frame_rounding;
+		if (ImGui::SliderFloat("Widget Rounding", &frame_round, 0.0f, 16.0f, "%.1f px")) {
+			cfg.ui.frame_rounding = frame_round;
+			style.FrameRounding = frame_round;
+			style.ChildRounding = frame_round;
+			style.PopupRounding = frame_round;
+			style.GrabRounding = frame_round;
+			style.TabRounding = frame_round;
+			ConfigManager::save();
+		}
+
+		// Button Height
+		int btn_h = cfg.ui.button_height;
+		if (ImGui::SliderInt("Button Height", &btn_h, 20, 50, "%d px")) {
+			cfg.ui.button_height = btn_h;
+			ConfigManager::save();
+		}
+
+		// UI Scale
+		float scale = cfg.ui.ui_scale;
+		if (ImGui::SliderFloat("UI Scale*", &scale, 0.5f, 2.5f, "%.2fx")) {
+			cfg.ui.ui_scale = scale;
+			ConfigManager::save();
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("*Requires application restart to apply.");
+		}
+
+		// Font Size
+		float f_sz = cfg.ui.font_size;
+		if (ImGui::SliderFloat("Font Size*", &f_sz, 10.0f, 32.0f, "%.1f px")) {
+			cfg.ui.font_size = f_sz;
+			ConfigManager::save();
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("*Requires application restart to reload font atlas.");
+		}
+
+		// Checkboxes for FPS & Active Cells
+		bool show_fps = cfg.ui.show_fps;
+		if (ImGui::Checkbox("Show FPS Counter in Header", &show_fps)) {
+			cfg.ui.show_fps = show_fps;
+			ConfigManager::save();
+		}
+		ImGui::SameLine();
+		bool show_cells = cfg.ui.show_active_cells;
+		if (ImGui::Checkbox("Show Active Cells in Header", &show_cells)) {
+			cfg.ui.show_active_cells = show_cells;
+			ConfigManager::save();
+		}
+
+		ImGui::Spacing();
+
+		if (ImGui::Button("Reset All Colors to Default", ImVec2(220, 26))) {
+			UI::reset_theme_colors();
+		}
+		ImGui::SameLine();
+		static char color_filter_buf[64] = "";
+		ImGui::SetNextItemWidth(180);
+		ImGui::InputTextWithHint("##col_filter", "Filter colors...", color_filter_buf, sizeof(color_filter_buf));
+
+		ImGui::Spacing();
+		ImGui::BeginChild("ColorEditorScroll", ImVec2(0, -1), true);
+		const ImVec4* defs = UI::get_default_colors();
+		std::string filter = color_filter_buf;
+		std::transform(filter.begin(), filter.end(), filter.begin(),
+					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
+			const char* col_name = ImGui::GetStyleColorName(i);
+			std::string lname = col_name;
+			std::transform(lname.begin(), lname.end(), lname.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			if (!filter.empty() && lname.find(filter) == std::string::npos) {
+				continue;
+			}
+
+			ImGui::PushID(i);
+			bool modified = defs && ConfigManager::color_differs(style.Colors[i], defs[i]);
+			if (modified) {
+				ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "*");
+				ImGui::SameLine();
+			}
+			if (ImGui::ColorEdit4(col_name, (float*)&style.Colors[i],
+								  ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf)) {
+				ConfigManager::get_color_overrides()[col_name] = ConfigManager::color_to_hex(style.Colors[i]);
+				ConfigManager::save();
+			}
+			if (modified) {
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Reset##col")) {
+					style.Colors[i] = defs[i];
+					ConfigManager::get_color_overrides().erase(col_name);
+					ConfigManager::save();
+				}
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndChild();
 		ImGui::EndTabItem();
 	}
 }
@@ -3047,8 +3803,8 @@ void UI::render_modals() {
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		ImGui::TextWrapped(
-			"Adding rules to the 'empty' material means every empty cell on the grid will be evaluated every frame.");
+		ImGui::TextWrapped("Adding rules to the 'empty' material means every empty cell on the grid will be "
+						   "evaluated every frame.");
 		ImGui::TextWrapped(
 			"This can significantly lower simulation performance when large areas of the grid are empty.");
 		ImGui::Spacing();
