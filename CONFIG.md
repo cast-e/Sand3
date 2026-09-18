@@ -5,9 +5,8 @@ This guide documents the configuration system in Sand3, including `config.ini` (
 ---
 
 ## Table of Contents
-1. [Configuration Philosophy: Delta-Only Saving](#configuration-philosophy-delta-only-saving)
+1. [Delta-Only Saving](#delta-only-saving)
 2. [Global Configuration: `config.ini`](#global-configuration-configini)
-   - [File Location](#file-location)
    - [[Window] Settings](#window-settings)
    - [[Advanced] Settings](#advanced-settings)
    - [[UI] Settings](#ui-settings)
@@ -16,12 +15,11 @@ This guide documents the configuration system in Sand3, including `config.ini` (
 3. [Per-Set Configuration: `set_config.ini`](#per-set-configuration-set_configini)
    - [File Location](#set-file-location)
    - [Supported Properties](#supported-properties)
-   - [Legacy `set.cfg` Migration](#legacy-setcfg-migration)
 4. [Example Configurations](#example-configurations)
 
 ---
 
-## Configuration Philosophy: Delta-Only Saving
+## Delta-Only Saving
 
 Sand3 uses a **delta-only serialization** approach for all configuration files:
 
@@ -35,16 +33,9 @@ Sand3 uses a **delta-only serialization** approach for all configuration files:
 
 ## Global Configuration: `config.ini`
 
-### File Location
-`config.ini` is located in the working directory of the application:
-- Linux: `bin/linux/config.ini` (or `./config.ini` when running from the binary directory)
-- Windows: `bin/win64/config.ini` (or `./config.ini` when running from the binary directory)
-
----
-
 ### [Window] Settings
 
-Controls the initial geometry, placement, and display state of the application window.
+Controls the initial placement and display state of the application window.
 
 | Key | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -59,7 +50,7 @@ Controls the initial geometry, placement, and display state of the application w
 
 ### [Advanced] Settings
 
-Controls simulation engine execution, multi-threading, frame rate targets, and synchronization.
+Controls simulation execution, multi-threading, frame rate targets, and synchronization.
 
 | Key | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -97,7 +88,7 @@ Controls layout, scaling, typography, and styling of the Dear ImGui interface.
 
 ### [Shortcuts] Keyboard Customization
 
-All keyboard shortcuts can be customized either directly in `config.ini` under `[Shortcuts]` or through the in-game UI under **Settings > Advanced > Custom Keyboard Shortcuts**.
+All keyboard shortcuts can be customized either directly in `config.ini` under `[Shortcuts]` or through the in-game UI.
 
 #### Key Combination Syntax
 Key combinations can include zero or more modifiers separated by `+`, followed by a key name:
@@ -155,7 +146,7 @@ Key combinations can include zero or more modifiers separated by `+`, followed b
 
 ### [Colors] Theme Colors
 
-All UI colors can be customized interactively in **Settings > Advanced > UI Appearance & Theme Colors** or manually via `[Colors]` in `config.ini`.
+All UI colors can be customized interactively in the UI or manually via `[Colors]` in `config.ini`.
 
 #### Color Value Formats
 Colors can be written in either `#RRGGBB` or `#RRGGBBAA` hex notation (e.g. `#1A1A1AFF` or `#FF5500`).
@@ -225,39 +216,29 @@ Colors can be written in either `#RRGGBB` or `#RRGGBBAA` hex notation (e.g. `#1A
 ## Per-Set Configuration: `set_config.ini`
 
 ### Set File Location
-Each material set has its own folder inside `bin/sets/<set_name>/` containing `materials.json`, `rules.json`, and `set_config.ini`:
+Each material set has its own folder inside `sets/<set_name>/` containing a `set_config.ini`:
 ```
-bin/sets/enviroment/
-├── materials.json
-├── rules.json
+sets/enviroment/
 ├── set_config.ini
+├── material_x.json
+├── material_y.json
 └── saves/
 ```
 
 ### Supported Properties
 
-All properties in `set_config.ini` are optional. When omitted or set to 0/-1, the application inherits the global defaults from `config.ini`.
+All properties in `set_config.ini` are optional.
 
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `author` | String | `""` | Name or handle of the author / set creator. |
 | `description` | String | `""` | Description of the material set, simulation mechanics, or rules. |
-| `width` | Unsigned Integer | `1024` | Simulation grid width in cells. Must be between 64 and 4096, and must be a multiple of 32 for GPU workgroup alignment. |
-| `height` | Unsigned Integer | `1024` | Simulation grid height in cells. Must be between 64 and 4096, and must be a multiple of 32 for GPU workgroup alignment. |
-| `target_fps` | Unsigned Integer | `0` (Inherit) | Per-set simulation target FPS override. If `0`, uses global target FPS. |
-| `processing_mode` | Integer (`-1`, `0`, `1`)| `-1` (Inherit) | Per-set engine backend override:<br>• `-1`: Inherit global configuration<br>• `0`: Force CPU Multithreaded<br>• `1`: Force GPU Compute (Vulkan) |
-| `prevent_downclock` | Boolean (`0`/`1`, `false`/`true`) | `true` | Per-set GPU downclock prevention toggle. |
-
-### Legacy `set.cfg` Migration
-For backwards compatibility with older sets:
-1. When loading a set, Sand3 looks for `set_config.ini`. If not found, it automatically falls back to loading legacy `set.cfg`.
-2. When saving a set, Sand3 automatically writes `set_config.ini` using delta-only serialization and removes the obsolete `set.cfg`.
 
 ---
 
 ## Example Configurations
 
-### Minimal `config.ini` (Delta-Only)
+### Minimal `config.ini`
 In regular usage, `config.ini` only contains lines you changed from defaults:
 
 ```ini
@@ -285,7 +266,4 @@ Inside `bin/sets/maze/set_config.ini`:
 ```ini
 author=Samuel
 description=Procedural labyrinth maze generation automaton
-width=512
-height=512
-processing_mode=1
 ```
