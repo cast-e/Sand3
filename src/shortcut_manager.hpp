@@ -1,8 +1,9 @@
 #pragma once
 
+#include <imgui.h>
+
 #include <string>
 #include <vector>
-#include <imgui.h>
 
 enum class ShortcutAction {
 	ToggleSimulation,
@@ -43,11 +44,11 @@ enum class ShortcutAction {
 
 struct ShortcutDef {
 	ShortcutAction action;
-	std::string id;           // identifier in config.ini, e.g. "toggle_simulation"
-	std::string display_name; // human-readable name, e.g. "Toggle Simulation"
-	std::string category;     // "Simulation", "Camera", "General", "Tools & Selection", "Brush"
-	std::string default_key;  // default key string, e.g. "Space"
-	std::string current_key;  // configured key string, e.g. "Space"
+	std::string id;			   // identifier in config.ini, e.g. "toggle_simulation"
+	std::string display_name;  // human-readable name, e.g. "Toggle Simulation"
+	std::string category;	   // "Simulation", "Camera", "General", "Tools & Selection", "Brush"
+	std::string default_key;   // default key string, e.g. "Space"
+	std::string current_key;   // configured key string, e.g. "Space"
 	ImGuiKey key = ImGuiKey_None;
 	bool ctrl = false;
 	bool shift = false;
@@ -74,7 +75,8 @@ public:
 	static const std::vector<ShortcutDef>& get_all();
 
 	// String parsing & formatting helpers
-	static bool parse_key_combo(const std::string& str, ImGuiKey& out_key, bool& out_ctrl, bool& out_shift, bool& out_alt);
+	static bool parse_key_combo(const std::string& str, ImGuiKey& out_key, bool& out_ctrl, bool& out_shift,
+								bool& out_alt);
 	static std::string format_key_combo(ImGuiKey key, bool ctrl, bool shift, bool alt);
 	static ImGuiKey string_to_imgui_key(const std::string& name);
 	static std::string imgui_key_to_string(ImGuiKey key);

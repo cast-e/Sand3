@@ -1,45 +1,46 @@
 #include "icon_manager.hpp"
 
+#include <fmt/base.h>
+
 #include <array>
 #include <filesystem>
-#include <fmt/base.h>
 
 #include "resources/icons_embedded.h"
 #include "window.hpp"
 
 namespace {
 
-struct EmbeddedIconEntry {
-	IconID id;
-	const char* filename;
-	const unsigned char* data;
-	unsigned int len;
-};
+	struct EmbeddedIconEntry {
+		IconID id;
+		const char* filename;
+		const unsigned char* data;
+		unsigned int len;
+	};
 
-const EmbeddedIconEntry ICON_ENTRIES[] = {
-	{IconID::Brush, "paintbrush.png", icon_brush_png, icon_brush_png_len},
-	{IconID::Select, "shape_handles.png", icon_select_png, icon_select_png_len},
-	{IconID::Copy, "page_copy.png", icon_copy_png, icon_copy_png_len},
-	{IconID::Cut, "cut.png", icon_cut_png, icon_cut_png_len},
-	{IconID::Paste, "page_paste.png", icon_paste_png, icon_paste_png_len},
-	{IconID::Delete, "delete.png", icon_delete_png, icon_delete_png_len},
-	{IconID::Cross, "cross.png", icon_cross_png, icon_cross_png_len},
-	{IconID::Fill, "paintcan.png", icon_fill_png, icon_fill_png_len},
-	{IconID::RotateCW, "arrow_rotate_clockwise.png", icon_rotate_cw_png, icon_rotate_cw_png_len},
-	{IconID::RotateCCW, "arrow_rotate_anticlockwise.png", icon_rotate_ccw_png, icon_rotate_ccw_png_len},
-	{IconID::Save, "disk.png", icon_save_png, icon_save_png_len},
-	{IconID::Folder, "folder.png", icon_folder_png, icon_folder_png_len},
-	{IconID::Pause, "control_pause_blue.png", icon_pause_png, icon_pause_png_len},
-	{IconID::Play, "control_play_blue.png", icon_play_png, icon_play_png_len},
-	{IconID::Step, "control_fastforward_blue.png", icon_step_png, icon_step_png_len},
-	{IconID::Clear, "bin.png", icon_clear_png, icon_clear_png_len},
-	{IconID::Add, "add.png", icon_add_png, icon_add_png_len},
-	{IconID::Refresh, "arrow_refresh.png", icon_refresh_png, icon_refresh_png_len},
-};
+	const EmbeddedIconEntry ICON_ENTRIES[] = {
+		{IconID::Brush, "paintbrush.png", icon_brush_png, icon_brush_png_len},
+		{IconID::Select, "shape_handles.png", icon_select_png, icon_select_png_len},
+		{IconID::Copy, "page_copy.png", icon_copy_png, icon_copy_png_len},
+		{IconID::Cut, "cut.png", icon_cut_png, icon_cut_png_len},
+		{IconID::Paste, "page_paste.png", icon_paste_png, icon_paste_png_len},
+		{IconID::Delete, "delete.png", icon_delete_png, icon_delete_png_len},
+		{IconID::Cross, "cross.png", icon_cross_png, icon_cross_png_len},
+		{IconID::Fill, "paintcan.png", icon_fill_png, icon_fill_png_len},
+		{IconID::RotateCW, "arrow_rotate_clockwise.png", icon_rotate_cw_png, icon_rotate_cw_png_len},
+		{IconID::RotateCCW, "arrow_rotate_anticlockwise.png", icon_rotate_ccw_png, icon_rotate_ccw_png_len},
+		{IconID::Save, "disk.png", icon_save_png, icon_save_png_len},
+		{IconID::Folder, "folder.png", icon_folder_png, icon_folder_png_len},
+		{IconID::Pause, "control_pause_blue.png", icon_pause_png, icon_pause_png_len},
+		{IconID::Play, "control_play_blue.png", icon_play_png, icon_play_png_len},
+		{IconID::Step, "control_fastforward_blue.png", icon_step_png, icon_step_png_len},
+		{IconID::Clear, "bin.png", icon_clear_png, icon_clear_png_len},
+		{IconID::Add, "add.png", icon_add_png, icon_add_png_len},
+		{IconID::Refresh, "arrow_refresh.png", icon_refresh_png, icon_refresh_png_len},
+	};
 
-std::array<SDL_Texture*, static_cast<size_t>(IconID::Count)> textures{};
+	std::array<SDL_Texture*, static_cast<size_t>(IconID::Count)> textures{};
 
-} // namespace
+}  // namespace
 
 void IconManager::init() {
 	shutdown();
@@ -54,17 +55,14 @@ void IconManager::init() {
 		SDL_IOStream* io = nullptr;
 
 		// Try loading from filesystem first if present
-		const char* search_paths[] = {
-			"src/resources/Icons/",
-			"../../src/resources/Icons/",
-			"../src/resources/Icons/"
-		};
+		const char* search_paths[] = {"src/resources/Icons/", "../../src/resources/Icons/", "../src/resources/Icons/"};
 
 		for (const char* prefix : search_paths) {
 			std::string p = std::string(prefix) + entry.filename;
 			if (std::filesystem::exists(p)) {
 				io = SDL_IOFromFile(p.c_str(), "rb");
-				if (io) break;
+				if (io)
+					break;
 			}
 		}
 

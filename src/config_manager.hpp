@@ -23,6 +23,7 @@ struct UIConfig {
 	float window_rounding = 6.0f;
 	float frame_rounding = 4.0f;
 	int button_height = 32;
+	ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
 };
 
 struct Config {

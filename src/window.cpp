@@ -15,6 +15,7 @@ SDL_Renderer* Window::renderer = nullptr;
 SDL_Texture* Window::texture = nullptr;
 std::vector<uint32_t> Window::buffer;
 SDL_FRect Window::dst_rect{0.0f, 0.0f, 0.0f, 0.0f};
+ImVec4 Window::background_color{0.0f, 0.0f, 0.0f, 1.0f};
 uint64_t Window::frame_count = 0;
 uint64_t Window::next_frame_counter = 0;
 uint32_t Window::target_fps = 500;
@@ -96,6 +97,7 @@ void Window::present() {
 	}
 
 	SDL_UpdateTexture(texture, nullptr, pixels, Grid::get_width() * 4);
+	SDL_SetRenderDrawColorFloat(renderer, background_color.x, background_color.y, background_color.z, background_color.w);
 	SDL_RenderClear(renderer);
 	SDL_RenderTexture(renderer, texture, nullptr, &dst_rect);
 
@@ -173,3 +175,6 @@ std::pair<int, int> Window::get_size() {
 
 void Window::set_dst_rect(const SDL_FRect& rect) { dst_rect = rect; }
 SDL_FRect Window::get_dst_rect() { return dst_rect; }
+
+void Window::set_background_color(const ImVec4& color) { background_color = color; }
+ImVec4 Window::get_background_color() { return background_color; }

@@ -35,8 +35,8 @@ public:
 
 	// Grid Saves
 	static bool save_to_file(const std::string& name, const std::string& current_set);
-	static bool load_from_file(const std::string& path_or_name, const std::string& current_set,
-							   std::string& loaded_set, LoadPlacement placement = LoadPlacement::Center);
+	static bool load_from_file(const std::string& path_or_name, const std::string& current_set, std::string& loaded_set,
+							   LoadPlacement placement = LoadPlacement::Center);
 	static bool inspect_save_file(const std::string& path_or_name, const std::string& current_set, SaveFileInfo& info);
 	static std::vector<SaveFileInfo> get_save_files(const std::string& current_set);
 	static bool delete_save_file(const std::string& filename, const std::string& current_set);

@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 #include <fmt/base.h>
 
+#include <imgui.h>
+
 #include <utility>
 #include <vector>
 
@@ -34,6 +36,9 @@ public:
 	static void set_dst_rect(const SDL_FRect& rect);
 	static SDL_FRect get_dst_rect();
 
+	static void set_background_color(const ImVec4& color);
+	static ImVec4 get_background_color();
+
 private:
 	static SDL_Window* window;
 	static SDL_Renderer* renderer;
@@ -41,6 +46,7 @@ private:
 
 	static std::vector<uint32_t> buffer;
 	static SDL_FRect dst_rect;
+	static ImVec4 background_color;
 
 	static uint64_t frame_count;
 	static uint64_t next_frame_counter;

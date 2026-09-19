@@ -161,16 +161,25 @@ void ConfigManager::load() {
 						config.ui.frame_rounding = std::stof(val);
 					else if (key == "button_height")
 						config.ui.button_height = std::stoi(val);
+					else if (key == "background_color")
+						parse_color_string(val, config.ui.background_color);
 				} catch (...) {}
 			} else if (section == "Shortcuts") {
 				ShortcutManager::load_from_config(key, val);
 			} else if (section == "Colors") {
-				color_overrides[key] = val;
+				if (key == "background_color" || key == "CanvasBackground" || key == "BackgroundColor") {
+					parse_color_string(val, config.ui.background_color);
+				} else {
+					color_overrides[key] = val;
+				}
 			}
 		}
 
 		in.close();
 	}
+
+	// Apply background color
+	Window::set_background_color(config.ui.background_color);
 
 	// Apply advanced settings
 	Window::set_vsync(config.vsync);
@@ -292,6 +301,8 @@ void ConfigManager::save() {
 		ui_lines.push_back("frame_rounding = " + std::to_string(config.ui.frame_rounding));
 	if (config.ui.button_height != default_config.ui.button_height)
 		ui_lines.push_back("button_height = " + std::to_string(config.ui.button_height));
+	if (color_differs(config.ui.background_color, default_config.ui.background_color))
+		ui_lines.push_back("background_color = " + color_to_hex(config.ui.background_color));
 
 	if (!ui_lines.empty()) {
 		out << "[UI]\n";

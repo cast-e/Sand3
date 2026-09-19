@@ -1,8 +1,8 @@
 #pragma once
 
-#include <deque>
 #include <stdint.h>
 
+#include <deque>
 #include <string>
 #include <vector>
 

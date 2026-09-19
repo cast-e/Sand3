@@ -1788,7 +1788,7 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 			fill_selection(0);
 			deselect();
 		}
-	} else if (!update && ShortcutManager::is_action_pressed(ShortcutAction::StepFrame)) {
+	} else if (!update && ShortcutManager::is_action_pressed(ShortcutAction::StepFrame, true)) {
 		step_frame = true;
 	} else if (selection_state == SelectionState::Selected) {
 		if (ShortcutManager::is_action_pressed(ShortcutAction::Fill)) {
@@ -3674,7 +3674,7 @@ void UI::render_theme_editor() {
 
 		// Widget Rounding
 		float frame_round = cfg.ui.frame_rounding;
-		if (ImGui::SliderFloat("Widget Rounding", &frame_round, 0.0f, 16.0f, "%.1f px")) {
+		if (ImGui::SliderFloat("Frame Rounding", &frame_round, 0.0f, 16.0f, "%.1f px")) {
 			cfg.ui.frame_rounding = frame_round;
 			style.FrameRounding = frame_round;
 			style.ChildRounding = frame_round;
@@ -3686,7 +3686,7 @@ void UI::render_theme_editor() {
 
 		// Button Height
 		int btn_h = cfg.ui.button_height;
-		if (ImGui::SliderInt("Button Height", &btn_h, 20, 50, "%d px")) {
+		if (ImGui::SliderInt("Button Size", &btn_h, 20, 50, "%d px")) {
 			cfg.ui.button_height = btn_h;
 			ConfigManager::save();
 		}
@@ -3709,6 +3709,16 @@ void UI::render_theme_editor() {
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("*Requires application restart to reload font atlas.");
+		}
+
+		// Background Color
+		float background_color[4] = {cfg.ui.background_color.x, cfg.ui.background_color.y, cfg.ui.background_color.z,
+									 cfg.ui.background_color.w};
+		if (ImGui::ColorEdit4("Background Color", background_color, ImGuiColorEditFlags_NoAlpha)) {
+			cfg.ui.background_color =
+				ImVec4(background_color[0], background_color[1], background_color[2], background_color[3]);
+			ConfigManager::save();
+			Window::set_background_color(cfg.ui.background_color);
 		}
 
 		// Checkboxes for FPS & Active Cells

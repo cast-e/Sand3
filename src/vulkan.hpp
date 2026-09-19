@@ -6,14 +6,14 @@
 #include <volk.h>
 
 struct GpuPushConstants {
-	uint32_t pass_type;			  // 0 = simulation phase, 1 = render & finalize
-	uint32_t phase_x;			  // 0..4
-	uint32_t phase_y;			  // 0..4
-	uint32_t frame_count;		  // current frame index
-	uint32_t sim_width;			  // grid width
-	uint32_t sim_height;		  // grid height
-	uint32_t reverse_x;			  // 0 or 1
-	uint32_t reverse_y;			  // 0 or 1
+	uint32_t pass_type;	   // 0 = simulation phase, 1 = render & finalize
+	uint32_t phase_x;	   // 0..4
+	uint32_t phase_y;	   // 0..4
+	uint32_t frame_count;  // current frame index
+	uint32_t sim_width;	   // grid width
+	uint32_t sim_height;   // grid height
+	uint32_t reverse_x;	   // 0 or 1
+	uint32_t reverse_y;	   // 0 or 1
 };
 
 struct GpuRuleVariant {

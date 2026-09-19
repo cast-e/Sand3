@@ -332,9 +332,8 @@ std::vector<SaveFileInfo> SaveManager::get_save_files(const std::string& current
 			}
 		}
 	}
-	std::sort(list.begin(), list.end(), [](const SaveFileInfo& a, const SaveFileInfo& b) {
-		return a.filename < b.filename;
-	});
+	std::sort(list.begin(), list.end(),
+			  [](const SaveFileInfo& a, const SaveFileInfo& b) { return a.filename < b.filename; });
 	return list;
 }
 
@@ -472,9 +471,8 @@ std::vector<StampFileInfo> SaveManager::get_stamp_files(const std::string& curre
 			}
 		}
 	}
-	std::sort(list.begin(), list.end(), [](const StampFileInfo& a, const StampFileInfo& b) {
-		return a.filename < b.filename;
-	});
+	std::sort(list.begin(), list.end(),
+			  [](const StampFileInfo& a, const StampFileInfo& b) { return a.filename < b.filename; });
 	return list;
 }
 

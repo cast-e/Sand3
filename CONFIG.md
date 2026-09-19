@@ -83,6 +83,7 @@ Controls layout, scaling, typography, and styling of the Dear ImGui interface.
 | `frame_rounding` | Float | `4.0` | Corner rounding radius for buttons and input fields. |
 | `window_alpha` | Float | `0.95` | Window background opacity (`0.0` = fully transparent, `1.0` = fully opaque). |
 | `button_height` | Integer | `30` | Default button height in pixels. |
+| `background_color` | Color Hex (`#RRGGBB` / `#RRGGBBAA`) | `#000000FF` | Color of the canvas viewport outside of the simulation grid. |
 
 ---
 
