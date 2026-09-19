@@ -66,7 +66,7 @@ static void init_style() {
 	colors[ImGuiCol_SliderGrabActive] = ImVec4(0.40f, 0.64f, 1.00f, 1.00f);
 	colors[ImGuiCol_Button] = ImVec4(0.22f, 0.23f, 0.26f, 1.00f);
 	colors[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.29f, 0.32f, 1.00f);
-	colors[ImGuiCol_ButtonActive] = ImVec4(0.38f, 0.39f, 0.42f, 1.00f);
+	colors[ImGuiCol_ButtonActive] = ImVec4(0.20f, 0.50f, 0.85f, 1.00f);
 	colors[ImGuiCol_Header] = ImVec4(0.18f, 0.19f, 0.21f, 1.00f);
 	colors[ImGuiCol_HeaderHovered] = ImVec4(0.25f, 0.26f, 0.29f, 1.00f);
 	colors[ImGuiCol_HeaderActive] = ImVec4(0.32f, 0.33f, 0.37f, 1.00f);
@@ -79,8 +79,10 @@ static void init_style() {
 	colors[ImGuiCol_Tab] = ImVec4(0.16f, 0.17f, 0.19f, 0.86f);
 	colors[ImGuiCol_TabHovered] = ImVec4(0.30f, 0.54f, 0.94f, 0.80f);
 	colors[ImGuiCol_TabActive] = ImVec4(0.22f, 0.45f, 0.78f, 1.00f);
+	colors[ImGuiCol_TabSelectedOverline] = ImVec4(0.20f, 0.50f, 0.85f, 1.00f);
 	colors[ImGuiCol_TabUnfocused] = ImVec4(0.09f, 0.09f, 0.11f, 0.97f);
 	colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.12f, 0.12f, 0.14f, 1.00f);
+	colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.15f, 0.40f, 0.70f, 1.00f);
 	colors[ImGuiCol_PlotLines] = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
 	colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
 	colors[ImGuiCol_PlotHistogram] = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
@@ -1061,7 +1063,7 @@ bool UI::button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& si
 		ImVec2 icon_min(icon_x, icon_y);
 		ImVec2 icon_max(icon_x + icon_w, icon_y + icon_h);
 		bool is_disabled = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
-		ImU32 icon_tint = ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, is_disabled ? 0.45f : 1.0f));
+		ImU32 icon_tint = ImGui::GetColorU32(is_disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text);
 		window->DrawList->AddImage((ImTextureID)(intptr_t)icon, icon_min, icon_max, ImVec2(0, 0), ImVec2(1, 1),
 								   icon_tint);
 	}
@@ -1086,9 +1088,14 @@ void UI::render_selection_controls() {
 	float spacing_x = ImGui::GetStyle().ItemSpacing.x;
 	float btn = (cfg.ui.button_height > 0) ? static_cast<float>(cfg.ui.button_height) : 28.0f;
 
+	const ImVec4& btn_active_col = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
+	ImVec4 btn_active_hover =
+		ImVec4(std::min(1.0f, btn_active_col.x * 1.15f + 0.05f), std::min(1.0f, btn_active_col.y * 1.15f + 0.05f),
+			   std::min(1.0f, btn_active_col.z * 1.15f + 0.05f), btn_active_col.w);
+
 	if (is_brush) {
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.85f, 1.0f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 0.95f, 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
 	}
 	if (button_with_icon("##BrushTool", IconManager::get(IconID::Brush), ImVec2(btn, btn))) {
 		set_tool_mode(ToolMode::Brush);
@@ -1102,8 +1109,8 @@ void UI::render_selection_controls() {
 
 	ImGui::SameLine();
 	if (is_select) {
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.5f, 0.85f, 1.0f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.6f, 0.95f, 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
 	}
 	if (button_with_icon("##SelectTool", IconManager::get(IconID::Select), ImVec2(btn, btn))) {
 		set_tool_mode(ToolMode::Select);
@@ -1120,7 +1127,7 @@ void UI::render_selection_controls() {
 	if (current_tool == ToolMode::Brush) {
 		ImGui::Spacing();
 		ImGui::Text("Brush Settings:");
-		ImGui::SliderInt("Brush Size", &mouse_size, 1, 512);
+		ImGui::SliderInt("Brush Size", &mouse_size, 1, static_cast<int>(Grid::get_width() * 0.5f));
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Adjust brush width (Scroll wheel)");
 		}
@@ -1890,8 +1897,8 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 void UI::handle_mouse_wheel_brush_size(ImGuiIO& io) {
 	if (!io.WantCaptureMouse && io.MouseWheel != 0.0f && !io.KeyShift) {
 		bool fast = io.KeyCtrl;
-		mouse_size += static_cast<int>(io.MouseWheel) * (fast ? 5 : 1);
-		mouse_size = std::clamp(mouse_size, 1, 512);
+		mouse_size += io.MouseWheel * std::ceil(mouse_size * (fast ? 0.2f : 0.05f));
+		mouse_size = std::clamp(mouse_size, 1, static_cast<int>(Grid::get_width() * 0.5f));
 	}
 }
 
@@ -2167,7 +2174,7 @@ void UI::handle_interaction() {
 
 void UI::render_header(ImGuiIO& io) {
 	const auto& cfg = ConfigManager::get_config();
-	ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "SAND3 SIMULATOR");
+	ImGui::Text("SAND3 SIMULATOR");
 	if (cfg.ui.show_fps) {
 		ImGui::Text("FPS: %.1f (%.3f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
 	}
@@ -2412,7 +2419,7 @@ void UI::render_material_editor() {
 
 		auto& mat = const_cast<MaterialDefinition&>(MaterialManager::get_material(selected_id));
 
-		ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "Editing: %s", mat.name.c_str());
+		ImGui::Text("Editing: %s", mat.name.c_str());
 
 		char name_buf[128];
 		strncpy(name_buf, mat.name.c_str(), sizeof(name_buf));
@@ -2987,7 +2994,7 @@ void UI::render_manage_sets() {
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "Set Settings:");
+		ImGui::Text("Set Settings:");
 
 		char set_rename_buf[64];
 		strncpy(set_rename_buf, current_set.c_str(), sizeof(set_rename_buf));
@@ -3586,7 +3593,7 @@ void UI::render_shortcuts() {
 			if (s.category != last_cat) {
 				if (!last_cat.empty())
 					ImGui::Spacing();
-				ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "%s", s.category.c_str());
+				ImGui::Text("%s", s.category.c_str());
 				ImGui::Separator();
 				last_cat = s.category;
 			}
@@ -3839,9 +3846,9 @@ void UI::render_modals() {
 	if (ImGui::BeginPopupModal("Create Set...", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
 		ImGui::Spacing();
 		if (duplicate_set_checkbox) {
-			ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "DUPLICATE CURRENT SET");
+			ImGui::Text("DUPLICATE CURRENT SET");
 		} else {
-			ImGui::TextColored(ImVec4(0.40f, 0.70f, 1.00f, 1.00f), "CREATE NEW EMPTY SET");
+			ImGui::Text("CREATE NEW EMPTY SET");
 		}
 		ImGui::Separator();
 		ImGui::Spacing();

@@ -97,3 +97,8 @@ All dependencies are included as a submodule in the "third-party/" directory.
 - [imgui](https://github.com/ocornut/imgui) - Dear ImGui.
 - [volk](https://github.com/zeux/volk) - Meta-loader for Vulkan API.
 - [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) - Vulkan API header files.
+
+## Credits
+
+- [Roboto](https://fonts.google.com/specimen/Roboto) for the font.
+- [famfamfam-silk](https://github.com/legacy-icons/famfamfam-silk) for the icons.
