@@ -928,9 +928,9 @@ void Vulkan::clear() {
 	VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
 	std::memset(staging_mapped, 0, size);
 
-	constexpr uint32_t BG_COLOR = (255u << 24) | (64u << 16) | (64u << 8) | 64u;
+	const uint32_t bg_color = MaterialManager::get_runtime_material(0).packed_color;
 	for (size_t i = 0; i < width * height; ++i) {
-		display_mapped[i] = BG_COLOR;
+		display_mapped[i] = bg_color;
 	}
 
 	vkResetCommandBuffer(command_buffer, 0);

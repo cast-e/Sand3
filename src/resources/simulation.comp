@@ -186,10 +186,6 @@ void main() {
 	}
 
 	uint center_mat = current_cells[center_id] & 0xFFu;
-	if (center_mat == 0u) {
-		return;
-	}
-
 	GpuMaterial mat = materials[center_mat];
 	if (mat.rule_count == 0u) {
 		return;

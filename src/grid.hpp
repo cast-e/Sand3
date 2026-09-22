@@ -59,6 +59,7 @@ public:
 	static uint32_t get_thread_count() { return num_active_threads; }
 
 	static uint32_t get_changed_cells();
+	static uint64_t get_sim_step_count() { return sim_step_count; }
 	static void remap_materials(const std::vector<uint8_t>& old_to_new);
 
 	static void sync_to_gpu();
@@ -85,6 +86,5 @@ private:
 
 	static bool gpu_data_valid;
 	static bool gpu_needs_upload;
-
-	static constexpr uint32_t BG_COLOR = (255u << 24) | (64u << 16) | (64u << 8) | 64u;
+	static uint64_t sim_step_count;
 };

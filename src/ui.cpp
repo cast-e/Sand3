@@ -1869,11 +1869,16 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		target_zoom /= 1.2f;
 	}
 
-	uint8_t material_count = MaterialManager::get_material_count();
+	const auto& mats = MaterialManager::get_materials();
+	const size_t material_count = mats.size();
 	for (int i = 1; i <= 9; ++i) {
 		ShortcutAction act = static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (i - 1));
-		if (ShortcutManager::is_action_pressed(act) && material_count > i) {
-			selected_id = MaterialManager::get_materials()[i].id;
+		if (ShortcutManager::is_action_pressed(act)) {
+			if (static_cast<size_t>(i) < material_count) {
+				selected_id = mats[i].id;
+			} else if (static_cast<size_t>(i) == material_count) {
+				selected_id = mats[0].id;
+			}
 		}
 	}
 
@@ -2258,6 +2263,10 @@ void UI::render_sim_content() {
 		if (ImGui::Selectable((label + "##sim_" + std::to_string(i)).c_str(), selected_id == materials[i].id)) {
 			selected_id = materials[i].id;
 		}
+		if (i <= 9 && ImGui::IsItemHovered()) {
+			ShortcutAction act = static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (i - 1));
+			ImGui::SetTooltip("Shortcut: %s", ShortcutManager::get_key_string(act).c_str());
+		}
 	}
 	ImVec4 color =
 		ImVec4(materials[0].color[0] / 255.f, materials[0].color[1] / 255.f, materials[0].color[2] / 255.f, 1.f);
@@ -2265,6 +2274,11 @@ void UI::render_sim_content() {
 	ImGui::SameLine();
 	if (ImGui::Selectable((materials[0].name + "##sim_0").c_str(), selected_id == 0)) {
 		selected_id = 0;
+	}
+	if (materials.size() <= 9 && ImGui::IsItemHovered()) {
+		ShortcutAction act =
+			static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (materials.size() - 1));
+		ImGui::SetTooltip("Shortcut: %s", ShortcutManager::get_key_string(act).c_str());
 	}
 	ImGui::EndChild();
 }
@@ -2321,8 +2335,16 @@ void UI::render_material_editor() {
 					selected_id = materials[i].id;
 				}
 				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Has %zu rule%s", materials[i].rules.size(),
-									  (materials[i].rules.size() == 1 ? "" : "s"));
+					if (i <= 9) {
+						ShortcutAction act =
+							static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (i - 1));
+						ImGui::SetTooltip("Has %zu rule%s\nShortcut: %s", materials[i].rules.size(),
+										  (materials[i].rules.size() == 1 ? "" : "s"),
+										  ShortcutManager::get_key_string(act).c_str());
+					} else {
+						ImGui::SetTooltip("Has %zu rule%s", materials[i].rules.size(),
+										  (materials[i].rules.size() == 1 ? "" : "s"));
+					}
 				}
 			}
 
@@ -2335,8 +2357,16 @@ void UI::render_material_editor() {
 				selected_id = 0;
 			}
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Has %zu rule%s", materials[0].rules.size(),
-								  (materials[0].rules.size() == 1 ? "" : "s"));
+				if (materials.size() <= 9) {
+					ShortcutAction act = static_cast<ShortcutAction>(
+						static_cast<int>(ShortcutAction::QuickSelect1) + (materials.size() - 1));
+					ImGui::SetTooltip("Has %zu rule%s\nShortcut: %s", materials[0].rules.size(),
+									  (materials[0].rules.size() == 1 ? "" : "s"),
+									  ShortcutManager::get_key_string(act).c_str());
+				} else {
+					ImGui::SetTooltip("Has %zu rule%s", materials[0].rules.size(),
+									  (materials[0].rules.size() == 1 ? "" : "s"));
+				}
 			}
 
 			ImGui::EndChild();
@@ -2349,7 +2379,13 @@ void UI::render_material_editor() {
 			if (button_with_icon("New", IconManager::get(IconID::Add), ImVec2(80, 25))) {
 				UndoManager::push_snapshot("New Material");
 				MaterialDefinition new_mat;
-				new_mat.name = "material_" + std::to_string(materials.size());
+				std::string base_name = "material_" + std::to_string(materials.size());
+				std::string unique_name = base_name;
+				int name_counter = 1;
+				while (!MaterialManager::is_valid_name(unique_name)) {
+					unique_name = "material_" + std::to_string(materials.size() + (name_counter++));
+				}
+				new_mat.name = unique_name;
 				new_mat.color = {255, 255, 255};
 				const uint8_t id = MaterialManager::add_material(new_mat);
 				selected_id = id;
@@ -2374,7 +2410,13 @@ void UI::render_material_editor() {
 			if (button_with_icon("Copy", IconManager::get(IconID::Copy), ImVec2(80, 25))) {
 				UndoManager::push_snapshot("Copy Material");
 				MaterialDefinition duplicated_mat = MaterialManager::get_material(selected_id);
-				duplicated_mat.name = duplicated_mat.name + "_copy";
+				std::string base_name = duplicated_mat.name + "_copy";
+				std::string unique_name = base_name;
+				int copy_counter = 1;
+				while (!MaterialManager::is_valid_name(unique_name)) {
+					unique_name = base_name + "_" + std::to_string(copy_counter++);
+				}
+				duplicated_mat.name = unique_name;
 				const uint8_t id = MaterialManager::add_material(duplicated_mat);
 				selected_id = id;
 				unsaved_changes = true;
@@ -2417,6 +2459,9 @@ void UI::render_material_editor() {
 
 		ImGui::Separator();
 
+		if (MaterialManager::get_material(selected_id).id != selected_id) {
+			selected_id = 0;
+		}
 		auto& mat = const_cast<MaterialDefinition&>(MaterialManager::get_material(selected_id));
 
 		ImGui::Text("Editing: %s", mat.name.c_str());

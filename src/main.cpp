@@ -30,10 +30,8 @@ int main() {
 
 		UI::handle_interaction();
 
-		Grid::draw();
-
 		bool running = (UI::should_update() || UI::should_step());
-		bool desired_vsync = running ? Window::get_vsync() : true;
+		bool desired_vsync = Window::get_vsync();
 		static int active_vsync = -1;
 		if (active_vsync != static_cast<int>(desired_vsync)) {
 			active_vsync = static_cast<int>(desired_vsync);
@@ -46,6 +44,8 @@ int main() {
 		} else {
 			Grid::keep_awake_gpu();
 		}
+
+		Grid::draw();
 
 		ImGui::Render();
 		Window::present();

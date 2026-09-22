@@ -33,6 +33,7 @@ std::atomic<bool> Grid::shutdown_flag{false};
 std::atomic<uint32_t> Grid::frame_changed{0};
 bool Grid::gpu_data_valid = true;
 bool Grid::gpu_needs_upload = true;
+uint64_t Grid::sim_step_count = 0;
 
 void Grid::recompute_neighbor_offsets() {
 	for (int dy = -static_cast<int>(HALF_NEIGHBOR_SIZE); dy <= static_cast<int>(HALF_NEIGHBOR_SIZE); ++dy) {
@@ -182,16 +183,17 @@ void Grid::set_processing_mode(ProcessingMode preset) {
 		return;
 	}
 	if (processing_mode == ProcessingMode::GPU && preset != ProcessingMode::GPU) {
-		if (!gpu_data_valid) {
-			sync_from_gpu();
-		}
+		processing_mode = preset;
+		sync_from_gpu();
 	} else if (preset == ProcessingMode::GPU) {
+		processing_mode = preset;
 		sync_to_gpu();
 		if (Vulkan::is_available()) {
 			Vulkan::refresh_display();
 		}
+	} else {
+		processing_mode = preset;
 	}
-	processing_mode = preset;
 }
 
 void Grid::sync_to_gpu() {
@@ -267,10 +269,10 @@ void Grid::worker_thread(const uint32_t thread_id) {
 		}
 
 		uint32_t local_changed = 0;
-		const bool reverse_x = (Window::get_frame_count() % 2 == 0);
-		const bool reverse_y = (Window::get_frame_count() % 2 == 1);
+		const bool reverse_x = (sim_step_count % 2 == 0);
+		const bool reverse_y = (sim_step_count % 2 == 1);
 
-		const bool swap_phases = (Window::get_frame_count() % 2 == 1);
+		const bool swap_phases = (sim_step_count % 2 == 1);
 		for (uint32_t p_id = 0; p_id < 2; ++p_id) {
 			const uint32_t target_sy_mod = swap_phases ? (1 - p_id) : p_id;
 
@@ -477,7 +479,7 @@ void Grid::update() {
 	frame_changed = 0;
 
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
-		Vulkan::step(static_cast<uint32_t>(Window::get_frame_count()), gpu_needs_upload);
+		Vulkan::step(static_cast<uint32_t>(sim_step_count), gpu_needs_upload);
 		uint32_t* staging = Vulkan::get_staging_buffer();
 		if (staging) {
 			for (size_t i = 0; i < Grid::get_size(); ++i) {
@@ -487,6 +489,7 @@ void Grid::update() {
 		gpu_data_valid = true;
 		gpu_needs_upload = false;
 		frame_changed = Vulkan::get_changed_cells();
+		sim_step_count++;
 		return;
 	}
 
@@ -501,6 +504,7 @@ void Grid::update() {
 	}
 
 	cells = next_cells;
+	sim_step_count++;
 }
 
 void Grid::draw() {
@@ -579,6 +583,7 @@ void Grid::clear() {
 	}
 	gpu_needs_upload = false;
 	gpu_data_valid = true;
+	draw();
 }
 
 void Grid::restore_state(const std::vector<uint8_t>& state) {

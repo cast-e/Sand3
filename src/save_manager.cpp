@@ -184,6 +184,10 @@ bool SaveManager::save_to_file(const std::string& name, const std::string& curre
 	file.write(reinterpret_cast<const char*>(&width), sizeof(width));
 	file.write(reinterpret_cast<const char*>(&height), sizeof(height));
 
+	if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+		Grid::sync_from_gpu();
+	}
+
 	std::vector<uint8_t> grid_bytes(Grid::get_size());
 	for (uint32_t y = 0; y < height; ++y) {
 		for (uint32_t x = 0; x < width; ++x) {

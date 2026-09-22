@@ -13,8 +13,8 @@ namespace fs = std::filesystem;
 std::vector<MaterialDefinition> MaterialManager::materials{};
 std::array<RuntimeMaterial, 256> MaterialManager::runtime_materials{};
 std::array<uint8_t, 256> MaterialManager::material_by_id{};
-MaterialDefinition MaterialManager::default_empty{"empty", 0, 255, {64, 64, 64}};
-RuntimeMaterial MaterialManager::default_runtime_empty{0, MaterialManager::pack_color({64, 64, 64}), {}};
+MaterialDefinition MaterialManager::default_empty{"empty", 255, 255, {64, 64, 64}};
+RuntimeMaterial MaterialManager::default_runtime_empty{255, MaterialManager::pack_color({64, 64, 64}), {}};
 
 uint32_t MaterialManager::pack_color(const std::array<uint8_t, 3>& color) {
 	return (255u << 24) | (color[2] << 16) | (color[1] << 8) | color[0];
@@ -55,18 +55,28 @@ bool MaterialManager::is_valid_name(std::string_view name) {
 void MaterialDefinition::sync_rule_order() {
 	std::vector<RuleReference> valid_refs;
 
-	const auto* parent = &MaterialManager::get_material(inherits_from);
+	const MaterialDefinition* parent = nullptr;
+	if (inherits_from != 255) {
+		const auto& p = MaterialManager::get_material(inherits_from);
+		if (p.id == inherits_from) {
+			parent = &p;
+		}
+	}
 
 	size_t parent_rule_count = parent ? parent->rules.size() : 0;
 	size_t custom_rule_count = rules.size();
 
 	for (const auto& reference : rule_order) {
-		if (reference.is_inherited && parent && reference.index < parent_rule_count &&
-			std::find(valid_refs.begin(), valid_refs.end(), reference) == valid_refs.end()) {
-			valid_refs.push_back(reference);
-		} else if (reference.index < custom_rule_count &&
-				   std::find(valid_refs.begin(), valid_refs.end(), reference) == valid_refs.end()) {
-			valid_refs.push_back(reference);
+		if (reference.is_inherited) {
+			if (parent && reference.index < parent_rule_count &&
+				std::find(valid_refs.begin(), valid_refs.end(), reference) == valid_refs.end()) {
+				valid_refs.push_back(reference);
+			}
+		} else {
+			if (reference.index < custom_rule_count &&
+				std::find(valid_refs.begin(), valid_refs.end(), reference) == valid_refs.end()) {
+				valid_refs.push_back(reference);
+			}
 		}
 	}
 
@@ -107,7 +117,7 @@ RuleDefinition MaterialDefinition::get_effective_rule(size_t order_idx) const {
 	const RuleReference& reference = rule_order[order_idx];
 	if (reference.is_inherited && inherits_from != 255) {
 		const auto& parent = MaterialManager::get_material(inherits_from);
-		if (reference.index < parent.rules.size()) {
+		if (parent.id == inherits_from && reference.index < parent.rules.size()) {
 			RuleDefinition r = parent.rules[reference.index];
 			MaterialManager::replace_self_references(r, parent.id, id);
 			r.when[12] = {id};
@@ -148,9 +158,10 @@ void MaterialManager::replace_self_references_in_material(MaterialDefinition& ma
 	}
 }
 
-void MaterialManager::sync_inherited_rules(uint8_t index) {
-	if (index < materials.size()) {
-		materials[index].sync_rule_order();
+void MaterialManager::sync_inherited_rules(uint8_t id) {
+	uint8_t idx = material_by_id[id];
+	if (idx < materials.size() && materials[idx].id == id) {
+		materials[idx].sync_rule_order();
 	}
 }
 
@@ -208,6 +219,7 @@ void MaterialManager::load_all_materials(std::string_view directory_path) {
 	materials.clear();
 
 	MaterialDefinition empty_mat = default_empty;
+	empty_mat.id = 0;
 
 	std::vector<MaterialDefinition> loaded_mats;
 
@@ -237,10 +249,14 @@ void MaterialManager::load_all_materials(std::string_view directory_path) {
 	std::sort(loaded_mats.begin(), loaded_mats.end(),
 			  [](const MaterialDefinition& a, const MaterialDefinition& b) { return a.id < b.id; });
 
+	std::array<bool, 256> id_taken{};
+	id_taken[0] = true;
+
 	for (auto& mat : loaded_mats) {
-		if (mat.id == 255) {
+		if (mat.id == 0 || mat.id == 255 || id_taken[mat.id]) {
 			mat.id = get_unused_id();
 		}
+		id_taken[mat.id] = true;
 		for (auto& r : mat.rules) {
 			r.when[12] = {mat.id};
 		}
@@ -342,17 +358,43 @@ uint8_t MaterialManager::add_material(const MaterialDefinition& mat) {
 	return m.id;
 }
 
-void MaterialManager::update_material_name(uint8_t index, std::string_view name) { materials[index].name = name; }
-
-void MaterialManager::update_material_rules(uint8_t index, const MaterialDefinition& mat) {
-	materials[index].rules = mat.rules;
-	rebuild_compiled_rules();
+void MaterialManager::update_material_name(uint8_t id, std::string_view name) {
+	uint8_t idx = material_by_id[id];
+	if (idx < materials.size() && materials[idx].id == id) {
+		materials[idx].name = name;
+	}
 }
 
-void MaterialManager::set_material_inheritance(uint8_t index, uint8_t parent_id) {
-	if (index >= materials.size())
+void MaterialManager::update_material_rules(uint8_t id, const MaterialDefinition& mat) {
+	uint8_t idx = material_by_id[id];
+	if (idx < materials.size() && materials[idx].id == id) {
+		materials[idx].rules = mat.rules;
+		materials[idx].rule_order = mat.rule_order;
+		materials[idx].last_synced_parent_rule_count = mat.last_synced_parent_rule_count;
+		rebuild_compiled_rules();
+	}
+}
+
+void MaterialManager::set_material_inheritance(uint8_t id, uint8_t parent_id) {
+	uint8_t idx = material_by_id[id];
+	if (idx >= materials.size() || materials[idx].id != id)
 		return;
-	auto& mat = materials[index];
+
+	// Prevent circular inheritance
+	if (parent_id != 255) {
+		uint8_t curr = parent_id;
+		while (curr != 255) {
+			if (curr == id) {
+				return; // Cycle detected
+			}
+			const auto& p = get_material(curr);
+			if (p.id != curr)
+				break;
+			curr = p.inherits_from;
+		}
+	}
+
+	auto& mat = materials[idx];
 	mat.inherits_from = parent_id;
 
 	std::erase_if(mat.rule_order, [](const RuleReference& r) { return r.is_inherited; });
@@ -360,17 +402,19 @@ void MaterialManager::set_material_inheritance(uint8_t index, uint8_t parent_id)
 
 	if (parent_id != 255) {
 		const auto& parent = get_material(parent_id);
-		std::vector<RuleReference> new_order;
-		for (size_t i = 0; i < parent.rules.size(); ++i) {
-			new_order.push_back({true, i});
-		}
-		for (const auto& reference : mat.rule_order) {
-			if (!reference.is_inherited) {
-				new_order.push_back(reference);
+		if (parent.id == parent_id) {
+			std::vector<RuleReference> new_order;
+			for (size_t i = 0; i < parent.rules.size(); ++i) {
+				new_order.push_back({true, i});
 			}
+			for (const auto& reference : mat.rule_order) {
+				if (!reference.is_inherited) {
+					new_order.push_back(reference);
+				}
+			}
+			mat.rule_order = new_order;
+			mat.last_synced_parent_rule_count = parent.rules.size();
 		}
-		mat.rule_order = new_order;
-		mat.last_synced_parent_rule_count = parent.rules.size();
 	}
 
 	mat.sync_rule_order();
@@ -379,8 +423,10 @@ void MaterialManager::set_material_inheritance(uint8_t index, uint8_t parent_id)
 
 void MaterialManager::update_material_color(uint8_t id, const MaterialDefinition& mat) {
 	uint8_t idx = material_by_id[id];
+	if (idx >= materials.size() || materials[idx].id != id)
+		return;
 	materials[idx].color = mat.color;
-	runtime_materials[idx].packed_color = pack_color(mat.color);
+	runtime_materials[id].packed_color = pack_color(mat.color);
 
 	if (Vulkan::is_available()) {
 		Vulkan::update_rules();
@@ -391,12 +437,14 @@ void MaterialManager::update_material_color(uint8_t id, const MaterialDefinition
 
 void MaterialManager::remove_material(uint8_t id) {
 	uint8_t idx = material_by_id[id];
+	if (idx >= materials.size() || materials[idx].id != id)
+		return;
 
 	std::vector<uint8_t> old_to_new(256);
 	for (int i = 0; i < 256; ++i) {
 		old_to_new[i] = static_cast<uint8_t>(i);
 	}
-	old_to_new[idx] = 0;
+	old_to_new[id] = 0;
 
 	Grid::remap_materials(old_to_new);
 	Grid::draw_material(0);
@@ -404,12 +452,17 @@ void MaterialManager::remove_material(uint8_t id) {
 	materials.erase(materials.begin() + idx);
 
 	for (auto& m : materials) {
+		if (m.inherits_from == id) {
+			m.inherits_from = 255;
+			std::erase_if(m.rule_order, [](const RuleReference& r) { return r.is_inherited; });
+			m.last_synced_parent_rule_count = 0;
+		}
 		for (auto& r : m.rules) {
 			for (auto& when_cell : r.when) {
-				std::erase(when_cell, idx);
+				std::erase(when_cell, id);
 			}
 			for (auto& then_cell : r.then) {
-				if (then_cell == idx) {
+				if (then_cell == id) {
 					then_cell = 255;
 				}
 			}
@@ -420,13 +473,13 @@ void MaterialManager::remove_material(uint8_t id) {
 }
 
 void MaterialManager::rebuild_compiled_rules() {
-	material_by_id.fill(0);
+	material_by_id.fill(255);
 	for (size_t i = 0; i < materials.size(); ++i) {
 		material_by_id[materials[i].id] = static_cast<uint8_t>(i);
 	}
 
 	for (size_t i = 0; i < materials.size(); ++i) {
-		sync_inherited_rules(static_cast<uint8_t>(i));
+		materials[i].sync_rule_order();
 	}
 
 	runtime_materials.fill(default_runtime_empty);
@@ -588,7 +641,7 @@ void MaterialManager::rebuild_compiled_rules() {
 
 const MaterialDefinition& MaterialManager::get_material(uint8_t id) {
 	uint8_t idx = material_by_id[id];
-	if (idx < materials.size()) {
+	if (idx < materials.size() && materials[idx].id == id) {
 		return materials[idx];
 	}
 	return default_empty;

@@ -69,18 +69,18 @@ public:
 	static void save_all_materials(std::string_view directory_path);
 
 	static uint8_t add_material(const MaterialDefinition& mat);
-	static void update_material_name(uint8_t index, std::string_view name);
-	static void update_material_rules(uint8_t index, const MaterialDefinition& mat);
-	static void update_material_color(uint8_t index, const MaterialDefinition& mat);
-	static void set_material_inheritance(uint8_t index, uint8_t parent_id);
-	static void remove_material(uint8_t index);
+	static void update_material_name(uint8_t id, std::string_view name);
+	static void update_material_rules(uint8_t id, const MaterialDefinition& mat);
+	static void update_material_color(uint8_t id, const MaterialDefinition& mat);
+	static void set_material_inheritance(uint8_t id, uint8_t parent_id);
+	static void remove_material(uint8_t id);
 
 	static void rebuild_compiled_rules();
 	static uint8_t get_unused_id();
 
 	static void replace_self_references(RuleDefinition& rule, uint8_t old_id, uint8_t new_id);
 	static void replace_self_references_in_material(MaterialDefinition& mat, uint8_t old_id, uint8_t new_id);
-	static void sync_inherited_rules(uint8_t index);
+	static void sync_inherited_rules(uint8_t id);
 
 	static bool is_valid_name(std::string_view name);
 	static uint32_t pack_color(const std::array<uint8_t, 3>& color);
