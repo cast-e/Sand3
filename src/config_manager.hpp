@@ -20,9 +20,12 @@ struct UIConfig {
 	float ui_scale = 1.0f;
 	bool show_fps = true;
 	bool show_active_cells = true;
+	bool show_simulation_status = true;
 	float window_rounding = 6.0f;
 	float frame_rounding = 4.0f;
-	int button_height = 32;
+	int button_size = 32;
+	int icon_size = 16;
+	int material_list_height = 150;
 	ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
 };
 
@@ -52,7 +55,6 @@ public:
 	static const Config& get_default_config() { return default_config; }
 	static std::unordered_map<std::string, std::string>& get_color_overrides() { return color_overrides; }
 
-	// Color utilities
 	static bool parse_color_string(const std::string& str, ImVec4& out_col);
 	static std::string color_to_hex(const ImVec4& c);
 	static bool color_differs(const ImVec4& a, const ImVec4& b);

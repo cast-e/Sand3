@@ -380,12 +380,11 @@ void MaterialManager::set_material_inheritance(uint8_t id, uint8_t parent_id) {
 	if (idx >= materials.size() || materials[idx].id != id)
 		return;
 
-	// Prevent circular inheritance
 	if (parent_id != 255) {
 		uint8_t curr = parent_id;
 		while (curr != 255) {
 			if (curr == id) {
-				return; // Cycle detected
+				return;
 			}
 			const auto& p = get_material(curr);
 			if (p.id != curr)
@@ -634,7 +633,7 @@ void MaterialManager::rebuild_compiled_rules() {
 	if (Vulkan::is_available()) {
 		Vulkan::update_rules();
 		if (Grid::get_processing_mode() == ProcessingMode::GPU) {
-			Vulkan::refresh_display();
+			Grid::refresh_gpu_display();
 		}
 	}
 }

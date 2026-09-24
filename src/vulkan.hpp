@@ -6,34 +6,34 @@
 #include <volk.h>
 
 struct GpuPushConstants {
-	uint32_t pass_type;	   // 0 = simulation phase, 1 = render & finalize
-	uint32_t phase_x;	   // 0..4
-	uint32_t phase_y;	   // 0..4
-	uint32_t frame_count;  // current frame index
-	uint32_t sim_width;	   // grid width
-	uint32_t sim_height;   // grid height
-	uint32_t reverse_x;	   // 0 or 1
-	uint32_t reverse_y;	   // 0 or 1
+	uint32_t pass_type;
+	uint32_t phase_x;
+	uint32_t phase_y;
+	uint32_t frame_count;
+	uint32_t sim_width;
+	uint32_t sim_height;
+	uint32_t reverse_x;
+	uint32_t reverse_y;
 };
 
 struct GpuRuleVariant {
-	uint32_t when_bits[200];  // 25 neighbors * 8 uints (256-bit bitset)
-	uint32_t then_val[25];	  // 25 neighbor targets (255 = unchanged)
-	uint32_t when_wildcard;	  // bitmask of wildcard neighbors (all 256 bits set)
-	uint32_t pad[6];		  // align to 928 bytes
+	uint32_t when_bits[200];
+	uint32_t then_val[25];
+	uint32_t when_wildcard;
+	uint32_t pad[6];
 };
 
 struct GpuRule {
 	uint32_t variant_start;
 	uint32_t variant_count;
-	uint32_t chance_scaled;	 // 0..100000 (100000 = 100%)
+	uint32_t chance_scaled;
 	uint32_t pad;
 };
 
 struct GpuMaterial {
 	uint32_t rule_start;
 	uint32_t rule_count;
-	uint32_t color;	 // packed 0xAABBGGRR
+	uint32_t color;
 	uint32_t pad;
 };
 
@@ -68,7 +68,7 @@ public:
 	static uint32_t* get_staging_buffer() { return staging_mapped; }
 	static uint32_t get_changed_cells();
 
-	static void refresh_display();
+	static void refresh_display(bool upload_pending = false);
 	static void keep_awake();
 	static bool is_prevent_downclock_enabled() { return prevent_downclocking; }
 	static void set_prevent_downclock(bool enable) { prevent_downclocking = enable; }
@@ -96,29 +96,24 @@ private:
 	static VkDescriptorPool descriptor_pool;
 	static VkDescriptorSet descriptor_set;
 
-	// Grid state buffers
 	static VkBuffer current_grid_buffer;
 	static VkDeviceMemory current_grid_memory;
 
 	static VkBuffer next_grid_buffer;
 	static VkDeviceMemory next_grid_memory;
 
-	// Rules buffer
 	static VkBuffer rules_buffer;
 	static VkDeviceMemory rules_memory;
 	static GpuRulesHeader* rules_mapped;
 
-	// Display output buffer
 	static VkBuffer display_buffer;
 	static VkDeviceMemory display_memory;
 	static uint32_t* display_mapped;
 
-	// Stats buffer
 	static VkBuffer stats_buffer;
 	static VkDeviceMemory stats_memory;
 	static uint32_t* stats_mapped;
 
-	// Staging buffer for transfers
 	static VkBuffer staging_buffer;
 	static VkDeviceMemory staging_memory;
 	static uint32_t* staging_mapped;

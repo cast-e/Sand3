@@ -2,17 +2,19 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct SetMetadata {
 	std::string name;
 	std::string author;
 	std::string description;
-	uint32_t width = 0;           // Recommended canvas width (0 = inherit/use global)
-	uint32_t height = 0;          // Recommended canvas height (0 = inherit/use global)
-	uint32_t target_fps = 0;      // Target FPS for this set (0 = inherit/use global)
-	int processing_mode = -1;     // Recommended mode (-1 = inherit, 0 = CPU, 1 = GPU)
+	uint32_t width = 0;
+	uint32_t height = 0;
+	uint32_t target_fps = 0;
+	int processing_mode = -1;
 	bool prevent_downclock = true;
+	std::unordered_map<std::string, std::string> shortcuts;
 };
 
 class SetManager {
@@ -33,6 +35,11 @@ public:
 	static void delete_set(const std::string& name);
 
 	static void update_current_metadata(const SetMetadata& metadata);
+
+	static std::string get_current_material_shortcut(const std::string& mat_name);
+	static void set_current_material_shortcut(const std::string& mat_name, const std::string& key_combo);
+	static void remove_current_material_shortcut(const std::string& mat_name);
+	static void clear_current_material_shortcuts();
 
 private:
 	static std::string current_set_name;

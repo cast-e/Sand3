@@ -65,6 +65,9 @@ public:
 	static void sync_to_gpu();
 	static void sync_from_gpu();
 	static void keep_awake_gpu();
+	static void refresh_gpu_display();
+	static bool get_gpu_needs_upload() { return gpu_needs_upload; }
+	static void set_gpu_needs_upload(bool val) { gpu_needs_upload = val; }
 
 private:
 	static uint32_t width;

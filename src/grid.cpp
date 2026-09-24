@@ -52,7 +52,6 @@ void Grid::init() {
 
 	clear();
 
-	// Initialize GPU simulation (Vulkan)
 	if (Vulkan::init(width, height)) {
 		sync_to_gpu();
 	}
@@ -74,7 +73,7 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 	if (new_width == 0 || new_height == 0) {
 		return false;
 	}
-	// Snap to multiple of 16 for GPU workgroup (16x16) and CPU strips (STRIP_HEIGHT=16)
+
 	new_width = ((new_width + 15) / 16) * 16;
 	new_height = ((new_height + 15) / 16) * 16;
 
@@ -82,12 +81,10 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 		return true;
 	}
 
-	// 1. If currently using GPU and GPU has updated data, sync down first so CPU has current cells
 	if (processing_mode == ProcessingMode::GPU && !gpu_needs_upload) {
 		sync_from_gpu();
 	}
 
-	// 2. Stop CPU worker threads
 	shutdown_flag = true;
 	if (start_barrier) {
 		start_barrier->arrive_and_wait();
@@ -102,7 +99,6 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 	done_barrier.reset();
 	phase_barrier.reset();
 
-	// 3. Prepare new cell buffers
 	std::vector<Cell> new_cells(new_width * new_height, Cell{0, false});
 	if (preserve_content) {
 		uint32_t copy_w = std::min(width, new_width);
@@ -119,10 +115,8 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 	cells = std::move(new_cells);
 	next_cells.assign(width * height, Cell{0, false});
 
-	// 4. Recompute neighbor offsets for new width
 	recompute_neighbor_offsets();
 
-	// 5. Restart CPU worker threads
 	shutdown_flag = false;
 	frame_changed = 0;
 	uint32_t max_threads = get_num_strips_y() / 2;
@@ -139,15 +133,12 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 		workers.emplace_back(&Grid::worker_thread, t);
 	}
 
-	// 6. Resize Vulkan buffers
 	if (Vulkan::is_available()) {
 		Vulkan::resize(width, height);
 	}
 
-	// 7. Resize Window texture and buffer
 	Window::resize_texture_and_buffer(width, height);
 
-	// 8. Sync display
 	if (processing_mode == ProcessingMode::GPU) {
 		sync_to_gpu();
 		if (Vulkan::is_available()) {
@@ -227,6 +218,13 @@ void Grid::sync_from_gpu() {
 void Grid::keep_awake_gpu() {
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available() && Vulkan::is_prevent_downclock_enabled()) {
 		Vulkan::keep_awake();
+	}
+}
+
+void Grid::refresh_gpu_display() {
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		Vulkan::refresh_display(gpu_needs_upload);
+		gpu_needs_upload = false;
 	}
 }
 
@@ -525,7 +523,7 @@ void Grid::draw() {
 
 void Grid::draw_material(uint32_t id) {
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
-		Vulkan::refresh_display();
+		refresh_gpu_display();
 		return;
 	}
 
@@ -611,6 +609,14 @@ void Grid::restore_state(const std::vector<uint8_t>& state) {
 }
 
 std::vector<uint8_t> Grid::get_all_cells() {
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available() && !gpu_needs_upload) {
+		uint32_t* staging = Vulkan::get_staging_buffer();
+		if (staging) {
+			for (size_t i = 0; i < Grid::get_size(); ++i) {
+				cells[i].material = static_cast<uint8_t>(staging[i] & 0xFFu);
+			}
+		}
+	}
 	std::vector<uint8_t> state(Grid::get_size());
 	for (size_t i = 0; i < Grid::get_size(); ++i) {
 		state[i] = cells[i].material;

@@ -155,40 +155,39 @@ void ConfigManager::load() {
 						config.ui.show_fps = (val == "true" || val == "1");
 					else if (key == "show_active_cells")
 						config.ui.show_active_cells = (val == "true" || val == "1");
+					else if (key == "show_simulation_status")
+						config.ui.show_simulation_status = (val == "true" || val == "1");
 					else if (key == "window_rounding")
 						config.ui.window_rounding = std::stof(val);
 					else if (key == "frame_rounding")
 						config.ui.frame_rounding = std::stof(val);
-					else if (key == "button_height")
-						config.ui.button_height = std::stoi(val);
+					else if (key == "button_size")
+						config.ui.button_size = std::stoi(val);
+					else if (key == "icon_size")
+						config.ui.icon_size = std::stoi(val);
+					else if (key == "material_list_height")
+						config.ui.material_list_height = std::stoi(val);
 					else if (key == "background_color")
 						parse_color_string(val, config.ui.background_color);
 				} catch (...) {}
 			} else if (section == "Shortcuts") {
 				ShortcutManager::load_from_config(key, val);
 			} else if (section == "Colors") {
-				if (key == "background_color" || key == "CanvasBackground" || key == "BackgroundColor") {
-					parse_color_string(val, config.ui.background_color);
-				} else {
-					color_overrides[key] = val;
-				}
+				color_overrides[key] = val;
 			}
 		}
 
 		in.close();
 	}
 
-	// Apply background color
 	Window::set_background_color(config.ui.background_color);
 
-	// Apply advanced settings
 	Window::set_vsync(config.vsync);
 	Window::set_target_fps(static_cast<uint32_t>(config.target_fps));
 	Grid::set_processing_mode(static_cast<ProcessingMode>(config.processing_mode));
 	Grid::configure_threads(static_cast<uint32_t>(config.thread_count));
 	Vulkan::set_prevent_downclock(config.prevent_downclock);
 
-	// Apply window geometry
 	SDL_Window* window = Window::get_window();
 	if (window) {
 		if (config.window_width > 200 && config.window_height > 200) {
@@ -229,7 +228,6 @@ void ConfigManager::save() {
 	if (!out.is_open())
 		return;
 
-	// [Window] - only save overridden settings
 	std::vector<std::string> win_lines;
 	if (config.window_x >= 0 && config.window_x != default_config.window_x)
 		win_lines.push_back("x = " + std::to_string(config.window_x));
@@ -251,7 +249,6 @@ void ConfigManager::save() {
 		out << "\n";
 	}
 
-	// [Advanced] - only save overridden settings
 	std::vector<std::string> adv_lines;
 	if (config.vsync != default_config.vsync)
 		adv_lines.push_back(std::string("vsync = ") + (config.vsync ? "true" : "false"));
@@ -271,7 +268,6 @@ void ConfigManager::save() {
 		out << "\n";
 	}
 
-	// [UI] - only save overridden settings
 	std::vector<std::string> ui_lines;
 	if (config.ui.sidebar_x != default_config.ui.sidebar_x)
 		ui_lines.push_back("sidebar_x = " + std::to_string(config.ui.sidebar_x));
@@ -295,12 +291,19 @@ void ConfigManager::save() {
 		ui_lines.push_back(std::string("show_fps = ") + (config.ui.show_fps ? "true" : "false"));
 	if (config.ui.show_active_cells != default_config.ui.show_active_cells)
 		ui_lines.push_back(std::string("show_active_cells = ") + (config.ui.show_active_cells ? "true" : "false"));
+	if (config.ui.show_simulation_status != default_config.ui.show_simulation_status)
+		ui_lines.push_back(std::string("show_simulation_status = ") +
+						   (config.ui.show_simulation_status ? "true" : "false"));
 	if (std::fabs(config.ui.window_rounding - default_config.ui.window_rounding) > 0.01f)
 		ui_lines.push_back("window_rounding = " + std::to_string(config.ui.window_rounding));
 	if (std::fabs(config.ui.frame_rounding - default_config.ui.frame_rounding) > 0.01f)
 		ui_lines.push_back("frame_rounding = " + std::to_string(config.ui.frame_rounding));
-	if (config.ui.button_height != default_config.ui.button_height)
-		ui_lines.push_back("button_height = " + std::to_string(config.ui.button_height));
+	if (config.ui.button_size != default_config.ui.button_size)
+		ui_lines.push_back("button_size = " + std::to_string(config.ui.button_size));
+	if (config.ui.icon_size != default_config.ui.icon_size)
+		ui_lines.push_back("icon_size = " + std::to_string(config.ui.icon_size));
+	if (config.ui.material_list_height != default_config.ui.material_list_height)
+		ui_lines.push_back("material_list_height = " + std::to_string(config.ui.material_list_height));
 	if (color_differs(config.ui.background_color, default_config.ui.background_color))
 		ui_lines.push_back("background_color = " + color_to_hex(config.ui.background_color));
 
@@ -311,7 +314,6 @@ void ConfigManager::save() {
 		out << "\n";
 	}
 
-	// [Shortcuts] - only save overridden settings
 	if (ShortcutManager::any_modified()) {
 		out << "[Shortcuts]\n";
 		for (const auto& s : ShortcutManager::get_all()) {
@@ -322,7 +324,6 @@ void ConfigManager::save() {
 		out << "\n";
 	}
 
-	// [Colors] - only save overridden settings
 	if (!color_overrides.empty()) {
 		out << "[Colors]\n";
 		for (const auto& [name, val] : color_overrides) {

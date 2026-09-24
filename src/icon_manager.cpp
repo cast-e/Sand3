@@ -54,7 +54,6 @@ void IconManager::init() {
 	for (const auto& entry : ICON_ENTRIES) {
 		SDL_IOStream* io = nullptr;
 
-		// Try loading from filesystem first if present
 		const char* search_paths[] = {"src/resources/Icons/", "../../src/resources/Icons/", "../src/resources/Icons/"};
 
 		for (const char* prefix : search_paths) {
@@ -66,7 +65,6 @@ void IconManager::init() {
 			}
 		}
 
-		// Fallback to embedded memory
 		if (!io) {
 			io = SDL_IOFromConstMem(entry.data, entry.len);
 		}

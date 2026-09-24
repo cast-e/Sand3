@@ -106,7 +106,6 @@ static void init_style() {
 		default_colors_initialized = true;
 	}
 
-	// Apply any customized colors loaded from config.ini
 	for (const auto& [name, val] : ConfigManager::get_color_overrides()) {
 		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
 			if (name == ImGui::GetStyleColorName(i)) {
@@ -176,16 +175,10 @@ static GridRect calculate_brush_bounds(ImVec2 grid_pos, int brush_size) {
 }
 
 static ResizeHandle get_hovered_resize_handle(const ScreenRect& srect, ImVec2 mouse_pos) {
-	ImVec2 handle_pts[8] = {
-		ImVec2(srect.x1, srect.y1),						 // TopLeft
-		ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y1),	 // Top
-		ImVec2(srect.x2, srect.y1),						 // TopRight
-		ImVec2(srect.x2, (srect.y1 + srect.y2) * 0.5f),	 // Right
-		ImVec2(srect.x2, srect.y2),						 // BottomRight
-		ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y2),	 // Bottom
-		ImVec2(srect.x1, srect.y2),						 // BottomLeft
-		ImVec2(srect.x1, (srect.y1 + srect.y2) * 0.5f)	 // Left
-	};
+	ImVec2 handle_pts[8] = {ImVec2(srect.x1, srect.y1), ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y1),
+							ImVec2(srect.x2, srect.y1), ImVec2(srect.x2, (srect.y1 + srect.y2) * 0.5f),
+							ImVec2(srect.x2, srect.y2), ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y2),
+							ImVec2(srect.x1, srect.y2), ImVec2(srect.x1, (srect.y1 + srect.y2) * 0.5f)};
 
 	ResizeHandle handle_enums[8] = {ResizeHandle::TopLeft,	  ResizeHandle::Top,		 ResizeHandle::TopRight,
 									ResizeHandle::Right,	  ResizeHandle::BottomRight, ResizeHandle::Bottom,
@@ -568,7 +561,7 @@ void UI::init() {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGuiIO& io = ImGui::GetIO();
-	io.IniFilename = nullptr;  // Completely disable imgui.ini saving/loading
+	io.IniFilename = nullptr;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 	io.ConfigInputTrickleEventQueue = false;
 	io.ConfigWindowsMoveFromTitleBarOnly = true;
@@ -616,7 +609,7 @@ void UI::render() {
 		ImGui::SetNextWindowSize(
 			ImVec2(static_cast<float>(cfg.ui.compact_width), static_cast<float>(cfg.ui.compact_height)),
 			ImGuiCond_Once);
-		if (ImGui::Begin("Simulation Controls")) {
+		if (ImGui::Begin("Sand3 - Simulation Controls")) {
 			ImVec2 pos = ImGui::GetWindowPos();
 			ImVec2 sz = ImGui::GetWindowSize();
 			cfg.ui.compact_x = static_cast<int>(pos.x);
@@ -627,15 +620,16 @@ void UI::render() {
 		}
 		ImGui::End();
 	} else {
+		float screen_w = io.DisplaySize.x > 0.0f ? io.DisplaySize.x : static_cast<float>(Window::get_size().first);
 		float screen_h = io.DisplaySize.y > 0.0f ? io.DisplaySize.y : static_cast<float>(Window::get_size().second);
 		float sidebar_y = (cfg.ui.sidebar_y <= 2) ? 0.0f : static_cast<float>(cfg.ui.sidebar_y);
 		float sidebar_x = (cfg.ui.sidebar_x <= 2) ? 0.0f : static_cast<float>(cfg.ui.sidebar_x);
 		float target_h = std::max(100.0f, screen_h - sidebar_y);
 
-		ImGui::SetNextWindowPos(ImVec2(sidebar_x, sidebar_y), ImGuiCond_FirstUseEver);
-		ImGui::SetNextWindowSizeConstraints(ImVec2(200.0f, target_h), ImVec2(FLT_MAX, target_h));
-		ImGui::SetNextWindowSize(ImVec2(static_cast<float>(cfg.ui.sidebar_width), target_h), ImGuiCond_FirstUseEver);
-		if (ImGui::Begin("Simulation Editor", nullptr)) {
+		ImGui::SetNextWindowPos(ImVec2(sidebar_x, sidebar_y), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(static_cast<float>(cfg.ui.sidebar_width), target_h), ImGuiCond_Always);
+		ImGui::SetNextWindowSizeConstraints(ImVec2(260.0f, target_h), ImVec2(800.0f, target_h));
+		if (ImGui::Begin("Sand3 - Simulation Editor", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove)) {
 			ImVec2 pos = ImGui::GetWindowPos();
 			ImVec2 sz = ImGui::GetWindowSize();
 			cfg.ui.sidebar_x = static_cast<int>(pos.x);
@@ -655,13 +649,60 @@ void UI::render() {
 
 			ImGui::End();
 		}
+
+		float bar_x = sidebar_x + static_cast<float>(cfg.ui.sidebar_width);
+		float hit_w = 10.0f;
+
+		ImGui::SetNextWindowPos(ImVec2(bar_x - hit_w * 0.5f, sidebar_y));
+		ImGui::SetNextWindowSize(ImVec2(hit_w, target_h));
+		ImGui::SetNextWindowBgAlpha(0.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+		constexpr ImGuiWindowFlags kSplitterFlags =
+			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove |
+			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings |
+			ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoTitleBar;
+		if (ImGui::Begin("##SidebarResizeOverlay", nullptr, kSplitterFlags)) {
+			ImGui::InvisibleButton("##SidebarWidthResizeSplitter", ImVec2(hit_w, target_h));
+			bool bar_hovered = ImGui::IsItemHovered();
+			bool bar_held = ImGui::IsItemActive();
+			if (bar_hovered || bar_held) {
+				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+			}
+			if (bar_held && io.MouseDelta.x != 0.0f) {
+				cfg.ui.sidebar_width = std::clamp(cfg.ui.sidebar_width + static_cast<int>(io.MouseDelta.x), 260,
+												  static_cast<int>(screen_w * 0.85f));
+			}
+			if (ImGui::IsItemDeactivated()) {
+				ConfigManager::save();
+			}
+			if (bar_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+				cfg.ui.sidebar_width = 380;
+				ConfigManager::save();
+			}
+
+			ImDrawList* fg_dl = ImGui::GetForegroundDrawList();
+			if (bar_hovered || bar_held) {
+				ImU32 glow_col =
+					bar_held ? ImGui::GetColorU32(ImGuiCol_ButtonActive) : ImGui::GetColorU32(ImGuiCol_SeparatorActive);
+				fg_dl->AddLine(ImVec2(bar_x, sidebar_y), ImVec2(bar_x, sidebar_y + target_h), glow_col,
+							   bar_held ? 3.0f : 2.0f);
+				float mid_y = sidebar_y + target_h * 0.5f;
+				fg_dl->AddRectFilled(ImVec2(bar_x - 3.0f, mid_y - 20.0f), ImVec2(bar_x + 3.0f, mid_y + 20.0f), glow_col,
+									 3.0f);
+			} else {
+				fg_dl->AddLine(ImVec2(bar_x, sidebar_y), ImVec2(bar_x, sidebar_y + target_h),
+							   ImGui::GetColorU32(ImGuiCol_Separator), 1.0f);
+			}
+		}
+		ImGui::End();
+		ImGui::PopStyleVar(2);
 	}
 
 	render_mouse_overlay();
 
 	render_modals();
 
-	// Cursor icons for the UI
 	ImGuiContext& g = *GImGui;
 	if (g.HoveredIdIsDisabled) {
 		ImGui::SetMouseCursor(ImGuiMouseCursor_NotAllowed);
@@ -1023,19 +1064,23 @@ bool UI::button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& si
 
 	ImGuiContext& g = *GImGui;
 	const ImGuiStyle& style = g.Style;
+	const auto& cfg = ConfigManager::get_config();
 	const ImGuiID id = window->GetID(label);
 	const char* label_end = ImGui::FindRenderedTextEnd(label);
 	const ImVec2 text_size = ImGui::CalcTextSize(label, label_end, false);
 
-	const float icon_w = icon ? 16.0f : 0.0f;
-	const float icon_h = icon ? 16.0f : 0.0f;
+	float default_btn_h = (cfg.ui.button_size > 0) ? static_cast<float>(cfg.ui.button_size) : 30.0f;
+	float req_h = (size_arg.y > 0.0f) ? size_arg.y : default_btn_h;
+	float base_icon_sz = (cfg.ui.icon_size > 0) ? static_cast<float>(cfg.ui.icon_size) : 16.0f;
+	float icon_sz = icon ? std::min(base_icon_sz, std::max(8.0f, req_h - 4.0f)) : 0.0f;
 	const float spacing = (icon && text_size.x > 0.0f) ? 6.0f : 0.0f;
-	const float total_content_w = icon_w + spacing + text_size.x;
-	const float total_content_h = std::max(icon_h, text_size.y);
+	const float total_content_w = (icon ? icon_sz : 0.0f) + spacing + text_size.x;
+	const float total_content_h = std::max(icon_sz, text_size.y);
 
 	ImVec2 pos = window->DC.CursorPos;
-	ImVec2 size = ImGui::CalcItemSize(size_arg, total_content_w + style.FramePadding.x * 2.0f,
-									  total_content_h + style.FramePadding.y * 2.0f);
+	float req_w = (size_arg.x > 0.0f) ? size_arg.x
+									  : (text_size.x > 0.0f ? (total_content_w + style.FramePadding.x * 2.0f) : req_h);
+	ImVec2 size(req_w, req_h);
 
 	const ImRect bb(pos, ImVec2(pos.x + size.x, pos.y + size.y));
 	ImGui::ItemSize(size, style.FramePadding.y);
@@ -1045,32 +1090,31 @@ bool UI::button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& si
 	bool hovered, held;
 	bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, ImGuiButtonFlags_None);
 
-	// Render button frame
 	const ImU32 col = ImGui::GetColorU32((held && hovered) ? ImGuiCol_ButtonActive
 										 : hovered		   ? ImGuiCol_ButtonHovered
 														   : ImGuiCol_Button);
 	ImGui::RenderNavCursor(bb, id);
 	ImGui::RenderFrame(bb.Min, bb.Max, col, true, style.FrameRounding);
 
-	// Center content horizontally
-	float content_start_x = bb.Min.x + (bb.GetWidth() - total_content_w) * 0.5f;
+	float content_start_x = std::round(bb.Min.x + (bb.GetWidth() - total_content_w) * 0.5f);
 	if (content_start_x < bb.Min.x + style.FramePadding.x)
 		content_start_x = bb.Min.x + style.FramePadding.x;
 
 	if (icon) {
-		float icon_x = std::floor(content_start_x);
-		float icon_y = std::floor(bb.Min.y + (bb.GetHeight() - icon_h) * 0.5f);
+		float icon_x = (text_size.x > 0.0f) ? content_start_x : std::round(bb.Min.x + (bb.GetWidth() - icon_sz) * 0.5f);
+		float icon_y = std::round(bb.Min.y + (bb.GetHeight() - icon_sz) * 0.5f);
 		ImVec2 icon_min(icon_x, icon_y);
-		ImVec2 icon_max(icon_x + icon_w, icon_y + icon_h);
+		ImVec2 icon_max(icon_x + icon_sz, icon_y + icon_sz);
 		bool is_disabled = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
-		ImU32 icon_tint = ImGui::GetColorU32(is_disabled ? ImGuiCol_TextDisabled : ImGuiCol_Text);
+
+		ImU32 icon_tint = is_disabled ? IM_COL32(180, 180, 180, 130) : IM_COL32(255, 255, 255, 255);
 		window->DrawList->AddImage((ImTextureID)(intptr_t)icon, icon_min, icon_max, ImVec2(0, 0), ImVec2(1, 1),
 								   icon_tint);
 	}
 
 	if (text_size.x > 0.0f) {
-		float text_x = std::floor(content_start_x + (icon ? (icon_w + spacing) : 0.0f));
-		float text_y = std::floor(bb.Min.y + (bb.GetHeight() - text_size.y) * 0.5f);
+		float text_x = std::round(content_start_x + (icon ? (icon_sz + spacing) : 0.0f));
+		float text_y = std::round(bb.Min.y + (bb.GetHeight() - text_size.y) * 0.5f);
 		ImVec2 text_min(text_x, text_y);
 		ImVec2 text_max(bb.Max.x - style.FramePadding.x, bb.Max.y);
 		ImGui::RenderTextClipped(text_min, text_max, label, label_end, &text_size, ImVec2(0.0f, 0.5f), &bb);
@@ -1086,7 +1130,7 @@ void UI::render_selection_controls() {
 
 	float avail_w = ImGui::GetContentRegionAvail().x;
 	float spacing_x = ImGui::GetStyle().ItemSpacing.x;
-	float btn = (cfg.ui.button_height > 0) ? static_cast<float>(cfg.ui.button_height) : 28.0f;
+	float btn = (cfg.ui.button_size > 0) ? static_cast<float>(cfg.ui.button_size) : 28.0f;
 
 	const ImVec4& btn_active_col = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
 	ImVec4 btn_active_hover =
@@ -1151,7 +1195,6 @@ void UI::render_selection_controls() {
 		float col_w = (avail_w - spacing_x * 3.0f) / 4.0f;
 		ImVec2 btn_sz(col_w, btn);
 
-		// Grid Row 1: Copy, Cut, Paste, Delete
 		if (!has_selection)
 			ImGui::BeginDisabled();
 		if (button_with_icon("##CopySel", IconManager::get(IconID::Copy), btn_sz)) {
@@ -1199,7 +1242,6 @@ void UI::render_selection_controls() {
 			ImGui::SetTooltip("Delete selected cells (%s)",
 							  ShortcutManager::get_key_string(ShortcutAction::Delete).c_str());
 
-		// Grid Row 2: Fill, Deselect, Rotate CW, Rotate CCW
 		if (!has_selection)
 			ImGui::BeginDisabled();
 		if (button_with_icon("##FillSel", IconManager::get(IconID::Fill), btn_sz)) {
@@ -1247,7 +1289,6 @@ void UI::render_selection_controls() {
 			ImGui::SetTooltip("Rotate selection 90° counter-clockwise (%s)",
 							  ShortcutManager::get_key_string(ShortcutAction::RotateCCW).c_str());
 
-		// Transparent Checkbox
 		ImGui::Spacing();
 		ImGui::Checkbox("Transparent", &transparent_mode);
 		if (ImGui::IsItemHovered()) {
@@ -1255,7 +1296,6 @@ void UI::render_selection_controls() {
 				"When enabled, air/empty cells in clipboard or moved selection will not overwrite existing cells.");
 		}
 
-		// Stamp Prefabs
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::Text("Stamp Prefabs:");
@@ -1363,11 +1403,9 @@ void UI::render_mouse_overlay() {
 			int bh = selection_box.height();
 			ScreenRect srect = grid_to_screen_rect_wh(min_x, min_y, bw, bh);
 
-			// Semi-transparent fill
 			draw_list->AddRectFilled(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2),
 									 IM_COL32(50, 150, 255, 30));
 
-			// Dual-tone border
 			draw_list->AddRect(ImVec2(srect.x1 - 1.0f, srect.y1 - 1.0f), ImVec2(srect.x2 + 1.0f, srect.y2 + 1.0f),
 							   IM_COL32(0, 0, 0, 220), 0.0f, 0, 2.0f);
 			draw_list->AddRect(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2), IM_COL32(80, 200, 255, 255),
@@ -1375,16 +1413,10 @@ void UI::render_mouse_overlay() {
 
 			if (selection_state == SelectionState::Selected || selection_state == SelectionState::Resizing) {
 				float handle_size = 5.0f;
-				ImVec2 handle_pts[8] = {
-					ImVec2(srect.x1, srect.y1),						 // TopLeft
-					ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y1),	 // Top
-					ImVec2(srect.x2, srect.y1),						 // TopRight
-					ImVec2(srect.x2, (srect.y1 + srect.y2) * 0.5f),	 // Right
-					ImVec2(srect.x2, srect.y2),						 // BottomRight
-					ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y2),	 // Bottom
-					ImVec2(srect.x1, srect.y2),						 // BottomLeft
-					ImVec2(srect.x1, (srect.y1 + srect.y2) * 0.5f)	 // Left
-				};
+				ImVec2 handle_pts[8] = {ImVec2(srect.x1, srect.y1), ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y1),
+										ImVec2(srect.x2, srect.y1), ImVec2(srect.x2, (srect.y1 + srect.y2) * 0.5f),
+										ImVec2(srect.x2, srect.y2), ImVec2((srect.x1 + srect.x2) * 0.5f, srect.y2),
+										ImVec2(srect.x1, srect.y2), ImVec2(srect.x1, (srect.y1 + srect.y2) * 0.5f)};
 				ResizeHandle handle_enums[8] = {
 					ResizeHandle::TopLeft,	   ResizeHandle::Top,	 ResizeHandle::TopRight,   ResizeHandle::Right,
 					ResizeHandle::BottomRight, ResizeHandle::Bottom, ResizeHandle::BottomLeft, ResizeHandle::Left};
@@ -1687,7 +1719,6 @@ void UI::handle_zoom_and_pan(ImGuiIO& io) {
 	if (dt <= 0.0f)
 		dt = 0.016f;
 
-	// Configurable camera movement
 	if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt) {
 		float pan_dir_x = 0.0f;
 		float pan_dir_y = 0.0f;
@@ -1763,7 +1794,6 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		UndoManager::redo();
 	}
 
-	// Tool mode & Copy / Cut / Paste / Duplicate
 	if (ShortcutManager::is_action_pressed(ShortcutAction::Copy)) {
 		if (current_tool != ToolMode::Select) {
 			set_tool_mode(ToolMode::Select);
@@ -1841,50 +1871,44 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		if (update) {
 			UndoManager::push_snapshot("Resume Simulation");
 		}
+		return;
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::BrushShape)) {
 		brush_shape = static_cast<BrushShape>((static_cast<int>(brush_shape) + 1) % static_cast<int>(BrushShape::Size));
+		return;
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ToggleCompact)) {
 		ui_compact = !ui_compact;
+		return;
 	}
 
-	// Rotate selection: Q for Clockwise, E for Counter-Clockwise
 	bool can_rotate = (selection_state == SelectionState::Selected || selection_state == SelectionState::Moving ||
 					   (selection_state == SelectionState::Pasting && !clipboard.empty()));
 	if (can_rotate) {
 		if (ShortcutManager::is_action_pressed(ShortcutAction::RotateCW)) {
 			rotate_selection(true);
+			return;
 		}
 		if (ShortcutManager::is_action_pressed(ShortcutAction::RotateCCW)) {
 			rotate_selection(false);
+			return;
 		}
 	}
 
-	// Reset / Clear grid
 	if (ShortcutManager::is_action_pressed(ShortcutAction::ClearGrid)) {
 		Grid::clear();
 		UndoManager::push_snapshot("Clear Grid");
+		return;
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ZoomIn)) {
 		target_zoom *= 1.2f;
+		return;
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ZoomOut)) {
 		target_zoom /= 1.2f;
-	}
-
-	const auto& mats = MaterialManager::get_materials();
-	const size_t material_count = mats.size();
-	for (int i = 1; i <= 9; ++i) {
-		ShortcutAction act = static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (i - 1));
-		if (ShortcutManager::is_action_pressed(act)) {
-			if (static_cast<size_t>(i) < material_count) {
-				selected_id = mats[i].id;
-			} else if (static_cast<size_t>(i) == material_count) {
-				selected_id = mats[0].id;
-			}
-		}
+		return;
 	}
 
 	if (ShortcutManager::is_action_pressed(ShortcutAction::Fullscreen)) {
 		SDL_Window* window = Window::get_window();
 		SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
+		return;
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::CancelOrQuit)) {
 		if (selection_state == SelectionState::Moving) {
 			deselect();
@@ -1895,6 +1919,23 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 			deselect();
 		} else {
 			show_exit_popup = true;
+		}
+		return;
+	}
+
+	auto mat_shortcuts = get_all_material_shortcuts();
+	for (const auto& item : mat_shortcuts) {
+		if (item.effective_shortcut.empty())
+			continue;
+		ImGuiKey k;
+		bool c, s, a;
+		if (ShortcutManager::parse_key_combo(item.effective_shortcut, k, c, s, a)) {
+			if (k != ImGuiKey_None && io.KeyCtrl == c && io.KeyShift == s && io.KeyAlt == a) {
+				if (ImGui::IsKeyPressed(k, false)) {
+					selected_id = item.id;
+					break;
+				}
+			}
 		}
 	}
 }
@@ -1927,7 +1968,6 @@ void UI::handle_canvas_interaction() {
 	}
 
 	if (current_tool == ToolMode::Select) {
-		// Pasting state
 		if (selection_state == SelectionState::Pasting) {
 			if (clipboard.empty()) {
 				selection_state = SelectionState::None;
@@ -1965,7 +2005,6 @@ void UI::handle_canvas_interaction() {
 			return;
 		}
 
-		// Moving state
 		if (selection_state == SelectionState::Moving) {
 			int gx = static_cast<int>(grid_pos.x);
 			int gy = static_cast<int>(grid_pos.y);
@@ -1979,7 +2018,6 @@ void UI::handle_canvas_interaction() {
 			return;
 		}
 
-		// Resizing state
 		if (selection_state == SelectionState::Resizing) {
 			int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(Grid::get_width()) - 1);
 			int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(Grid::get_height()) - 1);
@@ -2028,7 +2066,6 @@ void UI::handle_canvas_interaction() {
 			return;
 		}
 
-		// None, Selecting, Selected
 		int gx = std::clamp(static_cast<int>(grid_pos.x), 0, static_cast<int>(Grid::get_width()) - 1);
 		int gy = std::clamp(static_cast<int>(grid_pos.y), 0, static_cast<int>(Grid::get_height()) - 1);
 
@@ -2089,13 +2126,11 @@ void UI::handle_canvas_interaction() {
 				}
 
 				if (selection_box.contains(gx, gy)) {
-					// Start moving
 					start_moving_selection(gx, gy);
 					return;
 				}
 			}
 
-			// Start new selection (or will deselect on release if not dragged)
 			selection_box.start_x = gx;
 			selection_box.start_y = gy;
 			selection_box.current_x = gx;
@@ -2179,12 +2214,18 @@ void UI::handle_interaction() {
 
 void UI::render_header(ImGuiIO& io) {
 	const auto& cfg = ConfigManager::get_config();
-	ImGui::Text("SAND3 SIMULATOR");
 	if (cfg.ui.show_fps) {
 		ImGui::Text("FPS: %.1f (%.3f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
 	}
 	if (cfg.ui.show_active_cells) {
 		ImGui::Text("Active cells: %u", Grid::get_changed_cells());
+	}
+	if (cfg.ui.show_simulation_status) {
+		if (update) {
+			ImGui::TextColored(ImVec4(0.25f, 0.90f, 0.45f, 1.0f), "Status: UNPAUSED");
+		} else {
+			ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.35f, 1.0f), "Status: PAUSED");
+		}
 	}
 	ImGui::Separator();
 	render_selection_controls();
@@ -2196,8 +2237,8 @@ void UI::render_sim_content() {
 	float avail_w = ImGui::GetContentRegionAvail().x;
 	float spacing_x = ImGui::GetStyle().ItemSpacing.x;
 	float sim_col_w = (avail_w - spacing_x * 2.0f) / 3.0f;
-	float btn_h = (cfg.ui.button_height > 0) ? static_cast<float>(cfg.ui.button_height) : 30.0f;
-	ImVec2 sim_btn_sz(sim_col_w, btn_h);
+	float btn_sz = (cfg.ui.button_size > 0) ? static_cast<float>(cfg.ui.button_size) : 30.0f;
+	ImVec2 sim_btn_sz(sim_col_w, btn_sz);
 
 	ImGui::Spacing();
 	if (update) {
@@ -2263,9 +2304,11 @@ void UI::render_sim_content() {
 		if (ImGui::Selectable((label + "##sim_" + std::to_string(i)).c_str(), selected_id == materials[i].id)) {
 			selected_id = materials[i].id;
 		}
-		if (i <= 9 && ImGui::IsItemHovered()) {
-			ShortcutAction act = static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (i - 1));
-			ImGui::SetTooltip("Shortcut: %s", ShortcutManager::get_key_string(act).c_str());
+		if (ImGui::IsItemHovered()) {
+			std::string sc = get_effective_material_shortcut(materials[i].id);
+			if (!sc.empty()) {
+				ImGui::SetTooltip("Shortcut: %s", sc.c_str());
+			}
 		}
 	}
 	ImVec4 color =
@@ -2275,10 +2318,11 @@ void UI::render_sim_content() {
 	if (ImGui::Selectable((materials[0].name + "##sim_0").c_str(), selected_id == 0)) {
 		selected_id = 0;
 	}
-	if (materials.size() <= 9 && ImGui::IsItemHovered()) {
-		ShortcutAction act =
-			static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (materials.size() - 1));
-		ImGui::SetTooltip("Shortcut: %s", ShortcutManager::get_key_string(act).c_str());
+	if (ImGui::IsItemHovered()) {
+		std::string sc = get_effective_material_shortcut(0);
+		if (!sc.empty()) {
+			ImGui::SetTooltip("Shortcut: %s", sc.c_str());
+		}
 	}
 	ImGui::EndChild();
 }
@@ -2312,15 +2356,92 @@ struct CopiedRuleCell {
 
 static CopiedRuleCell g_copied_rule_cell;
 
+std::vector<UI::MaterialShortcutItem> UI::get_all_material_shortcuts() {
+	const auto& mats = MaterialManager::get_materials();
+	if (mats.empty())
+		return {};
+
+	const auto& meta = SetManager::get_current_metadata();
+
+	std::vector<size_t> order;
+	order.reserve(mats.size());
+	for (size_t i = 1; i < mats.size(); ++i) {
+		order.push_back(i);
+	}
+	order.push_back(0);
+
+	std::vector<MaterialShortcutItem> result;
+	result.reserve(order.size());
+
+	int next_order_num = 1;
+
+	for (size_t idx : order) {
+		MaterialShortcutItem item;
+		item.name = mats[idx].name;
+		item.id = mats[idx].id;
+
+		auto it = meta.shortcuts.find(mats[idx].name);
+		if (it != meta.shortcuts.end() && !it->second.empty()) {
+			item.custom_shortcut = it->second;
+			item.effective_shortcut = it->second;
+			item.is_custom = true;
+
+			if (item.custom_shortcut.length() == 1 && item.custom_shortcut[0] >= '1' &&
+				item.custom_shortcut[0] <= '9') {
+				next_order_num = (item.custom_shortcut[0] - '0') + 1;
+			}
+		} else {
+			item.is_custom = false;
+
+			while (next_order_num <= 9) {
+				std::string num_str = std::to_string(next_order_num);
+				bool taken = false;
+				for (const auto& [mname, sc] : meta.shortcuts) {
+					if (sc == num_str) {
+						taken = true;
+						break;
+					}
+				}
+				if (!taken)
+					break;
+				next_order_num++;
+			}
+
+			if (next_order_num <= 9) {
+				item.effective_shortcut = std::to_string(next_order_num);
+				next_order_num++;
+			} else {
+				item.effective_shortcut = "";
+			}
+		}
+		result.push_back(item);
+	}
+
+	return result;
+}
+
+std::string UI::get_effective_material_shortcut(uint8_t id) {
+	auto all = get_all_material_shortcuts();
+	for (const auto& item : all) {
+		if (item.id == id) {
+			return item.effective_shortcut;
+		}
+	}
+	return "";
+}
+
 void UI::render_material_editor() {
 	std::vector<MaterialDefinition>& materials = MaterialManager::get_materials();
+	auto& cfg = ConfigManager::get_config();
+	ImGuiIO& io = ImGui::GetIO();
 
 	if (ImGui::BeginTabItem("Materials")) {
 		ImGui::Spacing();
 		bool rebuild_needed = false;
 
 		if (ImGui::CollapsingHeader("Materials List", ImGuiTreeNodeFlags_DefaultOpen)) {
-			ImGui::BeginChild("MaterialsListScroll", ImVec2(0, 150), true);
+			float list_h = static_cast<float>(cfg.ui.material_list_height > 0 ? cfg.ui.material_list_height : 150);
+			ImGui::BeginChild("MaterialsListScroll", ImVec2(0, list_h), true);
 
 			for (size_t i = 1; i < materials.size(); ++i) {
 				std::string label = materials[i].name;
@@ -2335,12 +2456,10 @@ void UI::render_material_editor() {
 					selected_id = materials[i].id;
 				}
 				if (ImGui::IsItemHovered()) {
-					if (i <= 9) {
-						ShortcutAction act =
-							static_cast<ShortcutAction>(static_cast<int>(ShortcutAction::QuickSelect1) + (i - 1));
+					std::string sc = get_effective_material_shortcut(materials[i].id);
+					if (!sc.empty()) {
 						ImGui::SetTooltip("Has %zu rule%s\nShortcut: %s", materials[i].rules.size(),
-										  (materials[i].rules.size() == 1 ? "" : "s"),
-										  ShortcutManager::get_key_string(act).c_str());
+										  (materials[i].rules.size() == 1 ? "" : "s"), sc.c_str());
 					} else {
 						ImGui::SetTooltip("Has %zu rule%s", materials[i].rules.size(),
 										  (materials[i].rules.size() == 1 ? "" : "s"));
@@ -2357,12 +2476,10 @@ void UI::render_material_editor() {
 				selected_id = 0;
 			}
 			if (ImGui::IsItemHovered()) {
-				if (materials.size() <= 9) {
-					ShortcutAction act = static_cast<ShortcutAction>(
-						static_cast<int>(ShortcutAction::QuickSelect1) + (materials.size() - 1));
+				std::string sc = get_effective_material_shortcut(0);
+				if (!sc.empty()) {
 					ImGui::SetTooltip("Has %zu rule%s\nShortcut: %s", materials[0].rules.size(),
-									  (materials[0].rules.size() == 1 ? "" : "s"),
-									  ShortcutManager::get_key_string(act).c_str());
+									  (materials[0].rules.size() == 1 ? "" : "s"), sc.c_str());
 				} else {
 					ImGui::SetTooltip("Has %zu rule%s", materials[0].rules.size(),
 									  (materials[0].rules.size() == 1 ? "" : "s"));
@@ -2370,6 +2487,44 @@ void UI::render_material_editor() {
 			}
 
 			ImGui::EndChild();
+
+			float bar_h = 8.0f;
+			ImVec2 cur_pos = ImGui::GetCursorScreenPos();
+			float avail_w = ImGui::GetContentRegionAvail().x;
+			ImRect h_bar_bb(cur_pos, ImVec2(cur_pos.x + avail_w, cur_pos.y + bar_h));
+			ImGui::InvisibleButton("##MatListResizeBar", ImVec2(-1, bar_h));
+			bool h_hovered = ImGui::IsItemHovered();
+			bool h_held = ImGui::IsItemActive();
+			if (h_hovered || h_held) {
+				ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+			}
+			if (h_held && io.MouseDelta.y != 0.0f) {
+				cfg.ui.material_list_height =
+					std::clamp(cfg.ui.material_list_height + static_cast<int>(io.MouseDelta.y), 70, 600);
+			}
+			if (ImGui::IsItemDeactivated()) {
+				ConfigManager::save();
+			}
+			if (h_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+				cfg.ui.material_list_height = 150;
+				ConfigManager::save();
+			}
+			if (h_hovered) {
+				ImGui::SetTooltip("Drag to resize material list (Double-click to reset to 150px)");
+			}
+
+			ImDrawList* w_dl = ImGui::GetWindowDrawList();
+			float mid_y = std::round((h_bar_bb.Min.y + h_bar_bb.Max.y) * 0.5f);
+			ImU32 line_col = h_held		 ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+							 : h_hovered ? ImGui::GetColorU32(ImGuiCol_SeparatorActive)
+										 : ImGui::GetColorU32(ImGuiCol_Separator);
+			w_dl->AddLine(ImVec2(h_bar_bb.Min.x, mid_y), ImVec2(h_bar_bb.Max.x, mid_y), line_col, h_held ? 2.0f : 1.0f);
+			float mid_x = std::round((h_bar_bb.Min.x + h_bar_bb.Max.x) * 0.5f);
+			ImU32 handle_col = h_held	   ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+							   : h_hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
+										   : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+			w_dl->AddRectFilled(ImVec2(mid_x - 18.0f, mid_y - 2.5f), ImVec2(mid_x + 18.0f, mid_y + 2.5f), handle_col,
+								2.5f);
 
 			ImGui::Spacing();
 			const bool at_max = materials.size() == 255;
@@ -3306,7 +3461,6 @@ void UI::render_save_load() {
 			ImGui::EndTabBar();
 		}
 
-		// Modal for differently sized saves
 		if (open_diff_size_save_popup) {
 			ImGui::OpenPopup("Differently Sized Save Detected");
 			open_diff_size_save_popup = false;
@@ -3470,7 +3624,6 @@ void UI::render_advanced_options() {
 			}
 		}
 
-		// Simulation Canvas Size
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::Spacing();
@@ -3486,7 +3639,6 @@ void UI::render_advanced_options() {
 		static bool resize_preserve_content = true;
 		static bool open_resize_confirm_popup = false;
 
-		// Sync with actual grid dimensions if changed externally
 		static uint32_t last_known_w = current_w;
 		static uint32_t last_known_h = current_h;
 		if (last_known_w != current_w || last_known_h != current_h) {
@@ -3594,6 +3746,83 @@ void UI::render_advanced_options() {
 	}
 }
 
+static std::string trim_string(const std::string& s) {
+	size_t start = s.find_first_not_of(" \t\r\n");
+	if (start == std::string::npos)
+		return "";
+	size_t end = s.find_last_not_of(" \t\r\n");
+	return s.substr(start, end - start + 1);
+}
+
+struct MouseShortcutEntry {
+	std::string action;
+	std::string control;
+	std::string description;
+};
+
+static const MouseShortcutEntry MOUSE_SHORTCUTS[] = {
+	{"Paint Material", "Left Mouse Button (Click / Drag)", "Draw with active material on the simulation grid"},
+	{"Erase Cells", "Right Mouse Button (Click / Drag)", "Erase cells (draw empty material) under brush"},
+	{"Pan Camera", "Middle Mouse Button (Drag)", "Pan the camera viewport across the grid"},
+	{"Eyedropper", "Middle Mouse Button (Click)", "Sample material from the grid cell under cursor"},
+	{"Brush Size", "Mouse Scroll Wheel", "Adjust simulation brush size"},
+	{"Fast Brush Size", "Ctrl + Mouse Scroll Wheel", "Rapidly adjust brush size (4x step size)"},
+	{"Zoom Viewport", "Shift + Mouse Scroll Wheel", "Smoothly zoom canvas in or out"},
+	{"Draw Straight Line", "Shift + Left / Right Drag", "Draw or erase straight lines between points"},
+	{"Flood Fill Area", "Shift + Alt + Left / Right Click", "Fill or clear connected region of matching cells"},
+	{"Fast Camera Pan", "Shift + W / A / S / D", "Pan camera at 2.5x speed"},
+	{"Move Selection", "Left Click Drag inside box", "Reposition floating selection area"},
+	{"Resize Selection Box", "Drag Handles on box border", "Resize active selection bounding box"},
+	{"Nudge Selection", "Arrow Keys", "Nudge selection box 1 cell (Shift for 10 cells)"},
+	{"Alternative Redo", "Ctrl + Shift + Z", "Secondary shortcut to redo undone action"},
+	{"Alternative Clear", "Ctrl + Shift + Delete", "Secondary shortcut to clear entire grid"},
+	{"Alternative Zoom", "Keypad + / Keypad -", "Secondary shortcuts to zoom camera in or out"},
+};
+
+struct CuratedColor {
+	ImGuiCol col;
+	const char* category;
+	const char* label;
+};
+
+static const CuratedColor CURATED_THEME_COLORS[] = {
+	{ImGuiCol_Text, "Text & Selection", "Main Text"},
+	{ImGuiCol_TextDisabled, "Text & Selection", "Disabled Text"},
+	{ImGuiCol_TextSelectedBg, "Text & Selection", "Text Selection Background"},
+
+	{ImGuiCol_WindowBg, "Windows & Backgrounds", "Window Background"},
+	{ImGuiCol_ChildBg, "Windows & Backgrounds", "Panel / Child Window Background"},
+	{ImGuiCol_PopupBg, "Windows & Backgrounds", "Popup & Tooltip Background"},
+	{ImGuiCol_Border, "Windows & Backgrounds", "Border Color"},
+	{ImGuiCol_MenuBarBg, "Windows & Backgrounds", "Menu Bar Background"},
+
+	{ImGuiCol_Button, "Buttons & Accent", "Button Normal"},
+	{ImGuiCol_ButtonHovered, "Buttons & Accent", "Button Hovered"},
+	{ImGuiCol_ButtonActive, "Buttons & Accent", "Button Active / Pressed"},
+	{ImGuiCol_Header, "Buttons & Accent", "Header / List Selected"},
+	{ImGuiCol_HeaderHovered, "Buttons & Accent", "Header Hovered"},
+	{ImGuiCol_HeaderActive, "Buttons & Accent", "Header Active"},
+
+	{ImGuiCol_FrameBg, "Inputs & Sliders", "Input Field Background"},
+	{ImGuiCol_FrameBgHovered, "Inputs & Sliders", "Input Field Hovered"},
+	{ImGuiCol_FrameBgActive, "Inputs & Sliders", "Input Field Active"},
+	{ImGuiCol_CheckMark, "Inputs & Sliders", "Checkmark Color"},
+	{ImGuiCol_SliderGrab, "Inputs & Sliders", "Slider Grabber"},
+	{ImGuiCol_SliderGrabActive, "Inputs & Sliders", "Slider Grabber Active"},
+
+	{ImGuiCol_Tab, "Tabs", "Tab Inactive"},
+	{ImGuiCol_TabHovered, "Tabs", "Tab Hovered"},
+	{ImGuiCol_TabActive, "Tabs", "Tab Active"},
+	{ImGuiCol_TabUnfocused, "Tabs", "Tab Unfocused"},
+	{ImGuiCol_TabUnfocusedActive, "Tabs", "Tab Unfocused Active"},
+
+	{ImGuiCol_Separator, "Dividers & Scrollbars", "Separator Line"},
+	{ImGuiCol_ScrollbarBg, "Dividers & Scrollbars", "Scrollbar Track"},
+	{ImGuiCol_ScrollbarGrab, "Dividers & Scrollbars", "Scrollbar Thumb"},
+	{ImGuiCol_ScrollbarGrabHovered, "Dividers & Scrollbars", "Scrollbar Thumb Hovered"},
+	{ImGuiCol_ScrollbarGrabActive, "Dividers & Scrollbars", "Scrollbar Thumb Active"},
+};
+
 void UI::render_shortcuts() {
 	if (ImGui::BeginTabItem("Shortcuts")) {
 		ImGui::Spacing();
@@ -3616,6 +3845,9 @@ void UI::render_shortcuts() {
 
 		std::string last_cat = "";
 		for (const auto& s : ShortcutManager::get_all()) {
+			if (s.action >= ShortcutAction::QuickSelect1 && s.action <= ShortcutAction::QuickSelect9) {
+				continue;
+			}
 			std::string name_lower = s.display_name;
 			std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
 						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -3675,6 +3907,117 @@ void UI::render_shortcuts() {
 			}
 			ImGui::PopID();
 		}
+
+		bool mouse_header_shown = false;
+		for (const auto& entry : MOUSE_SHORTCUTS) {
+			std::string a_lower = entry.action;
+			std::transform(a_lower.begin(), a_lower.end(), a_lower.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string c_lower = entry.control;
+			std::transform(c_lower.begin(), c_lower.end(), c_lower.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string d_lower = entry.description;
+			std::transform(d_lower.begin(), d_lower.end(), d_lower.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			if (!filter.empty() && a_lower.find(filter) == std::string::npos &&
+				c_lower.find(filter) == std::string::npos && d_lower.find(filter) == std::string::npos &&
+				filter != "mouse") {
+				continue;
+			}
+
+			if (!mouse_header_shown) {
+				ImGui::Spacing();
+				ImGui::Text("Canvas & Mouse Controls");
+				ImGui::Separator();
+				mouse_header_shown = true;
+			}
+
+			ImGui::Text("%s:", entry.action.c_str());
+			ImGui::SameLine(240);
+			ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "%s", entry.control.c_str());
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", entry.description.c_str());
+			}
+		}
+
+		ImGui::Spacing();
+		ImGui::Text("Material Shortcuts (Set: %s)", SetManager::get_current_set().c_str());
+		ImGui::Separator();
+		ImGui::TextDisabled("Stored in set_config.ini under [Shortcuts]. If a material is assigned a custom shortcut, "
+							"next materials follow the order.");
+		if (ImGui::SmallButton("Reset Set Material Shortcuts to Default")) {
+			SetManager::clear_current_material_shortcuts();
+		}
+		ImGui::Spacing();
+
+		auto mat_items = get_all_material_shortcuts();
+		for (const auto& item : mat_items) {
+			std::string name_l = item.name;
+			std::transform(name_l.begin(), name_l.end(), name_l.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string eff_l = item.effective_shortcut;
+			std::transform(eff_l.begin(), eff_l.end(), eff_l.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			if (!filter.empty() && name_l.find(filter) == std::string::npos &&
+				eff_l.find(filter) == std::string::npos && filter != "material" && filter != "materials") {
+				continue;
+			}
+
+			ImGui::PushID(("mat_sc_" + item.name + "_" + std::to_string(item.id)).c_str());
+
+			const auto& mat = MaterialManager::get_material(item.id);
+			ImVec4 col(mat.color[0] / 255.f, mat.color[1] / 255.f, mat.color[2] / 255.f, 1.0f);
+			ImGui::ColorButton("##swatch", col, ImGuiColorEditFlags_NoTooltip, ImVec2(15, 15));
+			ImGui::SameLine();
+
+			if (item.is_custom) {
+				ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "*");
+				ImGui::SameLine();
+			}
+			ImGui::Text("%s:", item.name.c_str());
+			ImGui::SameLine(180);
+
+			if (item.is_custom) {
+				ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), "[Custom]");
+			} else {
+				ImGui::TextDisabled("[Auto]");
+			}
+			ImGui::SameLine(240);
+
+			char mat_buf[32];
+			std::snprintf(mat_buf, sizeof(mat_buf), "%s", item.effective_shortcut.c_str());
+			ImGui::SetNextItemWidth(120);
+			if (ImGui::InputText("##mat_input", mat_buf, sizeof(mat_buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+				std::string new_str = trim_string(mat_buf);
+				if (new_str.empty()) {
+					SetManager::remove_current_material_shortcut(item.name);
+				} else {
+					ImGuiKey k;
+					bool c, s, a;
+					if (ShortcutManager::parse_key_combo(new_str, k, c, s, a)) {
+						std::string formatted = ShortcutManager::format_key_combo(k, c, s, a);
+						SetManager::set_current_material_shortcut(item.name, formatted);
+					}
+				}
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Custom shortcut for '%s' (e.g. 1, 2, G, Shift+1). Press Enter to apply.\nStored in "
+								  "set_config.ini under [Shortcuts].",
+								  item.name.c_str());
+			}
+
+			if (item.is_custom) {
+				ImGui::SameLine();
+				if (ImGui::SmallButton("Reset##mat_reset")) {
+					SetManager::remove_current_material_shortcut(item.name);
+				}
+			}
+
+			ImGui::PopID();
+		}
+
 		ImGui::EndChild();
 		ImGui::EndTabItem();
 	}
@@ -3689,14 +4032,19 @@ void UI::render_theme_editor() {
 		ImGuiStyle& style = ImGui::GetStyle();
 
 		ImGui::Spacing();
-		if (ImGui::Button("Reset Style to Defaults", ImVec2(200, 26))) {
+		if (ImGui::Button("Reset Style to Defaults", ImVec2(220, 26))) {
 			cfg.ui.window_rounding = def_cfg.ui.window_rounding;
 			cfg.ui.frame_rounding = def_cfg.ui.frame_rounding;
-			cfg.ui.button_height = def_cfg.ui.button_height;
+			cfg.ui.button_size = def_cfg.ui.button_size;
+			cfg.ui.icon_size = def_cfg.ui.icon_size;
+			cfg.ui.material_list_height = def_cfg.ui.material_list_height;
+			cfg.ui.sidebar_width = def_cfg.ui.sidebar_width;
 			cfg.ui.ui_scale = def_cfg.ui.ui_scale;
 			cfg.ui.font_size = def_cfg.ui.font_size;
 			cfg.ui.show_fps = def_cfg.ui.show_fps;
 			cfg.ui.show_active_cells = def_cfg.ui.show_active_cells;
+			cfg.ui.show_simulation_status = def_cfg.ui.show_simulation_status;
+			cfg.ui.background_color = def_cfg.ui.background_color;
 
 			style.WindowRounding = cfg.ui.window_rounding;
 			style.FrameRounding = cfg.ui.frame_rounding;
@@ -3706,10 +4054,10 @@ void UI::render_theme_editor() {
 			style.TabRounding = cfg.ui.frame_rounding;
 
 			ConfigManager::save();
+			Window::set_background_color(cfg.ui.background_color);
 		}
 		ImGui::Spacing();
 
-		// Window Rounding
 		float win_round = cfg.ui.window_rounding;
 		if (ImGui::SliderFloat("Window Rounding", &win_round, 0.0f, 20.0f, "%.1f px")) {
 			cfg.ui.window_rounding = win_round;
@@ -3717,7 +4065,6 @@ void UI::render_theme_editor() {
 			ConfigManager::save();
 		}
 
-		// Widget Rounding
 		float frame_round = cfg.ui.frame_rounding;
 		if (ImGui::SliderFloat("Frame Rounding", &frame_round, 0.0f, 16.0f, "%.1f px")) {
 			cfg.ui.frame_rounding = frame_round;
@@ -3729,14 +4076,30 @@ void UI::render_theme_editor() {
 			ConfigManager::save();
 		}
 
-		// Button Height
-		int btn_h = cfg.ui.button_height;
-		if (ImGui::SliderInt("Button Size", &btn_h, 20, 50, "%d px")) {
-			cfg.ui.button_height = btn_h;
+		int btn_size = cfg.ui.button_size;
+		if (ImGui::SliderInt("Button Size", &btn_size, 20, 50, "%d px")) {
+			cfg.ui.button_size = btn_size;
 			ConfigManager::save();
 		}
 
-		// UI Scale
+		int icon_sz = cfg.ui.icon_size;
+		if (ImGui::SliderInt("Icon Size", &icon_sz, 10, 36, "%d px")) {
+			cfg.ui.icon_size = icon_sz;
+			ConfigManager::save();
+		}
+
+		int sb_w = cfg.ui.sidebar_width;
+		if (ImGui::SliderInt("Sidebar Width", &sb_w, 260, 800, "%d px")) {
+			cfg.ui.sidebar_width = sb_w;
+			ConfigManager::save();
+		}
+
+		int mat_h = cfg.ui.material_list_height;
+		if (ImGui::SliderInt("Material List Height", &mat_h, 70, 600, "%d px")) {
+			cfg.ui.material_list_height = mat_h;
+			ConfigManager::save();
+		}
+
 		float scale = cfg.ui.ui_scale;
 		if (ImGui::SliderFloat("UI Scale*", &scale, 0.5f, 2.5f, "%.2fx")) {
 			cfg.ui.ui_scale = scale;
@@ -3746,7 +4109,6 @@ void UI::render_theme_editor() {
 			ImGui::SetTooltip("*Requires application restart to apply.");
 		}
 
-		// Font Size
 		float f_sz = cfg.ui.font_size;
 		if (ImGui::SliderFloat("Font Size*", &f_sz, 10.0f, 32.0f, "%.1f px")) {
 			cfg.ui.font_size = f_sz;
@@ -3756,7 +4118,6 @@ void UI::render_theme_editor() {
 			ImGui::SetTooltip("*Requires application restart to reload font atlas.");
 		}
 
-		// Background Color
 		float background_color[4] = {cfg.ui.background_color.x, cfg.ui.background_color.y, cfg.ui.background_color.z,
 									 cfg.ui.background_color.w};
 		if (ImGui::ColorEdit4("Background Color", background_color, ImGuiColorEditFlags_NoAlpha)) {
@@ -3766,7 +4127,6 @@ void UI::render_theme_editor() {
 			Window::set_background_color(cfg.ui.background_color);
 		}
 
-		// Checkboxes for FPS & Active Cells
 		bool show_fps = cfg.ui.show_fps;
 		if (ImGui::Checkbox("Show FPS Counter in Header", &show_fps)) {
 			cfg.ui.show_fps = show_fps;
@@ -3776,6 +4136,11 @@ void UI::render_theme_editor() {
 		bool show_cells = cfg.ui.show_active_cells;
 		if (ImGui::Checkbox("Show Active Cells in Header", &show_cells)) {
 			cfg.ui.show_active_cells = show_cells;
+			ConfigManager::save();
+		}
+		bool show_status = cfg.ui.show_simulation_status;
+		if (ImGui::Checkbox("Show Simulation Status (PAUSED / UNPAUSED) in Header", &show_status)) {
+			cfg.ui.show_simulation_status = show_status;
 			ConfigManager::save();
 		}
 
@@ -3796,30 +4161,47 @@ void UI::render_theme_editor() {
 		std::transform(filter.begin(), filter.end(), filter.begin(),
 					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
-			const char* col_name = ImGui::GetStyleColorName(i);
+		std::string last_col_cat = "";
+		for (const auto& item : CURATED_THEME_COLORS) {
+			const char* col_name = ImGui::GetStyleColorName(item.col);
 			std::string lname = col_name;
 			std::transform(lname.begin(), lname.end(), lname.begin(),
 						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			if (!filter.empty() && lname.find(filter) == std::string::npos) {
+			std::string llabel = item.label;
+			std::transform(llabel.begin(), llabel.end(), llabel.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+			std::string lcat = item.category;
+			std::transform(lcat.begin(), lcat.end(), lcat.begin(),
+						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+			if (!filter.empty() && lname.find(filter) == std::string::npos &&
+				llabel.find(filter) == std::string::npos && lcat.find(filter) == std::string::npos) {
 				continue;
 			}
 
-			ImGui::PushID(i);
-			bool modified = defs && ConfigManager::color_differs(style.Colors[i], defs[i]);
+			if (item.category != last_col_cat) {
+				if (!last_col_cat.empty())
+					ImGui::Spacing();
+				ImGui::Text("%s", item.category);
+				ImGui::Separator();
+				last_col_cat = item.category;
+			}
+
+			ImGui::PushID(item.col);
+			bool modified = defs && ConfigManager::color_differs(style.Colors[item.col], defs[item.col]);
 			if (modified) {
 				ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "*");
 				ImGui::SameLine();
 			}
-			if (ImGui::ColorEdit4(col_name, (float*)&style.Colors[i],
+			if (ImGui::ColorEdit4(item.label, (float*)&style.Colors[item.col],
 								  ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf)) {
-				ConfigManager::get_color_overrides()[col_name] = ConfigManager::color_to_hex(style.Colors[i]);
+				ConfigManager::get_color_overrides()[col_name] = ConfigManager::color_to_hex(style.Colors[item.col]);
 				ConfigManager::save();
 			}
 			if (modified) {
 				ImGui::SameLine();
 				if (ImGui::SmallButton("Reset##col")) {
-					style.Colors[i] = defs[i];
+					style.Colors[item.col] = defs[item.col];
 					ConfigManager::get_color_overrides().erase(col_name);
 					ConfigManager::save();
 				}

@@ -33,7 +33,6 @@ public:
 
 	static std::string get_saves_directory(const std::string& current_set);
 
-	// Grid Saves
 	static bool save_to_file(const std::string& name, const std::string& current_set);
 	static bool load_from_file(const std::string& path_or_name, const std::string& current_set, std::string& loaded_set,
 							   LoadPlacement placement = LoadPlacement::Center);
@@ -43,7 +42,6 @@ public:
 	static bool duplicate_save_file(const std::string& filename, const std::string& new_name,
 									const std::string& current_set);
 
-	// Stamp Prefabs
 	static bool save_stamp_to_file(const std::string& name, const std::string& current_set,
 								   const std::vector<uint8_t>& cells, uint32_t width, uint32_t height);
 	static bool load_stamp_from_file(const std::string& path_or_name, const std::string& current_set,
@@ -53,7 +51,6 @@ public:
 	static std::vector<StampFileInfo> get_stamp_files(const std::string& current_set);
 	static bool delete_stamp_file(const std::string& filename, const std::string& current_set);
 
-	// Chunked BWT+RLE helpers
 	static void bwt_encode(const uint8_t* in_data, size_t N, std::vector<uint8_t>& out_L, uint16_t& out_primary_id);
 	static void bwt_decode(const uint8_t* L, size_t N, uint16_t primary_id, uint8_t* out_data);
 

@@ -57,7 +57,6 @@ uint32_t Vulkan::find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags pr
 	VkPhysicalDeviceMemoryProperties mem_properties;
 	vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_properties);
 
-	// First try to match preferred | required
 	VkMemoryPropertyFlags combined = preferred | required;
 	for (uint32_t i = 0; i < mem_properties.memoryTypeCount; ++i) {
 		if ((type_filter & (1u << i)) && (mem_properties.memoryTypes[i].propertyFlags & combined) == combined) {
@@ -65,7 +64,6 @@ uint32_t Vulkan::find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags pr
 		}
 	}
 
-	// Fallback to required only
 	for (uint32_t i = 0; i < mem_properties.memoryTypeCount; ++i) {
 		if ((type_filter & (1u << i)) && (mem_properties.memoryTypes[i].propertyFlags & required) == required) {
 			return i;
@@ -90,7 +88,6 @@ bool Vulkan::create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemory
 
 	uint32_t mem_type_idx = find_memory_type(mem_reqs.memoryTypeBits, preferred_properties, required_properties);
 	if (mem_type_idx == 0xFFFFFFFF) {
-		// Fallback for device local if strictly needed
 		mem_type_idx =
 			find_memory_type(mem_reqs.memoryTypeBits, 0, required_properties & ~VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 		if (mem_type_idx == 0xFFFFFFFF) {
@@ -121,13 +118,11 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 	width = sim_width;
 	height = sim_height;
 
-	// 1. Initialize volk
 	if (volkInitialize() != VK_SUCCESS) {
 		fmt::print("Vulkan: volkInitialize failed. Vulkan is not available.\n");
 		return false;
 	}
 
-	// 2. Create Vulkan Instance
 	VkApplicationInfo app_info{VK_STRUCTURE_TYPE_APPLICATION_INFO};
 	app_info.pApplicationName = "Sand3";
 	app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -145,7 +140,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 
 	volkLoadInstance(instance);
 
-	// 3. Select Physical Device with Compute support
 	uint32_t device_count = 0;
 	vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
 	if (device_count == 0) {
@@ -201,7 +195,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 	vkGetPhysicalDeviceProperties(physical_device, &selected_props);
 	fmt::print("Vulkan: Selected GPU: {}\n", selected_props.deviceName);
 
-	// 4. Create Logical Device and Queue
 	float queue_priority = 1.0f;
 	VkDeviceQueueCreateInfo queue_create_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
 	queue_create_info.queueFamilyIndex = compute_queue_family;
@@ -221,7 +214,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 	volkLoadDevice(device);
 	vkGetDeviceQueue(device, compute_queue_family, 0, &compute_queue);
 
-	// 5. Command Pool and Buffer
 	VkCommandPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
 	pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 	pool_info.queueFamilyIndex = compute_queue_family;
@@ -251,7 +243,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 		return false;
 	}
 
-	// 6. Shader Module
 	VkShaderModuleCreateInfo shader_info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
 	shader_info.codeSize = simulation_spv_len;
 	shader_info.pCode = reinterpret_cast<const uint32_t*>(simulation_spv);
@@ -262,7 +253,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 		return false;
 	}
 
-	// 7. Descriptor Set Layout
 	std::array<VkDescriptorSetLayoutBinding, 5> bindings{};
 	for (uint32_t i = 0; i < 5; ++i) {
 		bindings[i].binding = i;
@@ -281,7 +271,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 		return false;
 	}
 
-	// 8. Pipeline Layout
 	VkPushConstantRange push_constant_range{};
 	push_constant_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	push_constant_range.offset = 0;
@@ -299,7 +288,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 		return false;
 	}
 
-	// 9. Compute Pipeline
 	VkComputePipelineCreateInfo pipeline_info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
 	pipeline_info.layout = pipeline_layout;
 	pipeline_info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -313,7 +301,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 		return false;
 	}
 
-	// 10. Descriptor Pool & Set
 	VkDescriptorPoolSize pool_size{};
 	pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	pool_size.descriptorCount = 5;
@@ -340,7 +327,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 		return false;
 	}
 
-	// 11. Create Buffers
 	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
 
 	create_buffer(grid_size_bytes,
@@ -381,7 +367,6 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 	vkMapMemory(device, staging_memory, 0, grid_size_bytes, 0, reinterpret_cast<void**>(&staging_mapped));
 	std::memset(staging_mapped, 0, grid_size_bytes);
 
-	// 12. Update Descriptor Set
 	std::array<VkDescriptorBufferInfo, 5> buffer_infos{};
 	buffer_infos[0] = {current_grid_buffer, 0, grid_size_bytes};
 	buffer_infos[1] = {next_grid_buffer, 0, grid_size_bytes};
@@ -418,7 +403,6 @@ bool Vulkan::resize(uint32_t new_width, uint32_t new_height) {
 	width = new_width;
 	height = new_height;
 
-	// Destroy old size-dependent buffers
 	if (staging_memory) {
 		vkUnmapMemory(device, staging_memory);
 		vkFreeMemory(device, staging_memory, nullptr);
@@ -448,7 +432,6 @@ bool Vulkan::resize(uint32_t new_width, uint32_t new_height) {
 		current_grid_buffer = VK_NULL_HANDLE;
 	}
 
-	// Recreate size-dependent buffers
 	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
 
 	create_buffer(grid_size_bytes,
@@ -476,7 +459,6 @@ bool Vulkan::resize(uint32_t new_width, uint32_t new_height) {
 	vkMapMemory(device, staging_memory, 0, grid_size_bytes, 0, reinterpret_cast<void**>(&staging_mapped));
 	std::memset(staging_mapped, 0, grid_size_bytes);
 
-	// Update descriptor set
 	std::array<VkDescriptorBufferInfo, 5> buffer_infos{};
 	buffer_infos[0] = {current_grid_buffer, 0, grid_size_bytes};
 	buffer_infos[1] = {next_grid_buffer, 0, grid_size_bytes};
@@ -675,7 +657,6 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 
 	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
 
-	// 0. If upload is pending (user painted or modified cells), copy staging_buffer to current_grid_buffer
 	if (upload_pending) {
 		VkBufferCopy upload_copy{};
 		upload_copy.srcOffset = 0;
@@ -691,10 +672,8 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 							 &upload_barrier, 0, nullptr, 0, nullptr);
 	}
 
-	// 1. Reset stats (changed_cells = 0)
 	vkCmdFillBuffer(command_buffer, stats_buffer, 0, sizeof(uint32_t), 0);
 
-	// 2. Copy current_grid to next_grid so next_grid starts with current materials and updated = 0
 	VkBufferCopy copy_region{};
 	copy_region.srcOffset = 0;
 	copy_region.dstOffset = 0;
@@ -711,7 +690,6 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 	vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &descriptor_set, 0,
 							nullptr);
 
-	// 3. 25 Simulation phases
 	const bool reverse_x = (frame_count % 2 == 0);
 	const bool reverse_y = (frame_count % 2 == 1);
 
@@ -749,7 +727,6 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 		}
 	}
 
-	// 4. Pass 1: Render and Finalize
 	pc.pass_type = 1;
 	vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
@@ -757,21 +734,18 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 	uint32_t render_group_y = (height + 15) / 16;
 	vkCmdDispatch(command_buffer, render_group_x, render_group_y, 1);
 
-	// 5. Barrier between compute shader write and copy to staging_buffer
 	VkMemoryBarrier copy_staging_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
 	copy_staging_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 	copy_staging_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 	vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1,
 						 &copy_staging_barrier, 0, nullptr, 0, nullptr);
 
-	// 6. Copy current_grid_buffer to staging_buffer so CPU cells can be kept in sync
 	VkBufferCopy download_copy{};
 	download_copy.srcOffset = 0;
 	download_copy.dstOffset = 0;
 	download_copy.size = grid_size_bytes;
 	vkCmdCopyBuffer(command_buffer, current_grid_buffer, staging_buffer, 1, &download_copy);
 
-	// 7. Barrier for host reads on display_buffer, stats_buffer, and staging_buffer
 	VkMemoryBarrier host_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
 	host_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
 	host_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
@@ -817,13 +791,12 @@ void Vulkan::upload_grid(const uint8_t* materials, uint32_t count) {
 	vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1,
 						 &barrier, 0, nullptr, 0, nullptr);
 
-	// Pass 1: Render display
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline);
 	vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &descriptor_set, 0,
 							nullptr);
 
 	GpuPushConstants pc{};
-	pc.pass_type = 1;
+	pc.pass_type = 3;
 	pc.sim_width = width;
 	pc.sim_height = height;
 	vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
@@ -953,7 +926,7 @@ void Vulkan::clear() {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 }
 
-void Vulkan::refresh_display() {
+void Vulkan::refresh_display(bool upload_pending) {
 	if (!initialized) {
 		return;
 	}
@@ -967,12 +940,30 @@ void Vulkan::refresh_display() {
 	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(command_buffer, &begin_info);
 
+	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
+
+	if (upload_pending && staging_buffer != VK_NULL_HANDLE) {
+		VkBufferCopy upload_copy{};
+		upload_copy.srcOffset = 0;
+		upload_copy.dstOffset = 0;
+		upload_copy.size = grid_size_bytes;
+		vkCmdCopyBuffer(command_buffer, staging_buffer, current_grid_buffer, 1, &upload_copy);
+		vkCmdCopyBuffer(command_buffer, staging_buffer, next_grid_buffer, 1, &upload_copy);
+
+		VkMemoryBarrier upload_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+		upload_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		upload_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+							 VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1,
+							 &upload_barrier, 0, nullptr, 0, nullptr);
+	}
+
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, compute_pipeline);
 	vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, 1, &descriptor_set, 0,
 							nullptr);
 
 	GpuPushConstants pc{};
-	pc.pass_type = 1;
+	pc.pass_type = 3;
 	pc.sim_width = width;
 	pc.sim_height = height;
 	vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
@@ -981,11 +972,17 @@ void Vulkan::refresh_display() {
 	uint32_t render_group_y = (height + 15) / 16;
 	vkCmdDispatch(command_buffer, render_group_x, render_group_y, 1);
 
+	VkBufferCopy sync_copy{};
+	sync_copy.srcOffset = 0;
+	sync_copy.dstOffset = 0;
+	sync_copy.size = grid_size_bytes;
+	vkCmdCopyBuffer(command_buffer, current_grid_buffer, next_grid_buffer, 1, &sync_copy);
+
 	VkMemoryBarrier host_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-	host_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	host_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
 	host_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-	vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
-						 &host_barrier, 0, nullptr, 0, nullptr);
+	vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+						 VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &host_barrier, 0, nullptr, 0, nullptr);
 
 	vkEndCommandBuffer(command_buffer);
 
@@ -1023,7 +1020,7 @@ void Vulkan::keep_awake() {
 							nullptr);
 
 	GpuPushConstants pc{};
-	pc.pass_type = 2;  // Pass 2: Empty GPU loop to keep GPU clocks boosted
+	pc.pass_type = 2;
 	pc.sim_width = width;
 	pc.sim_height = height;
 	vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);

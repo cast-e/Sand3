@@ -3,28 +3,28 @@
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(push_constant) uniform PushConstants {
-	uint pass_type;	 // 0 = simulation phase, 1 = render & finalize
-	uint phase_x;	 // 0..4
-	uint phase_y;	 // 0..4
+	uint pass_type;	 
+	uint phase_x;	 
+	uint phase_y;	 
 	uint frame_count;
 	uint sim_width;
 	uint sim_height;
-	uint reverse_x;	 // 0 or 1
-	uint reverse_y;	 // 0 or 1
+	uint reverse_x;	 
+	uint reverse_y;	 
 }
 pc;
 
 struct GpuRuleVariant {
-	uint when_bits[200];  // 25 neighbors * 8 uints (256-bit bitset)
-	uint then_val[25];	  // 25 neighbor targets (255 = unchanged)
-	uint when_wildcard;	  // bitmask of wildcard neighbors (all 256 bits set)
-	uint pad[6];		  // align to 928 bytes
+	uint when_bits[200];  
+	uint then_val[25];	  
+	uint when_wildcard;	  
+	uint pad[6];		  
 };
 
 struct GpuRule {
 	uint variant_start;
 	uint variant_count;
-	uint chance_scaled;	 // 0..100000 (100000 = 100%)
+	uint chance_scaled;	 
 	uint pad;
 };
 
@@ -65,7 +65,7 @@ uint xorshift32(inout uint state) {
 }
 
 bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uint local_changed) {
-	// 1. Condition check ("when"):
+	
 	for (uint n_id = 0u; n_id < 25u; ++n_id) {
 		if ((variants[var_idx].when_wildcard & (1u << n_id)) != 0u) {
 			continue;
@@ -86,7 +86,7 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 		}
 	}
 
-	// 2. Conflict check ("updated" in next_cells):
+	
 	for (uint n_id = 0u; n_id < 25u; ++n_id) {
 		uint then_m = variants[var_idx].then_val[n_id];
 		if (then_m != 255u) {
@@ -104,7 +104,7 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 		}
 	}
 
-	// 3. Apply changes:
+	
 	next_cells[center_id] = (next_cells[center_id] & 0xFFu) | (1u << 8u);
 	for (uint n_id = 0u; n_id < 25u; ++n_id) {
 		uint then_m = variants[var_idx].then_val[n_id];
@@ -128,7 +128,7 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 
 void main() {
 	if (pc.pass_type == 1u) {
-		// Render and finalize pass
+		
 		uint cx = gl_GlobalInvocationID.x;
 		uint cy = gl_GlobalInvocationID.y;
 		if (cx >= pc.sim_width || cy >= pc.sim_height) {
@@ -139,16 +139,16 @@ void main() {
 		uint next_val = next_cells[idx];
 		uint mat_id = next_val & 0xFFu;
 
-		// Reset updated flag for current_cells to be ready for next frame
+		
 		current_cells[idx] = mat_id;
 
-		// Output RGBA packed color
+		
 		display_pixels[idx] = materials[mat_id].color;
 		return;
 	}
 
 	if (pc.pass_type == 2u) {
-		// Empty GPU loop to keep GPU active and prevent downclocking
+		
 		uint dummy = gl_GlobalInvocationID.x ^ (gl_GlobalInvocationID.y << 16u);
 		for (uint i = 0u; i < 2000u; ++i) {
 			dummy = (dummy * 1664525u + 1013904223u) ^ i;
@@ -159,7 +159,20 @@ void main() {
 		return;
 	}
 
-	// Pass 0: Simulation phase
+	if (pc.pass_type == 3u) {
+		uint cx = gl_GlobalInvocationID.x;
+		uint cy = gl_GlobalInvocationID.y;
+		if (cx >= pc.sim_width || cy >= pc.sim_height) {
+			return;
+		}
+
+		uint idx = cy * pc.sim_width + cx;
+		uint mat_id = current_cells[idx] & 0xFFu;
+		display_pixels[idx] = materials[mat_id].color;
+		return;
+	}
+
+	
 	uint kx = gl_GlobalInvocationID.x;
 	uint ky = gl_GlobalInvocationID.y;
 

@@ -258,7 +258,7 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 				Grid::set_cell(x, y, saved_cells[y * saved_width + x]);
 			}
 		}
-	} else {  // LoadPlacement::Center
+	} else {
 		int offset_x = (static_cast<int>(Grid::get_width()) - static_cast<int>(saved_width)) / 2;
 		int offset_y = (static_cast<int>(Grid::get_height()) - static_cast<int>(saved_height)) / 2;
 		for (uint32_t sy = 0; sy < saved_height; ++sy) {

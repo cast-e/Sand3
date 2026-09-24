@@ -53,9 +53,14 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 	}
 
 	std::string line;
+	std::string current_section = "";
 	while (std::getline(file, line)) {
 		std::string trimmed = trim(line);
 		if (trimmed.empty() || trimmed[0] == '#' || trimmed[0] == ';' || trimmed.rfind("//", 0) == 0) {
+			continue;
+		}
+		if (trimmed.front() == '[' && trimmed.back() == ']') {
+			current_section = trim(trimmed.substr(1, trimmed.length() - 2));
 			continue;
 		}
 		size_t eq_pos = trimmed.find('=');
@@ -63,23 +68,29 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 			std::string key = trim(trimmed.substr(0, eq_pos));
 			std::string val = trim(trimmed.substr(eq_pos + 1));
 
-			try {
-				if (key == "author") {
-					meta.author = val;
-				} else if (key == "description") {
-					meta.description = val;
-				} else if (key == "width") {
-					meta.width = static_cast<uint32_t>(std::stoul(val));
-				} else if (key == "height") {
-					meta.height = static_cast<uint32_t>(std::stoul(val));
-				} else if (key == "target_fps") {
-					meta.target_fps = static_cast<uint32_t>(std::stoul(val));
-				} else if (key == "processing_mode") {
-					meta.processing_mode = std::stoi(val);
-				} else if (key == "prevent_downclock") {
-					meta.prevent_downclock = (val == "true" || val == "1");
+			if (current_section == "Shortcuts") {
+				if (!key.empty() && !val.empty()) {
+					meta.shortcuts[key] = val;
 				}
-			} catch (...) {}
+			} else {
+				try {
+					if (key == "author") {
+						meta.author = val;
+					} else if (key == "description") {
+						meta.description = val;
+					} else if (key == "width") {
+						meta.width = static_cast<uint32_t>(std::stoul(val));
+					} else if (key == "height") {
+						meta.height = static_cast<uint32_t>(std::stoul(val));
+					} else if (key == "target_fps") {
+						meta.target_fps = static_cast<uint32_t>(std::stoul(val));
+					} else if (key == "processing_mode") {
+						meta.processing_mode = std::stoi(val);
+					} else if (key == "prevent_downclock") {
+						meta.prevent_downclock = (val == "true" || val == "1");
+					}
+				} catch (...) {}
+			}
 		}
 	}
 
@@ -91,12 +102,12 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 	fs::create_directories(set_dir);
 	std::string cfg_path = set_dir + "/set_config.ini";
 
-	bool has_overrides = !metadata.author.empty() || !metadata.description.empty() || metadata.width > 0 ||
-						 metadata.height > 0 || metadata.target_fps > 0 || metadata.processing_mode >= 0 ||
-						 !metadata.prevent_downclock;
+	bool has_meta_overrides = !metadata.author.empty() || !metadata.description.empty() || metadata.width > 0 ||
+							  metadata.height > 0 || metadata.target_fps > 0 || metadata.processing_mode >= 0 ||
+							  !metadata.prevent_downclock;
+	bool has_shortcuts = !metadata.shortcuts.empty();
 
-	if (!has_overrides) {
-		// Nothing overridden: remove set_config.ini or leave empty
+	if (!has_meta_overrides && !has_shortcuts) {
 		if (fs::exists(cfg_path)) {
 			std::error_code ec;
 			fs::remove(cfg_path, ec);
@@ -109,7 +120,6 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 		return;
 	}
 
-	// Only save overridden (non-default) settings
 	if (!metadata.author.empty()) {
 		file << "author = " << metadata.author << "\n";
 	}
@@ -131,6 +141,18 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 	if (!metadata.prevent_downclock) {
 		file << "prevent_downclock = false\n";
 	}
+
+	if (has_shortcuts) {
+		if (has_meta_overrides) {
+			file << "\n";
+		}
+		file << "[Shortcuts]\n";
+		for (const auto& [mat_name, sc] : metadata.shortcuts) {
+			if (!sc.empty()) {
+				file << mat_name << " = " << sc << "\n";
+			}
+		}
+	}
 }
 
 std::string SetManager::get_current_set() { return current_set_name; }
@@ -143,7 +165,6 @@ void SetManager::set_current_set(const std::string& name) {
 	fs::create_directories(SETS_DIRECTORY + name);
 	MaterialManager::load_all_materials(SETS_DIRECTORY + name);
 
-	// If set specifies custom simulation dimensions, resize active grid to match
 	if (current_metadata.width > 0 && current_metadata.height > 0) {
 		if (current_metadata.width != Grid::get_width() || current_metadata.height != Grid::get_height()) {
 			Grid::resize(current_metadata.width, current_metadata.height, false);
@@ -249,5 +270,32 @@ void SetManager::delete_set(const std::string& name) {
 
 void SetManager::update_current_metadata(const SetMetadata& metadata) {
 	current_metadata = metadata;
+	save_set_metadata(current_set_name, current_metadata);
+}
+
+std::string SetManager::get_current_material_shortcut(const std::string& mat_name) {
+	auto it = current_metadata.shortcuts.find(mat_name);
+	if (it != current_metadata.shortcuts.end()) {
+		return it->second;
+	}
+	return "";
+}
+
+void SetManager::set_current_material_shortcut(const std::string& mat_name, const std::string& key_combo) {
+	if (key_combo.empty()) {
+		current_metadata.shortcuts.erase(mat_name);
+	} else {
+		current_metadata.shortcuts[mat_name] = key_combo;
+	}
+	save_set_metadata(current_set_name, current_metadata);
+}
+
+void SetManager::remove_current_material_shortcut(const std::string& mat_name) {
+	current_metadata.shortcuts.erase(mat_name);
+	save_set_metadata(current_set_name, current_metadata);
+}
+
+void SetManager::clear_current_material_shortcuts() {
+	current_metadata.shortcuts.clear();
 	save_set_metadata(current_set_name, current_metadata);
 }

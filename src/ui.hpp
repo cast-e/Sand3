@@ -97,6 +97,17 @@ public:
 
 	static bool button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& size = ImVec2(0, 0));
 
+	struct MaterialShortcutItem {
+		std::string name;
+		uint8_t id = 0;
+		std::string custom_shortcut;
+		std::string effective_shortcut;
+		bool is_custom = false;
+	};
+
+	static std::vector<MaterialShortcutItem> get_all_material_shortcuts();
+	static std::string get_effective_material_shortcut(uint8_t id);
+
 private:
 	static void render_header(ImGuiIO& io);
 	static void render_sim_content();

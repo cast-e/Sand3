@@ -28,16 +28,14 @@ ImGuiKey ShortcutManager::string_to_imgui_key(const std::string& name_raw) {
 	if (name.empty())
 		return ImGuiKey_None;
 
-	// Single letter A-Z
 	if (name.length() == 1 && name[0] >= 'a' && name[0] <= 'z') {
 		return static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'a'));
 	}
-	// Single digit 0-9
+
 	if (name.length() == 1 && name[0] >= '0' && name[0] <= '9') {
 		return static_cast<ImGuiKey>(ImGuiKey_0 + (name[0] - '0'));
 	}
 
-	// Function keys F1-F12
 	if (name.length() >= 2 && name[0] == 'f' && std::isdigit(name[1])) {
 		try {
 			int f_num = std::stoi(name.substr(1));
@@ -47,7 +45,6 @@ ImGuiKey ShortcutManager::string_to_imgui_key(const std::string& name_raw) {
 		} catch (...) {}
 	}
 
-	// Named keys
 	if (name == "space")
 		return ImGuiKey_Space;
 	if (name == "enter" || name == "return")
@@ -229,12 +226,10 @@ void ShortcutManager::init() {
 
 	s_shortcuts.clear();
 
-	// Simulation
 	add(ShortcutAction::ToggleSimulation, "toggle_simulation", "Toggle Simulation", "Simulation", "Space");
 	add(ShortcutAction::StepFrame, "step_frame", "Step Frame (Paused)", "Simulation", "F");
 	add(ShortcutAction::ClearGrid, "clear_grid", "Clear / Reset Grid", "Simulation", "R");
 
-	// Camera
 	add(ShortcutAction::CameraUp, "camera_up", "Move Camera Up", "Camera", "W");
 	add(ShortcutAction::CameraLeft, "camera_left", "Move Camera Left", "Camera", "A");
 	add(ShortcutAction::CameraDown, "camera_down", "Move Camera Down", "Camera", "S");
@@ -242,7 +237,6 @@ void ShortcutManager::init() {
 	add(ShortcutAction::ZoomIn, "zoom_in", "Zoom In", "Camera", "PageUp");
 	add(ShortcutAction::ZoomOut, "zoom_out", "Zoom Out", "Camera", "PageDown");
 
-	// General
 	add(ShortcutAction::QuickSelect1, "quick_select_1", "Select Material Slot 1", "General", "1");
 	add(ShortcutAction::QuickSelect2, "quick_select_2", "Select Material Slot 2", "General", "2");
 	add(ShortcutAction::QuickSelect3, "quick_select_3", "Select Material Slot 3", "General", "3");
@@ -258,7 +252,6 @@ void ShortcutManager::init() {
 	add(ShortcutAction::Fullscreen, "fullscreen", "Toggle Fullscreen", "General", "F11");
 	add(ShortcutAction::CancelOrQuit, "cancel_or_quit", "Cancel / Deselect / Quit", "General", "Escape");
 
-	// Tools & Selection
 	add(ShortcutAction::ToolBrush, "tool_brush", "Switch to Brush Tool", "Tools & Selection", "B");
 	add(ShortcutAction::ToolSelect, "tool_select", "Switch to Selection Tool", "Tools & Selection", "C");
 	add(ShortcutAction::Copy, "copy", "Copy Selection", "Tools & Selection", "Ctrl+C");
@@ -269,7 +262,6 @@ void ShortcutManager::init() {
 	add(ShortcutAction::RotateCW, "rotate_cw", "Rotate 90° Clockwise", "Tools & Selection", "Q");
 	add(ShortcutAction::RotateCCW, "rotate_ccw", "Rotate 90° Counter-Clockwise", "Tools & Selection", "E");
 
-	// Brush
 	add(ShortcutAction::BrushShape, "brush_shape", "Toggle Brush Shape", "Brush", "T");
 
 	s_initialized = true;
@@ -369,21 +361,18 @@ bool ShortcutManager::is_action_pressed(ShortcutAction action, bool repeat) {
 	if (ImGui::IsKeyPressed(def.key, repeat))
 		return true;
 
-	// Redo fallback (Ctrl+Shift+Z) when using default Ctrl+Y
 	if (action == ShortcutAction::Redo && !is_modified(action)) {
 		if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, repeat)) {
 			return true;
 		}
 	}
 
-	// ClearGrid fallback (Ctrl+Shift+Delete) when using default R
 	if (action == ShortcutAction::ClearGrid && !is_modified(action)) {
 		if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Delete, false)) {
 			return true;
 		}
 	}
 
-	// Zoom fallbacks (Keypad+ / Keypad-) when using default PageUp / PageDown
 	if (action == ShortcutAction::ZoomIn && !is_modified(action)) {
 		if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd, repeat))
 			return true;
@@ -407,7 +396,7 @@ bool ShortcutManager::is_action_down(ShortcutAction action) {
 
 	if (def.ctrl != io.KeyCtrl)
 		return false;
-	// Allow holding Shift for fast pan on camera keys if shift is not explicitly required
+
 	if (def.shift && !io.KeyShift)
 		return false;
 	if (def.alt != io.KeyAlt)
