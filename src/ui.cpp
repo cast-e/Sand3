@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "config_manager.hpp"
@@ -169,8 +170,9 @@ static ScreenRect grid_to_screen_rect_wh(int start_x, int start_y, int w, int h)
 }
 
 static GridRect calculate_brush_bounds(ImVec2 grid_pos, int brush_size) {
-	int x_start = static_cast<int>(grid_pos.x - static_cast<float>(brush_size) / 2.0f + 0.5f);
-	int y_start = static_cast<int>(grid_pos.y - static_cast<float>(brush_size) / 2.0f + 0.5f);
+	float half = static_cast<float>(brush_size) * 0.5f;
+	int x_start = static_cast<int>(std::floor(grid_pos.x - half + 0.5f));
+	int y_start = static_cast<int>(std::floor(grid_pos.y - half + 0.5f));
 	return {x_start, y_start, brush_size, brush_size};
 }
 
@@ -221,33 +223,167 @@ static ImGuiMouseCursor get_cursor_for_resize_handle(ResizeHandle h) {
 	}
 }
 
-static float cross_2d(ImVec2 a, ImVec2 b, ImVec2 c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
+struct LineSpan {
+	int y;
+	int x0;
+	int x1;
+};
 
-static std::vector<ImVec2> compute_swept_brush_hull(ScreenRect s_start, ScreenRect s_end) {
-	ImVec2 pts[8] = {{s_start.x1, s_start.y1}, {s_start.x2, s_start.y1}, {s_start.x2, s_start.y2},
-					 {s_start.x1, s_start.y2}, {s_end.x1, s_end.y1},	 {s_end.x2, s_end.y1},
-					 {s_end.x2, s_end.y2},	   {s_end.x1, s_end.y2}};
+static std::vector<LineSpan> compute_line_spans(ImVec2 start_grid, ImVec2 end_grid, int brush_size, BrushShape shape) {
+	GridRect b_start = calculate_brush_bounds(start_grid, brush_size);
+	GridRect b_end = calculate_brush_bounds(end_grid, brush_size);
 
-	std::sort(pts, pts + 8, [](ImVec2 a, ImVec2 b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+	float cx_start = static_cast<float>(b_start.x) + static_cast<float>(brush_size) * 0.5f;
+	float cy_start = static_cast<float>(b_start.y) + static_cast<float>(brush_size) * 0.5f;
+	float cx_end = static_cast<float>(b_end.x) + static_cast<float>(brush_size) * 0.5f;
+	float cy_end = static_cast<float>(b_end.y) + static_cast<float>(brush_size) * 0.5f;
 
-	ImVec2 hull[16];
-	int k = 0;
+	float dx = cx_end - cx_start;
+	float dy = cy_end - cy_start;
+	float dist = std::max(std::abs(dx), std::abs(dy));
 
-	for (int i = 0; i < 8; ++i) {
-		while (k >= 2 && cross_2d(hull[k - 2], hull[k - 1], pts[i]) <= 0.0f) {
-			k--;
+	int min_y = std::min(b_start.y, b_end.y);
+	int max_y = std::max(b_start.y + brush_size, b_end.y + brush_size);
+
+	int total_rows = max_y - min_y;
+	if (total_rows <= 0)
+		return {};
+
+	std::vector<int> row_min_x(total_rows, std::numeric_limits<int>::max());
+	std::vector<int> row_max_x(total_rows, std::numeric_limits<int>::min());
+
+	auto stamp = [&](const GridRect& b) {
+		if (shape == BrushShape::Square || brush_size <= 1) {
+			for (int y = b.y; y < b.y + brush_size; ++y) {
+				int r_idx = y - min_y;
+				if (r_idx >= 0 && r_idx < total_rows) {
+					row_min_x[r_idx] = std::min(row_min_x[r_idx], b.x);
+					row_max_x[r_idx] = std::max(row_max_x[r_idx], b.x + brush_size);
+				}
+			}
+		} else {
+			float cx = static_cast<float>(b.x) + static_cast<float>(brush_size) * 0.5f;
+			float cy = static_cast<float>(b.y) + static_cast<float>(brush_size) * 0.5f;
+			float r = static_cast<float>(brush_size) * 0.5f;
+			float r_sq = r * r;
+
+			for (int i = 0; i < brush_size; ++i) {
+				int y = b.y + i;
+				int r_idx = y - min_y;
+				if (r_idx < 0 || r_idx >= total_rows)
+					continue;
+
+				float cdy = (static_cast<float>(y) + 0.5f) - cy;
+				float dy_sq = cdy * cdy;
+				if (dy_sq <= r_sq) {
+					float dx_max = std::sqrt(r_sq - dy_sq);
+					int x0 = static_cast<int>(std::ceil(cx - dx_max - 0.5f));
+					int x1 = static_cast<int>(std::floor(cx + dx_max - 0.5f)) + 1;
+					if (x0 < x1) {
+						row_min_x[r_idx] = std::min(row_min_x[r_idx], x0);
+						row_max_x[r_idx] = std::max(row_max_x[r_idx], x1);
+					}
+				}
+			}
 		}
-		hull[k++] = pts[i];
+	};
+
+	if (dist < 0.001f) {
+		stamp(b_start);
+	} else {
+		int steps = static_cast<int>(std::ceil(dist * 2.0f));
+		int last_bx = std::numeric_limits<int>::min();
+		int last_by = std::numeric_limits<int>::min();
+
+		for (int i = 0; i <= steps; ++i) {
+			float t = static_cast<float>(i) / static_cast<float>(steps);
+			ImVec2 pos(cx_start + t * dx, cy_start + t * dy);
+			GridRect b = calculate_brush_bounds(pos, brush_size);
+			if (b.x != last_bx || b.y != last_by) {
+				stamp(b);
+				last_bx = b.x;
+				last_by = b.y;
+			}
+		}
 	}
 
-	for (int i = 6, t = k + 1; i >= 0; i--) {
-		while (k >= t && cross_2d(hull[k - 2], hull[k - 1], pts[i]) <= 0.0f) {
-			k--;
+	std::vector<LineSpan> spans;
+	spans.reserve(total_rows);
+	for (int i = 0; i < total_rows; ++i) {
+		int y = min_y + i;
+		if (row_min_x[i] < row_max_x[i]) {
+			spans.push_back({y, row_min_x[i], row_max_x[i]});
+		} else {
+			spans.push_back({y, 0, 0});
 		}
-		hull[k++] = pts[i];
+	}
+	return spans;
+}
+
+static void render_pixel_spans(ImDrawList* draw_list, const std::vector<LineSpan>& spans, ImU32 fill_color,
+							   ImU32 line_color, ImU32 inner_line_color) {
+	SDL_FRect dst_rect = Window::get_dst_rect();
+
+	// 1. Fill exact cell spans
+	for (const auto& span : spans) {
+		if (span.x0 < span.x1) {
+			ScreenRect r_srect = grid_to_screen_rect_wh(span.x0, span.y, span.x1 - span.x0, 1);
+			draw_list->AddRectFilled(ImVec2(r_srect.x1, r_srect.y1), ImVec2(r_srect.x2, r_srect.y2), fill_color);
+		}
 	}
 
-	return std::vector<ImVec2>(hull, hull + std::max(0, k - 1));
+	// 2. Stroke boundary segments
+	struct GridSeg {
+		int x1, y1, x2, y2;
+	};
+	std::vector<GridSeg> segs;
+	segs.reserve(spans.size() * 4);
+
+	for (size_t k = 0; k < spans.size(); ++k) {
+		int y = spans[k].y;
+		int x0 = spans[k].x0;
+		int x1 = spans[k].x1;
+		if (x0 >= x1)
+			continue;
+
+		// Left and Right edges
+		segs.push_back({x0, y, x0, y + 1});
+		segs.push_back({x1, y, x1, y + 1});
+
+		// Top edges
+		int prev_x0 = (k > 0) ? spans[k - 1].x0 : 0;
+		int prev_x1 = (k > 0) ? spans[k - 1].x1 : 0;
+		if (prev_x0 >= prev_x1) {
+			segs.push_back({x0, y, x1, y});
+		} else {
+			if (x0 < prev_x0)
+				segs.push_back({x0, y, prev_x0, y});
+			if (x1 > prev_x1)
+				segs.push_back({prev_x1, y, x1, y});
+		}
+
+		// Bottom edges
+		int next_x0 = (k + 1 < spans.size()) ? spans[k + 1].x0 : 0;
+		int next_x1 = (k + 1 < spans.size()) ? spans[k + 1].x1 : 0;
+		if (next_x0 >= next_x1) {
+			segs.push_back({x0, y + 1, x1, y + 1});
+		} else {
+			if (x0 < next_x0)
+				segs.push_back({x0, y + 1, next_x0, y + 1});
+			if (x1 > next_x1)
+				segs.push_back({next_x1, y + 1, x1, y + 1});
+		}
+	}
+
+	for (const auto& seg : segs) {
+		float sx1 = dst_rect.x + (static_cast<float>(seg.x1) / Grid::get_width()) * dst_rect.w;
+		float sy1 = dst_rect.y + (static_cast<float>(seg.y1) / Grid::get_height()) * dst_rect.h;
+		float sx2 = dst_rect.x + (static_cast<float>(seg.x2) / Grid::get_width()) * dst_rect.w;
+		float sy2 = dst_rect.y + (static_cast<float>(seg.y2) / Grid::get_height()) * dst_rect.h;
+
+		draw_list->AddLine(ImVec2(sx1, sy1), ImVec2(sx2, sy2), line_color, 3.0f);
+		draw_list->AddLine(ImVec2(sx1, sy1), ImVec2(sx2, sy2), inner_line_color, 1.5f);
+	}
 }
 
 template <typename Func>
@@ -299,25 +435,27 @@ static void paint_brush_at(int start_x, int start_y, int brush_size, uint8_t mat
 	if (min_x >= max_x || min_y >= max_y)
 		return;
 
-	if (shape == BrushShape::Square) {
+	if (shape == BrushShape::Square || brush_size <= 1) {
 		parallel_for_rows(min_y, max_y, [min_x, max_x, mat_id](int y) {
 			for (int x = min_x; x < max_x; ++x) {
 				Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
 			}
 		});
 	} else {
-		float cx = static_cast<float>(start_x) + static_cast<float>(brush_size) / 2.0f;
-		float cy = static_cast<float>(start_y) + static_cast<float>(brush_size) / 2.0f;
-		float r = static_cast<float>(brush_size) / 2.0f;
+		float cx = static_cast<float>(start_x) + static_cast<float>(brush_size) * 0.5f;
+		float cy = static_cast<float>(start_y) + static_cast<float>(brush_size) * 0.5f;
+		float r = static_cast<float>(brush_size) * 0.5f;
 		float r_sq = r * r;
 
 		parallel_for_rows(min_y, max_y, [min_x, max_x, cx, cy, r_sq, mat_id](int y) {
 			float dy = (static_cast<float>(y) + 0.5f) - cy;
 			float dy_sq = dy * dy;
 			if (dy_sq <= r_sq) {
-				float dx_half = std::sqrt(r_sq - dy_sq);
-				int rx_min = std::clamp(static_cast<int>(std::floor(cx - dx_half)), min_x, max_x);
-				int rx_max = std::clamp(static_cast<int>(std::ceil(cx + dx_half)), min_x, max_x);
+				float dx_max = std::sqrt(r_sq - dy_sq);
+				int rx_min = static_cast<int>(std::ceil(cx - dx_max - 0.5f));
+				int rx_max = static_cast<int>(std::floor(cx + dx_max - 0.5f)) + 1;
+				rx_min = std::clamp(rx_min, min_x, max_x);
+				rx_max = std::clamp(rx_max, min_x, max_x);
 				for (int x = rx_min; x < rx_max; ++x) {
 					Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
 				}
@@ -327,141 +465,18 @@ static void paint_brush_at(int start_x, int start_y, int brush_size, uint8_t mat
 }
 
 static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8_t mat_id, BrushShape shape) {
-	float half_brush = static_cast<float>(brush_size) / 2.0f;
-
-	if (shape == BrushShape::Square) {
-		int x0_start = static_cast<int>(start_grid.x - half_brush + 0.5f);
-		int y0_start = static_cast<int>(start_grid.y - half_brush + 0.5f);
-		int x1_start = static_cast<int>(end_grid.x - half_brush + 0.5f);
-		int y1_start = static_cast<int>(end_grid.y - half_brush + 0.5f);
-
-		int min_y = std::clamp(std::min(y0_start, y1_start), 0, static_cast<int>(Grid::get_height()));
-		int max_y = std::clamp(std::max(y0_start, y1_start) + brush_size, 0, static_cast<int>(Grid::get_height()));
-
-		if (min_y >= max_y)
-			return;
-
-		float dy = end_grid.y - start_grid.y;
-		float dx = end_grid.x - start_grid.x;
-
-		parallel_for_rows(min_y, max_y, [&](int y) {
-			int row_min_x = static_cast<int>(Grid::get_width());
-			int row_max_x = -1;
-
-			if (std::abs(dy) < 0.0001f) {
-				row_min_x = std::min(x0_start, x1_start);
-				row_max_x = std::max(x0_start, x1_start) + brush_size;
-			} else {
-				float t_a = (static_cast<float>(y) - start_grid.y + half_brush - 0.5f) / dy;
-				float t_b = (static_cast<float>(y + 1 - brush_size) - start_grid.y + half_brush - 0.5f) / dy;
-
-				float t_min = std::clamp(std::min(t_a, t_b), 0.0f, 1.0f);
-				float t_max = std::clamp(std::max(t_a, t_b), 0.0f, 1.0f);
-
-				float gx_min = start_grid.x + t_min * dx;
-				float gx_max = start_grid.x + t_max * dx;
-
-				int x_a = static_cast<int>(gx_min - half_brush + 0.5f);
-				int x_b = static_cast<int>(gx_max - half_brush + 0.5f);
-
-				row_min_x = std::min(x_a, x_b);
-				row_max_x = std::max(x_a, x_b) + brush_size;
-			}
-
-			row_min_x = std::clamp(row_min_x, 0, static_cast<int>(Grid::get_width()));
-			row_max_x = std::clamp(row_max_x, 0, static_cast<int>(Grid::get_width()));
-
-			for (int x = row_min_x; x < row_max_x; ++x) {
-				Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
-			}
-		});
-	} else {
-		GridRect b0 = calculate_brush_bounds(start_grid, brush_size);
-		GridRect b1 = calculate_brush_bounds(end_grid, brush_size);
-
-		float r = static_cast<float>(brush_size) / 2.0f;
-		float r_sq = r * r;
-
-		float p0x = static_cast<float>(b0.x) + r;
-		float p0y = static_cast<float>(b0.y) + r;
-		float p1x = static_cast<float>(b1.x) + r;
-		float p1y = static_cast<float>(b1.y) + r;
-
-		int min_y =
-			std::clamp(static_cast<int>(std::floor(std::min(p0y, p1y) - r)), 0, static_cast<int>(Grid::get_height()));
-		int max_y =
-			std::clamp(static_cast<int>(std::ceil(std::max(p0y, p1y) + r)), 0, static_cast<int>(Grid::get_height()));
-
-		if (min_y >= max_y)
-			return;
-
-		float dx = p1x - p0x;
-		float dy = p1y - p0y;
-		float len_sq = dx * dx + dy * dy;
-
-		parallel_for_rows(min_y, max_y, [&](int y) {
-			float cy_row = static_cast<float>(y) + 0.5f;
-
-			float row_left = static_cast<float>(Grid::get_width());
-			float row_right = -1.0f;
-			bool has_span = false;
-
-			float dy0 = cy_row - p0y;
-			if (dy0 * dy0 <= r_sq) {
-				float dx0 = std::sqrt(r_sq - dy0 * dy0);
-				row_left = std::min(row_left, p0x - dx0);
-				row_right = std::max(row_right, p0x + dx0);
-				has_span = true;
-			}
-
-			float dy1 = cy_row - p1y;
-			if (dy1 * dy1 <= r_sq) {
-				float dx1 = std::sqrt(r_sq - dy1 * dy1);
-				row_left = std::min(row_left, p1x - dx1);
-				row_right = std::max(row_right, p1x + dx1);
-				has_span = true;
-			}
-
-			if (len_sq > 0.0001f) {
-				if (std::abs(dy) > 0.0001f) {
-					float H = r * std::sqrt(len_sq) / std::abs(dy);
-					float x_line_mid = p0x + (cy_row - p0y) * dx / dy;
-					float x_line_left = x_line_mid - H;
-					float x_line_right = x_line_mid + H;
-
-					if (std::abs(dx) > 0.0001f) {
-						float x_t0 = p0x - (cy_row - p0y) * dy / dx;
-						float x_t1 = p0x + (len_sq - (cy_row - p0y) * dy) / dx;
-
-						float x_body_left = std::max(x_line_left, std::min(x_t0, x_t1));
-						float x_body_right = std::min(x_line_right, std::max(x_t0, x_t1));
-
-						if (x_body_left < x_body_right) {
-							row_left = std::min(row_left, x_body_left);
-							row_right = std::max(row_right, x_body_right);
-							has_span = true;
-						}
-					} else {
-						float min_p_y = std::min(p0y, p1y);
-						float max_p_y = std::max(p0y, p1y);
-						if (cy_row >= min_p_y && cy_row <= max_p_y) {
-							row_left = std::min(row_left, p0x - r);
-							row_right = std::max(row_right, p0x + r);
-							has_span = true;
-						}
-					}
-				}
-			}
-
-			if (has_span) {
-				int rx_min = std::clamp(static_cast<int>(std::floor(row_left)), 0, static_cast<int>(Grid::get_width()));
-				int rx_max = std::clamp(static_cast<int>(std::ceil(row_right)), 0, static_cast<int>(Grid::get_width()));
-
-				for (int x = rx_min; x < rx_max; ++x) {
-					Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
-				}
-			}
-		});
+	std::vector<LineSpan> spans = compute_line_spans(start_grid, end_grid, brush_size, shape);
+	for (const auto& span : spans) {
+		if (span.x0 >= span.x1)
+			continue;
+		int y = span.y;
+		if (y < 0 || y >= static_cast<int>(Grid::get_height()))
+			continue;
+		int x0 = std::clamp(span.x0, 0, static_cast<int>(Grid::get_width()));
+		int x1 = std::clamp(span.x1, 0, static_cast<int>(Grid::get_width()));
+		for (int x = x0; x < x1; ++x) {
+			Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+		}
 	}
 }
 
@@ -1619,8 +1634,8 @@ void UI::render_mouse_overlay() {
 						   inner_line_color, 2.0f);
 
 		ImVec2 grid_pos = screen_to_grid_pos(cur_mouse);
-		int cx = static_cast<int>(grid_pos.x);
-		int cy = static_cast<int>(grid_pos.y);
+		int cx = static_cast<int>(std::floor(grid_pos.x));
+		int cy = static_cast<int>(std::floor(grid_pos.y));
 		ScreenRect scell = grid_to_screen_rect(cx, cy, 1);
 		draw_list->AddRect(ImVec2(scell.x1, scell.y1), ImVec2(scell.x2, scell.y2), line_color, 0.0f, 0, 3.0f);
 		draw_list->AddRect(ImVec2(scell.x1, scell.y1), ImVec2(scell.x2, scell.y2), inner_line_color, 0.0f, 0, 1.5f);
@@ -1631,69 +1646,20 @@ void UI::render_mouse_overlay() {
 		ImVec2 start_grid = screen_to_grid_pos(start_mouse);
 		ImVec2 end_grid = screen_to_grid_pos(cur_mouse);
 
-		GridRect start_brush = calculate_brush_bounds(start_grid, mouse_size);
-		GridRect end_brush = calculate_brush_bounds(end_grid, mouse_size);
-
-		ScreenRect s_start = grid_to_screen_rect(start_brush.x, start_brush.y, start_brush.w);
-		ScreenRect s_end = grid_to_screen_rect(end_brush.x, end_brush.y, end_brush.w);
-
-		if (brush_shape == BrushShape::Square) {
-			std::vector<ImVec2> hull = compute_swept_brush_hull(s_start, s_end);
-			if (!hull.empty()) {
-				draw_list->AddConvexPolyFilled(hull.data(), static_cast<int>(hull.size()), fill_color);
-				draw_list->AddPolyline(hull.data(), static_cast<int>(hull.size()), line_color, ImDrawFlags_Closed,
-									   3.0f);
-				draw_list->AddPolyline(hull.data(), static_cast<int>(hull.size()), inner_line_color, ImDrawFlags_Closed,
-									   1.5f);
-			}
-		} else {
-			ImVec2 c_start((s_start.x1 + s_start.x2) * 0.5f, (s_start.y1 + s_start.y2) * 0.5f);
-			ImVec2 c_end((s_end.x1 + s_end.x2) * 0.5f, (s_end.y1 + s_end.y2) * 0.5f);
-			float r = (s_start.x2 - s_start.x1) * 0.5f;
-
-			float dx = c_end.x - c_start.x;
-			float dy = c_end.y - c_start.y;
-			float len = std::sqrt(dx * dx + dy * dy);
-
-			if (len > 0.5f) {
-				float angle = std::atan2(dy, dx);
-				float half_pi = 1.57079632679f;
-
-				draw_list->PathClear();
-				draw_list->PathArcTo(c_start, r, angle + half_pi, angle + 3.0f * half_pi, 16);
-				draw_list->PathArcTo(c_end, r, angle - half_pi, angle + half_pi, 16);
-				draw_list->PathFillConvex(fill_color);
-
-				draw_list->PathClear();
-				draw_list->PathArcTo(c_start, r, angle + half_pi, angle + 3.0f * half_pi, 16);
-				draw_list->PathArcTo(c_end, r, angle - half_pi, angle + half_pi, 16);
-				draw_list->PathStroke(line_color, ImDrawFlags_Closed, 3.0f);
-
-				draw_list->PathClear();
-				draw_list->PathArcTo(c_start, r, angle + half_pi, angle + 3.0f * half_pi, 16);
-				draw_list->PathArcTo(c_end, r, angle - half_pi, angle + half_pi, 16);
-				draw_list->PathStroke(inner_line_color, ImDrawFlags_Closed, 1.5f);
-			} else {
-				draw_list->AddCircleFilled(c_start, r, fill_color);
-				draw_list->AddCircle(c_start, r, line_color, 0, 3.0f);
-				draw_list->AddCircle(c_start, r, inner_line_color, 0, 1.5f);
-			}
-		}
+		std::vector<LineSpan> spans = compute_line_spans(start_grid, end_grid, mouse_size, brush_shape);
+		render_pixel_spans(draw_list, spans, fill_color, line_color, inner_line_color);
 	} else {
 		ImVec2 grid_pos = screen_to_grid_pos(cur_mouse);
 		GridRect brush = calculate_brush_bounds(grid_pos, mouse_size);
-		ScreenRect srect = grid_to_screen_rect(brush.x, brush.y, brush.w);
 
-		if (brush_shape == BrushShape::Square) {
+		if (brush_shape == BrushShape::Square || mouse_size <= 1) {
+			ScreenRect srect = grid_to_screen_rect_wh(brush.x, brush.y, brush.w, brush.w);
 			draw_list->AddRectFilled(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2), fill_color, 0.0f, 0);
 			draw_list->AddRect(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2), line_color, 0.0f, 0, 3.0f);
 			draw_list->AddRect(ImVec2(srect.x1, srect.y1), ImVec2(srect.x2, srect.y2), inner_line_color, 0.0f, 0, 1.5f);
 		} else {
-			ImVec2 center((srect.x1 + srect.x2) * 0.5f, (srect.y1 + srect.y2) * 0.5f);
-			float r = (srect.x2 - srect.x1) * 0.5f;
-			draw_list->AddCircleFilled(center, r, fill_color);
-			draw_list->AddCircle(center, r, line_color, 0, 3.0f);
-			draw_list->AddCircle(center, r, inner_line_color, 0, 1.5f);
+			std::vector<LineSpan> spans = compute_line_spans(grid_pos, grid_pos, mouse_size, BrushShape::Circle);
+			render_pixel_spans(draw_list, spans, fill_color, line_color, inner_line_color);
 		}
 	}
 }
@@ -1948,10 +1914,22 @@ void UI::handle_mouse_wheel_brush_size(ImGuiIO& io) {
 	}
 }
 
+static bool s_is_canvas_dragging = false;
+static ImVec2 s_prev_canvas_grid(0, 0);
+
+static void finalize_canvas_drag() {
+	if (s_is_canvas_dragging) {
+		s_is_canvas_dragging = false;
+		UndoManager::commit_grid_snapshot_if_changed("Paint Brush");
+	}
+}
+
 void UI::handle_canvas_interaction() {
 	ImGuiIO& io = ImGui::GetIO();
-	if (io.WantCaptureMouse && selection_state != SelectionState::Moving && selection_state != SelectionState::Resizing)
+	if (io.WantCaptureMouse && selection_state != SelectionState::Moving && selection_state != SelectionState::Resizing) {
+		finalize_canvas_drag();
 		return;
+	}
 
 	ImVec2 grid_pos = screen_to_grid_pos(io.MousePos);
 
@@ -2193,11 +2171,20 @@ void UI::handle_canvas_interaction() {
 		UndoManager::commit_grid_snapshot_if_changed("Draw Line");
 	} else if (!is_shift && !is_alt) {
 		if (left_down || right_down) {
-			GridRect brush = calculate_brush_bounds(grid_pos, mouse_size);
 			uint8_t mat_id = left_down ? static_cast<uint8_t>(selected_id) : 0;
-			paint_brush_at(brush.x, brush.y, brush.w, mat_id, brush_shape);
+			if (s_is_canvas_dragging) {
+				paint_line(s_prev_canvas_grid, grid_pos, mouse_size, mat_id, brush_shape);
+			} else {
+				GridRect brush = calculate_brush_bounds(grid_pos, mouse_size);
+				paint_brush_at(brush.x, brush.y, brush.w, mat_id, brush_shape);
+				s_is_canvas_dragging = true;
+			}
+			s_prev_canvas_grid = grid_pos;
 			ImGui::ResetMouseDragDelta();
+		} else {
+			s_is_canvas_dragging = false;
 		}
+
 		if (left_released || right_released) {
 			UndoManager::commit_grid_snapshot_if_changed("Paint Brush");
 		}
@@ -2373,7 +2360,29 @@ std::vector<UI::MaterialShortcutItem> UI::get_all_material_shortcuts() {
 	std::vector<MaterialShortcutItem> result;
 	result.reserve(order.size());
 
+	std::unordered_set<std::string> used_shortcuts;
+	for (size_t idx : order) {
+		auto it = meta.shortcuts.find(mats[idx].name);
+		if (it != meta.shortcuts.end() && !it->second.empty()) {
+			used_shortcuts.insert(it->second);
+		}
+	}
+
 	int next_order_num = 1;
+
+	auto find_next_available_digit = [&](int start_num) -> int {
+		for (int n = start_num; n <= 9; ++n) {
+			if (!used_shortcuts.count(std::to_string(n))) {
+				return n;
+			}
+		}
+		for (int n = 1; n < start_num && n <= 9; ++n) {
+			if (!used_shortcuts.count(std::to_string(n))) {
+				return n;
+			}
+		}
+		return 0;
+	};
 
 	for (size_t idx : order) {
 		MaterialShortcutItem item;
@@ -2393,23 +2402,12 @@ std::vector<UI::MaterialShortcutItem> UI::get_all_material_shortcuts() {
 		} else {
 			item.is_custom = false;
 
-			while (next_order_num <= 9) {
-				std::string num_str = std::to_string(next_order_num);
-				bool taken = false;
-				for (const auto& [mname, sc] : meta.shortcuts) {
-					if (sc == num_str) {
-						taken = true;
-						break;
-					}
-				}
-				if (!taken)
-					break;
-				next_order_num++;
-			}
-
-			if (next_order_num <= 9) {
-				item.effective_shortcut = std::to_string(next_order_num);
-				next_order_num++;
+			int chosen_digit = find_next_available_digit(next_order_num);
+			if (chosen_digit >= 1 && chosen_digit <= 9) {
+				std::string num_str = std::to_string(chosen_digit);
+				item.effective_shortcut = num_str;
+				used_shortcuts.insert(num_str);
+				next_order_num = chosen_digit + 1;
 			} else {
 				item.effective_shortcut = "";
 			}
@@ -3565,6 +3563,7 @@ void UI::render_advanced_options() {
 		ProcessingMode q = Grid::get_processing_mode();
 
 		if (ImGui::RadioButton("CPU (Multithreaded)", q == ProcessingMode::CPU)) {
+			finalize_canvas_drag();
 			Grid::set_processing_mode(ProcessingMode::CPU);
 			ConfigManager::save();
 		}
@@ -3577,6 +3576,7 @@ void UI::render_advanced_options() {
 			ImGui::BeginDisabled();
 		}
 		if (ImGui::RadioButton("GPU (Vulkan)", q == ProcessingMode::GPU)) {
+			finalize_canvas_drag();
 			Grid::set_processing_mode(ProcessingMode::GPU);
 			ConfigManager::save();
 		}
@@ -3989,9 +3989,10 @@ void UI::render_shortcuts() {
 			char mat_buf[32];
 			std::snprintf(mat_buf, sizeof(mat_buf), "%s", item.effective_shortcut.c_str());
 			ImGui::SetNextItemWidth(120);
-			if (ImGui::InputText("##mat_input", mat_buf, sizeof(mat_buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+			if (ImGui::InputTextWithHint("##mat_input", "-", mat_buf, sizeof(mat_buf),
+										 ImGuiInputTextFlags_EnterReturnsTrue)) {
 				std::string new_str = trim_string(mat_buf);
-				if (new_str.empty()) {
+				if (new_str.empty() || new_str == "-") {
 					SetManager::remove_current_material_shortcut(item.name);
 				} else {
 					ImGuiKey k;

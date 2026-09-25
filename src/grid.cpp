@@ -113,6 +113,9 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 	width = new_width;
 	height = new_height;
 	cells = std::move(new_cells);
+	for (auto& cell : cells) {
+		cell.updated = true;
+	}
 	next_cells.assign(width * height, Cell{0, false});
 
 	recompute_neighbor_offsets();
@@ -203,6 +206,10 @@ void Grid::sync_to_gpu() {
 void Grid::sync_from_gpu() {
 	if (!Vulkan::is_available()) {
 		return;
+	}
+	if (gpu_needs_upload) {
+		Vulkan::copy_staging_to_grid();
+		gpu_needs_upload = false;
 	}
 	std::vector<uint8_t> mat_data(Grid::get_size());
 	Vulkan::download_grid(mat_data.data(), Grid::get_size());
@@ -511,6 +518,9 @@ void Grid::draw() {
 	}
 
 	uint32_t* buffer = Window::get_buffer();
+	if (!buffer) {
+		return;
+	}
 
 	for (uint32_t id = 0; id < Grid::get_size(); ++id) {
 		if (!cells[id].updated) {
@@ -539,7 +549,10 @@ void Grid::draw_material(uint32_t id) {
 uint8_t& Grid::get_cell(const uint32_t x, const uint32_t y) { return cells[y * Grid::get_width() + x].material; }
 
 void Grid::set_cell(const uint32_t x, const uint32_t y, uint8_t cell) {
-	const uint32_t idx = y * Grid::get_width() + x;
+	if (x >= width || y >= height) {
+		return;
+	}
+	const uint32_t idx = y * width + x;
 	cells[idx].material = cell;
 	cells[idx].updated = true;
 	gpu_needs_upload = true;
@@ -553,6 +566,11 @@ void Grid::set_cell(const uint32_t x, const uint32_t y, uint8_t cell) {
 		if (staging) {
 			staging[idx] = static_cast<uint32_t>(cell);
 		}
+	} else {
+		uint32_t* buffer = Window::get_buffer();
+		if (buffer) {
+			buffer[idx] = MaterialManager::get_runtime_material(cell).packed_color;
+		}
 	}
 }
 
@@ -565,9 +583,12 @@ void Grid::remap_materials(const std::vector<uint8_t>& old_to_new) {
 		} else {
 			cell.material = 0;
 		}
+		cell.updated = true;
 	}
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
 		sync_to_gpu();
+	} else {
+		draw();
 	}
 }
 
@@ -609,15 +630,16 @@ void Grid::restore_state(const std::vector<uint8_t>& state) {
 }
 
 std::vector<uint8_t> Grid::get_all_cells() {
+	std::vector<uint8_t> state(Grid::get_size());
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available() && !gpu_needs_upload) {
 		uint32_t* staging = Vulkan::get_staging_buffer();
 		if (staging) {
 			for (size_t i = 0; i < Grid::get_size(); ++i) {
-				cells[i].material = static_cast<uint8_t>(staging[i] & 0xFFu);
+				state[i] = static_cast<uint8_t>(staging[i] & 0xFFu);
 			}
+			return state;
 		}
 	}
-	std::vector<uint8_t> state(Grid::get_size());
 	for (size_t i = 0; i < Grid::get_size(); ++i) {
 		state[i] = cells[i].material;
 	}
