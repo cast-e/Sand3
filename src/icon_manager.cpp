@@ -36,6 +36,21 @@ namespace {
 		{IconID::Clear, "bin.png", icon_clear_png, icon_clear_png_len},
 		{IconID::Add, "add.png", icon_add_png, icon_add_png_len},
 		{IconID::Refresh, "arrow_refresh.png", icon_refresh_png, icon_refresh_png_len},
+		{IconID::World, "world.png", icon_world_png, icon_world_png_len},
+		{IconID::Heart, "heart.png", icon_heart_png, icon_heart_png_len},
+		{IconID::Star, "star.png", icon_star_png, icon_star_png_len},
+		{IconID::Report, "flag_red.png", icon_flag_red_png, icon_flag_red_png_len},
+		{IconID::Package, "package.png", icon_package_png, icon_package_png_len},
+		{IconID::Transmit, "transmit.png", icon_transmit_png, icon_transmit_png_len},
+		{IconID::Magnifier, "magnifier.png", icon_magnifier_png, icon_magnifier_png_len},
+		{IconID::ArrowDown, "arrow_down.png", icon_arrow_down_png, icon_arrow_down_png_len},
+		{IconID::User, "user.png", icon_user_png, icon_user_png_len},
+		{IconID::Tag, "tag_blue.png", icon_tag_blue_png, icon_tag_blue_png_len},
+		{IconID::Edit, "pencil.png", icon_edit_png, icon_edit_png_len},
+		{IconID::Update, "arrow_up.png", icon_update_png, icon_update_png_len},
+		{IconID::Accept, "accept.png", icon_accept_png, icon_accept_png_len},
+		{IconID::Information, "information.png", icon_information_png, icon_information_png_len},
+		{IconID::Warning, "error.png", icon_error_png, icon_error_png_len},
 	};
 
 	std::array<SDL_Texture*, static_cast<size_t>(IconID::Count)> textures{};
@@ -54,7 +69,8 @@ void IconManager::init() {
 	for (const auto& entry : ICON_ENTRIES) {
 		SDL_IOStream* io = nullptr;
 
-		const char* search_paths[] = {"src/resources/Icons/", "../../src/resources/Icons/", "../src/resources/Icons/"};
+		const char* search_paths[] = {"src/resources/icons/", "../../src/resources/icons/", "../src/resources/icons/",
+									  "src/resources/Icons/", "../../src/resources/Icons/", "../src/resources/Icons/"};
 
 		for (const char* prefix : search_paths) {
 			std::string p = std::string(prefix) + entry.filename;

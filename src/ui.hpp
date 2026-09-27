@@ -97,6 +97,11 @@ public:
 
 	static bool button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& size = ImVec2(0, 0));
 
+	static void refresh_workshop_items();
+	static void handle_uri(const std::string& uri);
+	static std::string generate_thumbnail_base64(int type_idx, const std::string& target_set,
+												 const std::string& target_file = "");
+
 	struct MaterialShortcutItem {
 		std::string name;
 		uint8_t id = 0;
@@ -114,6 +119,8 @@ private:
 	static void render_material_editor();
 	static void render_manage_sets();
 	static void render_save_load();
+	static void render_workshop();
+	static void render_workshop_auth_modal();
 	static void render_advanced_options();
 	static void render_shortcuts();
 	static void render_theme_editor();

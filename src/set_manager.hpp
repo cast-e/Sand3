@@ -14,6 +14,10 @@ struct SetMetadata {
 	uint32_t target_fps = 0;
 	int processing_mode = -1;
 	bool prevent_downclock = true;
+	uint32_t version = 1;
+	std::string workshop_id;
+	std::string workshop_hash;
+	bool is_online = false;
 	std::unordered_map<std::string, std::string> shortcuts;
 };
 
@@ -36,6 +40,11 @@ public:
 
 	static void update_current_metadata(const SetMetadata& metadata);
 
+	static std::string compute_set_hash(const std::string& set_name);
+	static bool is_set_online(const std::string& set_name);
+	static void mark_set_online(const std::string& set_name, bool online);
+	static void set_workshop_info(const std::string& set_name, const std::string& workshop_id, const std::string& workshop_hash, uint32_t version = 1, const std::string& author = "");
+
 	static std::string get_current_material_shortcut(const std::string& mat_name);
 	static void set_current_material_shortcut(const std::string& mat_name, const std::string& key_combo);
 	static void remove_current_material_shortcut(const std::string& mat_name);
@@ -44,4 +53,5 @@ public:
 private:
 	static std::string current_set_name;
 	static SetMetadata current_metadata;
+	static std::unordered_map<std::string, bool> online_set_cache;
 };

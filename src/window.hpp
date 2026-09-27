@@ -39,6 +39,11 @@ public:
 	static void set_background_color(const ImVec4& color);
 	static ImVec4 get_background_color();
 
+	static void set_cursor_wait(bool wait);
+	static void increment_busy();
+	static void decrement_busy();
+	static bool is_busy();
+
 private:
 	static SDL_Window* window;
 	static SDL_Renderer* renderer;

@@ -21,6 +21,21 @@ enum class IconID {
 	Clear,
 	Add,
 	Refresh,
+	World,
+	Heart,
+	Star,
+	Report,
+	Package,
+	Transmit,
+	Magnifier,
+	ArrowDown,
+	User,
+	Tag,
+	Edit,
+	Update,
+	Accept,
+	Information,
+	Warning,
 	Count
 };
 

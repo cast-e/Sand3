@@ -2,5 +2,13 @@
 build*
 win64
 linux
+
+config.ini
 imgui.ini
+cache
+sets
+*.db-shm
+*.db-wal
+.vercel
+
 todo.txt

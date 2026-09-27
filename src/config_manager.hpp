@@ -27,6 +27,8 @@ struct UIConfig {
 	int icon_size = 16;
 	int material_list_height = 150;
 	ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+	ImVec4 selection_box_color = ImVec4(80.0f / 255.0f, 200.0f / 255.0f, 1.0f, 1.0f);
+	ImVec4 selection_box_fill = ImVec4(50.0f / 255.0f, 150.0f / 255.0f, 1.0f, 30.0f / 255.0f);
 };
 
 struct Config {
@@ -44,6 +46,11 @@ struct Config {
 	bool prevent_downclock = true;
 
 	UIConfig ui;
+
+	struct WorkshopConfig {
+		std::string token = "";
+		std::string username = "";
+	} workshop;
 };
 
 class ConfigManager {

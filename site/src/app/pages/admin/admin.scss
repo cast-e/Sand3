@@ -1,0 +1,248 @@
+.admin-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px 80px 16px;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+
+  .header-title {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0 0 4px 0;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin: 0;
+    }
+  }
+}
+
+.auth-card {
+  max-width: 540px;
+  margin: 40px auto;
+
+  .key-input-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+  }
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+
+    &.highlight {
+      border-color: rgba(248, 81, 73, 0.6);
+      background: rgba(248, 81, 73, 0.05);
+
+      .stat-val {
+        color: #f85149;
+      }
+    }
+
+    &.warning {
+      border-color: rgba(210, 153, 34, 0.6);
+      background: rgba(210, 153, 34, 0.05);
+    }
+
+    .stat-icon {
+      background: rgba(255, 255, 255, 0.04);
+      padding: 10px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .stat-info {
+      display: flex;
+      flex-direction: column;
+
+      .stat-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-muted);
+      }
+
+      .stat-val {
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text);
+      }
+    }
+  }
+}
+
+.section-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  h2 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+  }
+
+  .filter-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+}
+
+.reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.report-card {
+  padding: 16px;
+
+  .report-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 10px;
+
+    .item-summary {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      .item-thumb-tiny {
+        width: 44px;
+        height: 44px;
+        border-radius: 4px;
+        object-fit: cover;
+        border: 1px solid var(--border);
+      }
+
+      .item-title-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .item-link {
+          color: var(--text);
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+
+          &:hover {
+            color: var(--link);
+          }
+        }
+      }
+
+      .item-meta-row {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+    }
+  }
+
+  .report-details-box {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    font-size: 13px;
+
+    .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    p {
+      margin: 0;
+      color: var(--text);
+    }
+  }
+
+  .report-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+}
+
+.row-reported {
+  background: rgba(248, 81, 73, 0.04);
+}
+
+.row-hidden {
+  opacity: 0.7;
+}
+
+.item-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  .item-thumb-tiny {
+    width: 36px;
+    height: 36px;
+    border-radius: 4px;
+    object-fit: cover;
+    border: 1px solid var(--border);
+  }
+
+  .item-text {
+    display: flex;
+    flex-direction: column;
+
+    .item-link {
+      color: var(--link);
+    }
+
+    .created-date {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+  }
+}

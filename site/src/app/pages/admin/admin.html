@@ -1,0 +1,479 @@
+<div class="admin-container">
+  <!-- Toast Notification -->
+  @if (toastMsg()) {
+  <div class="toast-banner" [class.toast-danger]="toastType() === 'danger'">
+    <img [src]="toastType() === 'danger' ? '/icons/error.png' : '/icons/accept.png'" class="silk-icon" alt="status" />
+    <span>{{ toastMsg() }}</span>
+  </div>
+  }
+
+  <!-- Header -->
+  <div class="admin-header">
+    <div class="header-title">
+      <img src="/icons/shield.png" class="silk-icon-lg" alt="Admin" />
+      <div>
+        <h1>Workshop Admin Dashboard</h1>
+        <p class="subtitle">Review community reports, moderate content, and manage workshop items.</p>
+      </div>
+    </div>
+    <div class="header-nav">
+      <a routerLink="/workshop" class="btn btn-sm">
+        <img src="/icons/arrow_left.png" class="silk-icon" alt="Back" /> Back to Workshop
+      </a>
+    </div>
+  </div>
+
+  @if (authChecking()) {
+  <div class="loading-state">
+    <img src="/icons/arrow_refresh.png" class="silk-icon spinner" alt="Loading" />
+    <p>Verifying administrative credentials...</p>
+  </div>
+  } @else if (!isAuthorized()) {
+  <!-- Admin Authorization Barrier -->
+  <div class="card auth-card">
+    <div class="card-header">
+      <img src="/icons/lock.png" class="silk-icon" alt="Lock" />
+      <h2>Administrator Authorization Required</h2>
+    </div>
+    <div class="card-body">
+      <p>
+        This dashboard allows moderation of all workshop items and reports. To access this section, please enter
+        your
+        admin secret key or log in with an administrator account.
+      </p>
+
+      @if (authError()) {
+      <div class="alert alert-danger">{{ authError() }}</div>
+      }
+
+      <div class="form-group">
+        <label for="adminKey">Admin Secret Key</label>
+        <div class="key-input-row">
+          <input type="password" id="adminKey" [ngModel]="adminKeyInput()" (ngModelChange)="adminKeyInput.set($event)"
+            placeholder="Enter admin key..." class="input-control" (keyup.enter)="unlockWithKey()" />
+          <button class="btn btn-primary" (click)="unlockWithKey()">
+            <img src="/icons/key.png" class="silk-icon" alt="Unlock" />
+            Unlock Dashboard
+          </button>
+        </div>
+        <small class="helper-text">Default local development key is <code>sand3admin</code>.</small>
+      </div>
+    </div>
+  </div>
+  } @else {
+  <!-- Stats Metric Cards -->
+  <div class="stats-grid">
+    <div class="stat-card" [class.highlight]="(stats()?.total_reports || 0) > 0">
+      <div class="stat-icon">
+        <img src="/icons/flag_red.png" class="silk-icon" alt="Reports" />
+      </div>
+      <div class="stat-info">
+        <span class="stat-label">Pending Reports</span>
+        <span class="stat-val">{{ stats()?.total_reports || 0 }}</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">
+        <img src="/icons/package.png" class="silk-icon" alt="Items" />
+      </div>
+      <div class="stat-info">
+        <span class="stat-label">Total Items</span>
+        <span class="stat-val">{{ stats()?.total_items || 0 }}</span>
+      </div>
+    </div>
+    <div class="stat-card" [class.warning]="(stats()?.hidden_items || 0) > 0">
+      <div class="stat-icon">
+        <img src="/icons/eye.png" class="silk-icon" alt="Hidden" />
+      </div>
+      <div class="stat-info">
+        <span class="stat-label">Hidden Items</span>
+        <span class="stat-val">{{ stats()?.hidden_items || 0 }}</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">
+        <img src="/icons/user.png" class="silk-icon" alt="Users" />
+      </div>
+      <div class="stat-info">
+        <span class="stat-label">Registered Users</span>
+        <span class="stat-val">{{ stats()?.total_users || 0 }}</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">
+        <img src="/icons/arrow_down.png" class="silk-icon" alt="Downloads" />
+      </div>
+      <div class="stat-info">
+        <span class="stat-label">Total Downloads</span>
+        <span class="stat-val">{{ stats()?.total_downloads || 0 }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dashboard Tabs -->
+  <div class="admin-tabs">
+    <button class="tab-btn" [class.active]="activeTab() === 'reports'" (click)="activeTab.set('reports')">
+      <img src="/icons/flag_red.png" class="silk-icon" alt="Reports" />
+      Review Reports
+      @if (reports().length > 0) {
+      <span class="tab-badge">{{ reports().length }}</span>
+      }
+    </button>
+    <button class="tab-btn" [class.active]="activeTab() === 'items'" (click)="activeTab.set('items')">
+      <img src="/icons/application_view_list.png" class="silk-icon" alt="Items" />
+      Manage Items
+    </button>
+    <button class="tab-btn" [class.active]="activeTab() === 'users'" (click)="activeTab.set('users')">
+      <img src="/icons/user.png" class="silk-icon" alt="Users" />
+      Manage Users
+      @if (users().length > 0) {
+      <span class="tab-badge-subtle">{{ users().length }}</span>
+      }
+    </button>
+  </div>
+
+  <!-- Tab 1: Review Reports -->
+  @if (activeTab() === 'reports') {
+  <div class="tab-content">
+    <div class="section-toolbar">
+      <h2>Active Content Reports</h2>
+      <button class="btn btn-sm" (click)="loadReports()" [disabled]="reportsLoading()">
+        <img src="/icons/arrow_refresh.png" class="silk-icon" [class.spinner]="reportsLoading()" alt="Refresh" />
+        Refresh Reports
+      </button>
+    </div>
+
+    @if (reportsLoading()) {
+    <div class="loading-state">
+      <img src="/icons/arrow_refresh.png" class="silk-icon spinner" alt="Loading" />
+      <p>Loading reports...</p>
+    </div>
+    } @else if (reports().length === 0) {
+    <div class="empty-state card">
+      <h3><img src="/icons/accept.png" class="silk-icon" alt="Clean" />No Pending Reports</h3>
+      <p>All clean! There are currently no reported items requiring attention.</p>
+    </div>
+    } @else {
+    <div class="reports-list">
+      @for (rep of reports(); track rep.report_id) {
+      <div class="card report-card">
+        <div class="report-header">
+          <div class="item-summary">
+            @if (rep.item_thumbnail_path) {
+            <img [src]="getThumbnailUrl(rep.item_id)" alt="{{ rep.item_title }}" class="item-thumb-tiny" />
+            }
+            <div>
+              <div class="item-title-row">
+                <span class="badge" [class.badge-blue]="rep.item_type === 'set'"
+                  [class.badge-green]="rep.item_type === 'save'" [class.badge-yellow]="rep.item_type === 'stamp'"
+                  [class.badge-purple]="rep.item_type === 'theme'">
+                  {{ rep.item_type }}
+                </span>
+                <a [routerLink]="rep.item_type === 'set' ? ['/workshop/sets', rep.item_id] : ['/workshop/items', rep.item_id]"
+                  class="item-link" target="_blank" title="View in new tab">
+                  <strong>{{ rep.item_title || 'Unknown Item' }}</strong>
+                  <img src="/icons/arrow_right.png" class="silk-icon-sm" alt="go" />
+                </a>
+                @if (rep.item_is_hidden) {
+                <span class="badge badge-danger">Hidden</span>
+                }
+              </div>
+              <span class="item-author-meta">by {{ rep.item_author }} &bull; Total reports: {{ rep.reports_count
+                }}</span>
+            </div>
+          </div>
+
+          <div class="report-reason-badge" [class.reason-offensive]="rep.reason === 'offensive'"
+            [class.reason-broken]="rep.reason === 'broken'">
+            <img src="/icons/error.png" class="silk-icon" alt="reason" />
+            Reason: <strong>{{ rep.reason }}</strong>
+          </div>
+        </div>
+
+        <div class="report-body">
+          <div class="report-details-box">
+            <span class="label">Reporter Notes:</span>
+            <p>{{ rep.details || 'No additional details provided by reporter.' }}</p>
+          </div>
+          <div class="report-meta-line">
+            Reported on {{ rep.reported_at | date:'medium' }} by client
+            <code>{{ rep.client_uuid.substring(0, 14) }}...</code>
+          </div>
+        </div>
+
+        <div class="report-actions">
+          <button class="btn btn-sm" (click)="dismissReport(rep.report_id)" title="Dismiss this report">
+            <img src="/icons/accept.png" class="silk-icon" alt="Dismiss" />
+            Dismiss Report
+          </button>
+          <button class="btn btn-sm" (click)="clearItemReports(rep.item_id)" title="Clear all reports on this item">
+            <img src="/icons/bin.png" class="silk-icon" alt="Clear" />
+            Clear All &amp; Unhide
+          </button>
+          <button class="btn btn-sm" (click)="toggleHideItem(rep)" title="Toggle public visibility">
+            <img src="/icons/eye.png" class="silk-icon" alt="Visibility" />
+            {{ rep.item_is_hidden ? 'Unhide Item' : 'Hide Item' }}
+          </button>
+          <button class="btn btn-sm btn-danger" (click)="deleteItem(rep.item_id, rep.item_title)"
+            title="Permanently remove item and all reports">
+            <img src="/icons/delete.png" class="silk-icon" alt="Delete" />
+            Delete Item
+          </button>
+        </div>
+      </div>
+      }
+    </div>
+    }
+  </div>
+  }
+
+  <!-- Tab 2: Manage Items -->
+  @if (activeTab() === 'items') {
+  <div class="tab-content">
+    <div class="section-toolbar">
+      <h2>All Workshop Items</h2>
+      <div class="filter-controls">
+        <input type="text" [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event); loadItems()"
+          placeholder="Search by title or author..." class="input-control input-sm" />
+
+        <select [ngModel]="typeFilter()" (ngModelChange)="typeFilter.set($event); loadItems()"
+          class="input-control input-sm">
+          <option value="all">All Types</option>
+          <option value="set">Sets</option>
+          <option value="save">Saves</option>
+          <option value="stamp">Stamps</option>
+          <option value="theme">Themes</option>
+        </select>
+
+        <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event); loadItems()"
+          class="input-control input-sm">
+          <option value="all">All Status</option>
+          <option value="reported">Reported Only</option>
+          <option value="hidden">Hidden Only</option>
+        </select>
+
+        <button class="btn btn-sm" (click)="loadItems()">
+          <img src="/icons/arrow_refresh.png" class="silk-icon" [class.spinner]="itemsLoading()" alt="Refresh" />
+        </button>
+      </div>
+    </div>
+
+    @if (itemsLoading()) {
+    <div class="loading-state">
+      <img src="/icons/arrow_refresh.png" class="silk-icon spinner" alt="Loading" />
+      <p>Loading workshop items...</p>
+    </div>
+    } @else if (items().length === 0) {
+    <div class="empty-state card">
+      <img src="/icons/magnifier.png" class="silk-icon" alt="Empty" />
+      <h3>No Items Found</h3>
+      <p>Try adjusting your search query or filters.</p>
+    </div>
+    } @else {
+    <div class="card table-card">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Type</th>
+            <th>Author</th>
+            <th>Version</th>
+            <th>Stats</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (it of items(); track it.id) {
+          <tr [class.row-reported]="it.reports_count > 0" [class.row-hidden]="it.is_hidden">
+            <td>
+              <div class="item-cell">
+                @if (it.thumbnail_path) {
+                <img [src]="getThumbnailUrl(it.id)" alt="{{ it.title }}" class="item-thumb-tiny" />
+                }
+                <div class="item-text">
+                  <a [routerLink]="it.type === 'set' ? ['/workshop/sets', it.id] : ['/workshop/items', it.id]"
+                    target="_blank" class="item-link">
+                    <strong>{{ it.title }}</strong>
+                  </a>
+                  <span class="created-date">{{ it.created_at | date:'shortDate' }}</span>
+                </div>
+              </div>
+            </td>
+            <td>
+              <span class="badge" [class.badge-blue]="it.type === 'set'" [class.badge-green]="it.type === 'save'"
+                [class.badge-yellow]="it.type === 'stamp'" [class.badge-purple]="it.type === 'theme'">
+                {{ it.type }}
+              </span>
+            </td>
+            <td>{{ it.author }}</td>
+            <td>v{{ it.version || 1 }}</td>
+            <td>
+              <span class="stat-pill" title="Downloads">
+                <img src="/icons/arrow_down.png" class="silk-icon-sm" alt="d" /> {{ it.downloads_count }}
+              </span>
+              <span class="stat-pill" title="Likes">
+                <img src="/icons/heart.png" class="silk-icon-sm" alt="l" /> {{ it.likes_count }}
+              </span>
+              @if (it.reports_count > 0) {
+              <span class="stat-pill stat-danger" title="Reports">
+                <img src="/icons/flag_red.png" class="silk-icon-sm" alt="r" /> {{ it.reports_count }}
+              </span>
+              }
+            </td>
+            <td>
+              @if (it.is_hidden) {
+              <span class="badge badge-danger">Hidden</span>
+              } @else {
+              <span class="badge badge-success">Visible</span>
+              }
+            </td>
+            <td>
+              <div class="row-actions">
+                <a [routerLink]="it.type === 'set' ? ['/workshop/sets', it.id] : ['/workshop/items', it.id]"
+                  class="btn btn-sm" target="_blank" title="View details">
+                  <img src="/icons/eye.png" class="silk-icon" alt="View" />
+                </a>
+                <button class="btn btn-sm" (click)="toggleHideItem(it)"
+                  [title]="it.is_hidden ? 'Make visible to public' : 'Hide from public'">
+                  <img [src]="it.is_hidden ? '/icons/accept.png' : '/icons/cross.png'" class="silk-icon" alt="Hide" />
+                </button>
+                <button class="btn btn-sm btn-danger" (click)="deleteItem(it.id, it.title)"
+                  title="Permanently delete item">
+                  <img src="/icons/delete.png" class="silk-icon" alt="Delete" />
+                </button>
+              </div>
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    }
+  </div>
+  }
+
+  <!-- Tab 3: Manage Users -->
+  @if (activeTab() === 'users') {
+  <div class="tab-content">
+    <div class="section-toolbar">
+      <h2>Registered Platform Users</h2>
+      <div class="filter-controls">
+        <input type="text" [ngModel]="usersSearchQuery()" (ngModelChange)="usersSearchQuery.set($event); loadUsers()"
+          placeholder="Search by username or user ID..." class="input-control input-sm" />
+        <button class="btn btn-sm" (click)="loadUsers()">
+          <img src="/icons/arrow_refresh.png" class="silk-icon" [class.spinner]="usersLoading()" alt="Refresh" />
+        </button>
+      </div>
+    </div>
+
+    @if (usersLoading()) {
+    <div class="loading-state">
+      <img src="/icons/arrow_refresh.png" class="silk-icon spinner" alt="Loading" />
+      <p>Loading users...</p>
+    </div>
+    } @else if (users().length === 0) {
+    <div class="empty-state card">
+      <img src="/icons/user.png" class="silk-icon" alt="Users" />
+      <h3>No Users Found</h3>
+      <p>No registered users match your query.</p>
+    </div>
+    } @else {
+    <div class="card table-card">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Role</th>
+            <th>Items</th>
+            <th>Active Sessions</th>
+            <th>Registered</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (u of users(); track u.id) {
+          <tr [class.row-admin]="u.is_admin">
+            <td>
+              <div class="user-cell">
+                <span class="user-avatar-tag">
+                  <img src="/icons/user.png" class="silk-icon" alt="u" />
+                </span>
+                <div class="user-cell-meta">
+                  <strong>{{ u.username }}</strong>
+                  <span class="user-id-code">{{ u.id }}</span>
+                </div>
+              </div>
+            </td>
+            <td>
+              @if (u.role === 'admin' || u.is_admin) {
+              <span class="badge badge-purple">
+                <img src="/icons/shield.png" class="silk-icon-sm" alt="Admin" /> Administrator
+              </span>
+              } @else if (u.role === 'moderator') {
+              <span class="badge badge-blue">
+                <img src="/icons/user_suit.png" class="silk-icon-sm" alt="Mod" /> Moderator
+              </span>
+              } @else {
+              <span class="badge">User</span>
+              }
+            </td>
+            <td>
+              <span class="stat-pill" title="Items published">
+                <img src="/icons/package.png" class="silk-icon-sm" alt="c" /> {{ u.items_count }}
+              </span>
+            </td>
+            <td>{{ u.active_sessions_count }}</td>
+            <td>{{ u.created_at | date:'mediumDate' }}</td>
+            <td>
+              <div class="row-actions">
+                @if (auth.isAdmin()) {
+                  @if (u.username.toLowerCase() !== 'cast_e' && u.id !== 'c7831b24-de86-45ae-b049-9ecdf88a3219' && u.id !== 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d') {
+                    @if (u.role !== 'admin' && !u.is_admin) {
+                      @if (u.role !== 'moderator') {
+                      <button class="btn btn-sm" (click)="changeUserRole(u, 'moderator')" title="Grant Moderator privileges (can moderate creations, cannot remove users)">
+                        <img src="/icons/user_suit.png" class="silk-icon" alt="Mod" />
+                        Make Mod
+                      </button>
+                      } @else {
+                      <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'user')" title="Revoke Moderator privileges">
+                        <img src="/icons/user.png" class="silk-icon" alt="User" />
+                        Demote Mod
+                      </button>
+                      }
+                      <button class="btn btn-sm btn-primary" (click)="changeUserRole(u, 'admin')" title="Grant full Administrator privileges">
+                        <img src="/icons/shield_add.png" class="silk-icon" alt="Admin" />
+                        Make Admin
+                      </button>
+                    } @else {
+                      <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'moderator')" title="Demote to Moderator">
+                        <img src="/icons/user_suit.png" class="silk-icon" alt="Mod" />
+                        Set Mod
+                      </button>
+                      <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'user')" title="Revoke Administrator privileges">
+                        <img src="/icons/shield_delete.png" class="silk-icon" alt="User" />
+                        Demote User
+                      </button>
+                    }
+                    <button class="btn btn-sm btn-danger" (click)="userDelete(u)" title="Permanently delete user">
+                      <img src="/icons/delete.png" class="silk-icon" alt="Delete" />
+                      Delete
+                    </button>
+                  } @else {
+                    <span class="badge badge-purple">Platform Owner</span>
+                  }
+                } @else {
+                  <span class="badge" title="Moderators can moderate creations & reports, but cannot modify users.">Read-only (Admin only)</span>
+                }
+              </div>
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    }
+  </div>
+  }
+  }
+</div>

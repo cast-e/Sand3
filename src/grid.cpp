@@ -248,21 +248,19 @@ void Grid::configure_threads(uint32_t thread_count) {
 	workers.clear();
 
 	shutdown_flag = false;
-	num_active_threads = thread_count;
+	uint32_t max_threads = std::max(1u, get_num_strips_y() / 2);
+	if (thread_count == 0) {
+		thread_count = max_threads;
+	}
+	num_active_threads = std::clamp(thread_count, 1u, max_threads);
 
-	if (num_active_threads > 0) {
-		start_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
-		done_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
-		phase_barrier = std::make_unique<std::barrier<>>(num_active_threads);
+	start_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
+	done_barrier = std::make_unique<std::barrier<>>(num_active_threads + 1);
+	phase_barrier = std::make_unique<std::barrier<>>(num_active_threads);
 
-		workers.reserve(num_active_threads);
-		for (uint32_t t = 0; t < num_active_threads; ++t) {
-			workers.emplace_back(&Grid::worker_thread, t);
-		}
-	} else {
-		start_barrier.reset();
-		done_barrier.reset();
-		phase_barrier.reset();
+	workers.reserve(num_active_threads);
+	for (uint32_t t = 0; t < num_active_threads; ++t) {
+		workers.emplace_back(&Grid::worker_thread, t);
 	}
 }
 

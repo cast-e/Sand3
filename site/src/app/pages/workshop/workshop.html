@@ -1,0 +1,321 @@
+<div class="workshop-container">
+  <!-- Controls Bar -->
+  <div class="workshop-header">
+    <div class="title-filter-row">
+      <div class="category-tabs">
+        <button class="btn" [class.active]="currentType() === 'all'" (click)="setType('all')">
+          <img src="favicon.ico" class="silk-icon" alt="All" /> All Items
+        </button>
+        <button class="btn" [class.active]="currentType() === 'set'" (click)="setType('set')">
+          <img src="/icons/package.png" class="silk-icon" alt="Sets" /> Sets
+        </button>
+        <button class="btn" [class.active]="currentType() === 'save'" (click)="setType('save')">
+          <img src="/icons/disk.png" class="silk-icon" alt="Saves" /> Saves
+        </button>
+        <button class="btn" [class.active]="currentType() === 'stamp'" (click)="setType('stamp')">
+          <img src="/icons/shape_handles.png" class="silk-icon" alt="Stamps" /> Stamps
+        </button>
+        <button class="btn" [class.active]="currentType() === 'theme'" (click)="setType('theme')">
+          <img src="/icons/paintcan.png" class="silk-icon" alt="Themes" /> Themes
+        </button>
+      </div>
+    </div>
+
+    <!-- Search & Sort Bar -->
+    <div class="search-sort-row">
+      <div class="search-box">
+        <img src="/icons/magnifier.png" class="silk-icon search-icon" alt="Search" />
+        <input type="text" class="input search-input" placeholder="Search by title, description, or author..."
+          [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)" (keyup.enter)="onSearch()" />
+        @if (searchQuery()) {
+        <button class="clear-search-btn" (click)="searchQuery.set(''); onSearch()">✕</button>
+        }
+      </div>
+
+      <div class="sort-selector">
+        <span class="sort-label">Sort by:</span>
+        <select class="select sort-select" [ngModel]="currentSort()" (ngModelChange)="setSort($event)">
+          <option value="popular">Most Popular</option>
+          <option value="liked">Top Liked</option>
+          <option value="favorites">Most Favorited</option>
+          <option value="downloads">Most Downloads</option>
+          <option value="newest">Recently Published</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Items Grid -->
+  @if (loading()) {
+  <div class="loading-state">
+    <img src="/icons/arrow_refresh.png" class="silk-icon spinner" alt="Loading" />
+    <p>Loading community items...</p>
+  </div>
+  } @else if (items().length === 0) {
+  <div class="empty-state card">
+    <div class="card-body">
+      <img src="/icons/find.png" class="silk-icon-lg" alt="Empty" />
+      <h3>No items found</h3>
+      <p class="text-muted">No items matched your current filter criteria.</p>
+      <button class="btn btn-sm" (click)="searchQuery.set(''); setType('all')">Clear Filters</button>
+    </div>
+  </div>
+  } @else {
+  <div class="items-grid">
+    @for (item of items(); track item.id) {
+    <div class="card item-card">
+      <!-- Card Header -->
+      <div class="card-header">
+        <div class="item-title-meta">
+          <span class="badge" [class.badge-blue]="item.type === 'set'" [class.badge-green]="item.type === 'save'"
+            [class.badge-yellow]="item.type === 'stamp'" [class.badge-purple]="item.type === 'theme'">
+            @if (item.type === 'set') {
+            <img src="/icons/package.png" class="silk-icon" alt="Set" /> Set
+            } @else if (item.type === 'save') {
+            <img src="/icons/disk.png" class="silk-icon" alt="Save" /> Save
+            } @else if (item.type === 'stamp') {
+            <img src="/icons/shape_handles.png" class="silk-icon" alt="Stamp" /> Stamp
+            } @else {
+            <img src="/icons/paintcan.png" class="silk-icon" alt="Theme" /> Theme
+            }
+          </span>
+          @if (item.version && item.version > 1) {
+          <span class="badge badge-version">v{{ item.version }}</span>
+          }
+          <a [routerLink]="item.type === 'set' ? ['/workshop/sets', item.id] : ['/workshop/items', item.id]"
+            class="item-title-link" [title]="item.title">
+            {{ item.title }}
+          </a>
+        </div>
+        <span class="author-tag">by <strong>{{ item.author }}</strong></span>
+      </div>
+
+      <!-- Thumbnail Preview if available -->
+      @if (item.thumbnail_path) {
+      <div class="card-thumb-container">
+        <img [src]="api.getThumbnailUrl(item.id)" alt="{{ item.title }}" class="item-card-thumb" loading="lazy" />
+      </div>
+      }
+
+      <!-- Card Body -->
+      <div class="card-body item-body">
+        @if (item.parent_set_title) {
+        <div class="parent-set-pill">
+          <img src="/icons/package.png" class="silk-icon" alt="Set" />
+          <span>Uses Set: </span>
+          <a [routerLink]="['/workshop/sets', item.parent_set_id]" class="set-link">
+            {{ item.parent_set_title }}
+          </a>
+        </div>
+        }
+
+        <p class="item-desc">{{ item.description || 'No description provided.' }}</p>
+
+        <!-- Metadata Pills -->
+        <div class="meta-tags">
+          @if (parseMeta(item.meta_json); as m) {
+          @if (m.materials_count) {
+          <span class="meta-pill"><img src="/icons/palette.png" class="silk-icon" alt="mat" /> {{ m.materials_count }}
+            materials</span>
+          }
+          @if (m.rules_count) {
+          <span class="meta-pill"><img src="/icons/script_code.png" class="silk-icon" alt="rules" /> {{ m.rules_count }}
+            rules</span>
+          }
+          @if (getDimensions(item); as dims) {
+          <span class="meta-pill highlight"><img src="/icons/shape_square.png" class="silk-icon" alt="dim" /> {{ dims
+            }}</span>
+          }
+          @if (item.child_saves_count && item.child_saves_count > 0) {
+          <span class="meta-pill highlight"><img src="/icons/disk.png" class="silk-icon" alt="saves" /> {{
+            item.child_saves_count }} community save{{ item.child_saves_count === 1 ? '' : 's' }}</span>
+          }
+          }
+        </div>
+      </div>
+
+      <!-- Card Footer -->
+      <div class="card-footer item-actions">
+        <!-- Open in Sand3 / Download Button -->
+        <button (click)="openInSand3(item, $event)" class="btn btn-sm btn-primary" title="Open in Sand3">
+          <img src="/icons/application_go.png" class="silk-icon" alt="Open" />
+          Open
+        </button>
+
+        <!-- Social Action: Like -->
+        <button class="btn btn-sm" [class.active]="item.is_liked" (click)="toggleLike(item, $event)" title="Like item">
+          <img src="/icons/heart.png" class="silk-icon" alt="Like" />
+          <span>{{ item.likes_count }}</span>
+        </button>
+
+        <!-- Social Action: Favorite -->
+        <button class="btn btn-sm" [class.active]="item.is_favorited" (click)="toggleFavorite(item, $event)"
+          title="Add to favorites">
+          <img src="/icons/star.png" class="silk-icon" alt="Favorite" />
+          <span>{{ item.favorites_count }}</span>
+        </button>
+
+        <!-- Owner Actions: Edit & Delete -->
+        @if (isOwner(item)) {
+        <button class="btn btn-sm btn-owner-edit" (click)="openEditModal(item, $event)" title="Edit item">
+          <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
+        </button>
+        <button class="btn btn-sm btn-danger" (click)="deleteItem(item, $event)" title="Delete item">
+          <img src="/icons/delete.png" class="silk-icon" alt="Delete" />
+        </button>
+        }
+
+        <!-- Social Action: Report -->
+        <button class="btn btn-sm report-btn" (click)="openReportModal(item, $event)"
+          title="Report broken or inappropriate item">
+          <img src="/icons/flag_red.png" class="silk-icon" alt="Report" />
+        </button>
+      </div>
+    </div>
+    }
+  </div>
+  }
+
+  <!-- Edit Item Modal -->
+  @if (editingItem(); as item) {
+  <div class="modal-backdrop" (click)="closeEditModal()">
+    <div class="card modal-content" (click)="$event.stopPropagation()">
+      <div class="card-header">
+        <h3>
+          <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
+          Edit "{{ item.title }}"
+        </h3>
+        <button class="close-btn" (click)="closeEditModal()">✕</button>
+      </div>
+
+      <div class="card-body">
+        @if (editError()) {
+        <div class="alert alert-danger" style="margin-bottom: 12px;">
+          {{ editError() }}
+        </div>
+        }
+
+        <div class="form-group">
+          <label>Title:</label>
+          <input type="text" class="input" [ngModel]="editTitle()" (ngModelChange)="editTitle.set($event)" />
+        </div>
+
+        <div class="form-group">
+          <label>Description:</label>
+          <textarea class="textarea" rows="4" [ngModel]="editDescription()"
+            (ngModelChange)="editDescription.set($event)"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Replace Thumbnail (PNG / JPEG):</label>
+          <input type="file" accept="image/png, image/jpeg" class="input file-input"
+            (change)="onThumbnailSelected($event)" />
+          @if (editThumbnailData()) {
+          <div class="thumb-preview-box">
+            <img [src]="editThumbnailData()" alt="Preview" class="preview-img" />
+          </div>
+          }
+        </div>
+      </div>
+
+      <div class="card-footer modal-actions">
+        <button class="btn btn-primary" [disabled]="editLoading()" (click)="submitEdit()">
+          <img src="/icons/disk.png" class="silk-icon" alt="Save" />
+          {{ editLoading() ? 'Saving...' : 'Save Changes' }}
+        </button>
+        <button class="btn" (click)="closeEditModal()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+  }
+
+  <!-- Report Modal Overlay -->
+  @if (reportingItem(); as item) {
+  <div class="modal-backdrop" (click)="closeReportModal()">
+    <div class="card modal-content" (click)="$event.stopPropagation()">
+      <div class="card-header">
+        <h3>
+          <img src="/icons/flag_red.png" class="silk-icon" alt="Report" />
+          Report "{{ item.title }}"
+        </h3>
+        <button class="close-btn" (click)="closeReportModal()">✕</button>
+      </div>
+
+      <div class="card-body">
+        @if (reportMessage()) {
+        <div class="alert-box">
+          {{ reportMessage() }}
+        </div>
+        } @else {
+        <div class="form-group">
+          <label>Reason for report:</label>
+          <select class="select" [ngModel]="reportReason()" (ngModelChange)="reportReason.set($event)">
+            <option value="broken">Broken simulation / Game crashes</option>
+            <option value="offensive">Inappropriate or offensive content</option>
+            <option value="spam">Spam or duplicate submission</option>
+            <option value="other">Other issue</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Details (optional):</label>
+          <textarea class="textarea" rows="3" placeholder="Describe what is wrong with this item..."
+            [ngModel]="reportDetails()" (ngModelChange)="reportDetails.set($event)"></textarea>
+        </div>
+        }
+      </div>
+
+      <div class="card-footer modal-actions">
+        @if (!reportMessage()) {
+        <button class="btn btn-danger" (click)="submitReport()">
+          Submit Report
+        </button>
+        <button class="btn" (click)="closeReportModal()">
+          Cancel
+        </button>
+        }
+      </div>
+    </div>
+  </div>
+  }
+
+  <!-- Usage Guide Modal Dialog (shown when custom protocol fails and fallback download starts) -->
+  @if (showUsageModal() && currentOpenItem(); as it) {
+  <div class="modal-backdrop" (click)="closeUsageModal()">
+    <div class="modal-card" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h2>
+          <img src="/icons/help.png" class="silk-icon" alt="Help" />
+          How to use in Sand3
+        </h2>
+        <button class="close-btn" (click)="closeUsageModal()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <p class="subtext">
+          You can load this {{ it.type }} directly inside Sand3:
+        </p>
+
+        <ol style="padding-left: 20px; line-height: 1.8; margin-bottom: 20px; color: var(--text);">
+          <li>Open <strong>Sand3</strong>.</li>
+          <li>Go to the <strong>Workshop</strong> tab to browse and activate with 1-click.</li>
+          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.</li>
+        </ol>
+
+        <div style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <span style="font-size: 13px; color: var(--text-muted);">Need the file again?</span>
+          <a [href]="getDownloadUrl(it.id)" class="btn btn-sm btn-primary" download>
+            <img src="/icons/arrow_down.png" class="silk-icon" alt="Download" /> Download file
+          </a>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-sm" (click)="closeUsageModal()">Got it</button>
+      </div>
+    </div>
+  </div>
+  }
+</div>

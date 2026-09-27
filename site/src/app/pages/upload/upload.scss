@@ -1,0 +1,137 @@
+.upload-container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px 64px 16px;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--link);
+  }
+
+  .active-crumb {
+    color: var(--text);
+    font-weight: 500;
+  }
+}
+
+.upload-card {
+  .form-group {
+    margin-bottom: 20px;
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    .help-text {
+      display: block;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+
+      code {
+        color: var(--link);
+        background-color: var(--bg);
+      }
+    }
+  }
+
+  .type-selector {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+
+    .type-btn {
+      padding: 12px;
+      justify-content: center;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+  }
+
+  .file-input {
+    padding: 8px;
+    background-color: var(--bg);
+  }
+
+  .thumb-preview-box {
+    margin-top: 10px;
+    max-height: 140px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: #0d1117;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    .preview-img {
+      max-height: 140px;
+      width: auto;
+      object-fit: contain;
+    }
+  }
+
+  .warning-box {
+    background-color: rgba(248, 81, 73, 0.1);
+    border: 1px solid rgba(248, 81, 73, 0.4);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-top: 8px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text);
+
+    .silk-icon {
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+  }
+
+  .alert {
+    padding: 12px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 20px;
+
+    &.alert-danger {
+      background-color: var(--red-bg);
+      border: 1px solid var(--red);
+      color: var(--red);
+    }
+
+    &.alert-success {
+      background-color: rgba(63, 185, 80, 0.15);
+      border: 1px solid #3fb950;
+      color: #3fb950;
+    }
+  }
+
+  .upload-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    .publish-btn {
+      padding: 8px 20px;
+      font-size: 14px;
+    }
+  }
+}

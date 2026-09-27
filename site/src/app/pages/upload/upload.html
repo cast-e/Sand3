@@ -1,0 +1,148 @@
+<div class="upload-container">
+  <div class="breadcrumb">
+    <a routerLink="/workshop">
+      <img src="/icons/arrow_left.png" class="silk-icon" alt="Back" />
+      Workshop
+    </a>
+    <span>/</span>
+    <span class="active-crumb">Publish Item</span>
+  </div>
+
+  <div class="card upload-card">
+    <div class="card-header">
+      <h2>
+        <img src="/icons/add.png" class="silk-icon" alt="Publish" />
+        Share Item to Workshop
+      </h2>
+    </div>
+
+    <div class="card-body">
+      @if (errorMessage()) {
+      <div class="alert alert-danger">
+        {{ errorMessage() }}
+      </div>
+      }
+      @if (successMessage()) {
+      <div class="alert alert-success">
+        {{ successMessage() }}
+      </div>
+      }
+
+      <!-- Item Type Selection -->
+      <div class="form-group">
+        <label>What are you sharing?</label>
+        <div class="type-selector">
+          <button type="button" class="btn type-btn" [class.active]="type() === 'save'" (click)="type.set('save')">
+            <img src="/icons/disk.png" class="silk-icon" alt="Save" />
+            <span>Save (.save)</span>
+          </button>
+          <button type="button" class="btn type-btn" [class.active]="type() === 'set'" (click)="type.set('set')">
+            <img src="/icons/package.png" class="silk-icon" alt="Set" />
+            <span>Set (.zip)</span>
+          </button>
+          <button type="button" class="btn type-btn" [class.active]="type() === 'stamp'" (click)="type.set('stamp')">
+            <img src="/icons/shape_handles.png" class="silk-icon" alt="Stamp" />
+            <span>Stamp (.stamp)</span>
+          </button>
+          <button type="button" class="btn type-btn" [class.active]="type() === 'theme'" (click)="type.set('theme')">
+            <img src="/icons/paintcan.png" class="silk-icon" alt="Theme" />
+            <span>Theme / UI Style</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- File Picker -->
+      <div class="form-group">
+        <label>Select Item File *</label>
+        <input type="file" class="input file-input" (change)="onFileSelected($event)" />
+        <span class="help-text">
+          @if (type() === 'save') {
+          Locate your save in <code>./sets/&lt;set_name&gt;/saves/&lt;name&gt;.save</code>
+          } @else if (type() === 'set') {
+          Zip the set directory containing <code>set_config.ini</code> and <code>*.mat</code> files
+          } @else if (type() === 'stamp') {
+          Locate your stamp in <code>./sets/&lt;set_name&gt;/stamps/&lt;name&gt;.stamp</code>
+          } @else {
+          Theme configuration file (e.g. <code>theme.ini</code> or styling settings)
+          }
+        </span>
+      </div>
+
+      <!-- Thumbnail Picker -->
+      <div class="form-group">
+        <label>Thumbnail / Preview Image (Optional)</label>
+        <input type="file" accept="image/png, image/jpeg" class="input file-input"
+          (change)="onThumbnailSelected($event)" />
+        <span class="help-text">
+          Upload a screenshot, canvas preview, or palette representation (PNG or JPEG).
+        </span>
+        @if (thumbnailData()) {
+        <div class="thumb-preview-box">
+          <img [src]="thumbnailData()" alt="Preview" class="preview-img" />
+        </div>
+        }
+      </div>
+
+      <!-- Title -->
+      <div class="form-group">
+        <label>Title *</label>
+        <input type="text" class="input" placeholder="e.g., Crystal Cathedral, Volcanic Lava Reactor"
+          [ngModel]="title()" (ngModelChange)="title.set($event)" />
+      </div>
+
+      <!-- Author -->
+      <div class="form-group">
+        <label>Author / Creator Handle *</label>
+        <input type="text" class="input" placeholder="Your creator name" [ngModel]="author()"
+          (ngModelChange)="author.set($event)" [disabled]="auth.isAuthenticated()" />
+        @if (auth.isAuthenticated()) {
+        <span class="help-text">Logged in as <strong>{{ auth.currentUser()?.username }}</strong></span>
+        }
+      </div>
+
+      <!-- Parent Set Association (For Saves and Stamps) -->
+      @if (type() === 'save' || type() === 'stamp') {
+      <div class="form-group">
+        <label>Attach to Online Set (Optional)</label>
+        <select class="select" [ngModel]="parentSetId()" (ngModelChange)="onParentSetChange($event)">
+          <option value="">None (Custom / Bundled Set)</option>
+          @for (s of availableSets(); track s.id) {
+          <option [value]="s.id">{{ s.title }} (by {{ s.author }})</option>
+          }
+        </select>
+        <span class="help-text">
+          If selected, your item will automatically appear in this Set's gallery!
+        </span>
+      </div>
+
+      @if (parentSetId()) {
+      <div class="warning-box">
+        <img src="/icons/error.png" class="silk-icon" alt="Warning" />
+        <span><strong>Compatibility Note:</strong> This item will be bound to the specified online set.
+          If you modified cellular rules or material properties locally, the upload will be rejected to avoid corrupted
+          physics.
+          In that case, upload your modified set as a new Set instead!</span>
+      </div>
+      }
+      }
+
+      <!-- Description -->
+      <div class="form-group">
+        <label>Description</label>
+        <textarea class="textarea" rows="4"
+          placeholder="Describe how your simulation works, special interactions, or instructions for other players..."
+          [ngModel]="description()" (ngModelChange)="description.set($event)"></textarea>
+      </div>
+    </div>
+
+    <div class="card-footer upload-footer">
+      <button class="btn btn-primary publish-btn" [disabled]="publishing()" (click)="submit()">
+        <img src="/icons/transmit.png" class="silk-icon" alt="Publish" />
+        {{ publishing() ? 'Publishing...' : 'Publish to Workshop' }}
+      </button>
+      <a routerLink="/workshop" class="btn">
+        Cancel
+      </a>
+    </div>
+  </div>
+</div>

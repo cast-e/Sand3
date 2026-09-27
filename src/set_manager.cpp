@@ -7,13 +7,16 @@
 #include "grid.hpp"
 #include "material_manager.hpp"
 #include "sanitize.hpp"
+#include "sha256.hpp"
 #include "ui.hpp"
 #include "undo_manager.hpp"
+#include "window.hpp"
 
 namespace fs = std::filesystem;
 
 std::string SetManager::current_set_name = "";
 SetMetadata SetManager::current_metadata{};
+std::unordered_map<std::string, bool> SetManager::online_set_cache;
 
 std::vector<std::string> SetManager::get_sets() {
 	std::vector<std::string> sets;
@@ -45,6 +48,13 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 	meta.target_fps = 0;
 	meta.processing_mode = -1;
 	meta.prevent_downclock = true;
+	meta.workshop_id = "";
+	meta.workshop_hash = "";
+	meta.is_online = false;
+
+	if (online_set_cache.find(name) != online_set_cache.end()) {
+		meta.is_online = online_set_cache[name];
+	}
 
 	std::string cfg_path = SETS_DIRECTORY + name + "/set_config.ini";
 	std::ifstream file(cfg_path);
@@ -72,12 +82,21 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 				if (!key.empty() && !val.empty()) {
 					meta.shortcuts[key] = val;
 				}
+			} else if (current_section == "Workshop") {
+				if (key == "workshop_id") {
+					meta.workshop_id = val;
+					meta.is_online = true;
+				} else if (key == "workshop_hash") {
+					meta.workshop_hash = val;
+				}
 			} else {
 				try {
 					if (key == "author") {
 						meta.author = val;
 					} else if (key == "description") {
 						meta.description = val;
+					} else if (key == "version") {
+						meta.version = static_cast<uint32_t>(std::stoul(val));
 					} else if (key == "width") {
 						meta.width = static_cast<uint32_t>(std::stoul(val));
 					} else if (key == "height") {
@@ -104,10 +123,11 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 
 	bool has_meta_overrides = !metadata.author.empty() || !metadata.description.empty() || metadata.width > 0 ||
 							  metadata.height > 0 || metadata.target_fps > 0 || metadata.processing_mode >= 0 ||
-							  !metadata.prevent_downclock;
+							  !metadata.prevent_downclock || metadata.version > 1;
 	bool has_shortcuts = !metadata.shortcuts.empty();
+	bool has_workshop = !metadata.workshop_id.empty() || !metadata.workshop_hash.empty();
 
-	if (!has_meta_overrides && !has_shortcuts) {
+	if (!has_meta_overrides && !has_shortcuts && !has_workshop) {
 		if (fs::exists(cfg_path)) {
 			std::error_code ec;
 			fs::remove(cfg_path, ec);
@@ -125,6 +145,9 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 	}
 	if (!metadata.description.empty()) {
 		file << "description = " << metadata.description << "\n";
+	}
+	if (metadata.version > 0) {
+		file << "version = " << metadata.version << "\n";
 	}
 	if (metadata.width > 0) {
 		file << "width = " << metadata.width << "\n";
@@ -153,6 +176,16 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 			}
 		}
 	}
+
+	if (has_workshop) {
+		file << "\n[Workshop]\n";
+		if (!metadata.workshop_id.empty()) {
+			file << "workshop_id = " << metadata.workshop_id << "\n";
+		}
+		if (!metadata.workshop_hash.empty()) {
+			file << "workshop_hash = " << metadata.workshop_hash << "\n";
+		}
+	}
 }
 
 std::string SetManager::get_current_set() { return current_set_name; }
@@ -160,6 +193,7 @@ std::string SetManager::get_current_set() { return current_set_name; }
 const SetMetadata& SetManager::get_current_metadata() { return current_metadata; }
 
 void SetManager::set_current_set(const std::string& name) {
+	Window::set_cursor_wait(true);
 	current_set_name = name;
 	current_metadata = load_set_metadata(name);
 	fs::create_directories(SETS_DIRECTORY + name);
@@ -175,6 +209,7 @@ void SetManager::set_current_set(const std::string& name) {
 	UndoManager::init();
 	UI::clear_clipboard();
 	UI::deselect();
+	Window::set_cursor_wait(false);
 }
 
 void SetManager::create_new_empty_set(const std::string& name) {
@@ -271,6 +306,79 @@ void SetManager::delete_set(const std::string& name) {
 void SetManager::update_current_metadata(const SetMetadata& metadata) {
 	current_metadata = metadata;
 	save_set_metadata(current_set_name, current_metadata);
+}
+
+std::string SetManager::compute_set_hash(const std::string& set_name) {
+	std::string set_dir = SETS_DIRECTORY + set_name;
+	if (!fs::exists(set_dir) || !fs::is_directory(set_dir)) {
+		return "";
+	}
+
+	std::vector<std::string> filenames;
+	for (const auto& entry : fs::directory_iterator(set_dir)) {
+		if (entry.is_regular_file()) {
+			std::string fname = entry.path().filename().string();
+			std::string ext = entry.path().extension().string();
+			if (ext == ".mat" && fname != "set_config.ini") {
+				filenames.push_back(fname);
+			}
+		}
+	}
+	std::sort(filenames.begin(), filenames.end());
+
+	std::vector<uint8_t> combined_bytes;
+	for (const auto& fname : filenames) {
+		std::string fpath = set_dir + "/" + fname;
+		for (char c : fname)
+			combined_bytes.push_back(static_cast<uint8_t>(c));
+		combined_bytes.push_back(0);
+
+		std::ifstream in(fpath, std::ios::binary);
+		if (in.is_open()) {
+			std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			for (char c : content) {
+				if (c != '\r') {
+					combined_bytes.push_back(static_cast<uint8_t>(c));
+				}
+			}
+		}
+	}
+
+	if (combined_bytes.empty()) {
+		return "";
+	}
+
+	return sha256(combined_bytes.data(), combined_bytes.size());
+}
+
+bool SetManager::is_set_online(const std::string& set_name) {
+	if (online_set_cache.find(set_name) != online_set_cache.end()) {
+		return online_set_cache[set_name];
+	}
+	SetMetadata m = load_set_metadata(set_name);
+	return !m.workshop_id.empty();
+}
+
+void SetManager::mark_set_online(const std::string& set_name, bool online) { online_set_cache[set_name] = online; }
+
+void SetManager::set_workshop_info(const std::string& set_name, const std::string& workshop_id,
+								   const std::string& workshop_hash, uint32_t version,
+								   const std::string& author) {
+	SetMetadata m = load_set_metadata(set_name);
+	m.workshop_id = workshop_id;
+	m.workshop_hash = workshop_hash;
+	if (version > 0) {
+		m.version = version;
+	}
+	if (!author.empty()) {
+		m.author = author;
+	}
+	m.is_online = true;
+	online_set_cache[set_name] = true;
+	save_set_metadata(set_name, m);
+	if (current_set_name == set_name) {
+		current_metadata = m;
+	}
 }
 
 std::string SetManager::get_current_material_shortcut(const std::string& mat_name) {

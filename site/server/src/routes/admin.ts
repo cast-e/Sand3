@@ -1,0 +1,227 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { db } from '../db.js';
+import { isAdminUser, isModeratorUser, getAuthenticatedUser } from './auth.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOADS_DIR = process.env.UPLOADS_DIR || (process.env.VERCEL ? '/tmp/sand3-uploads' : path.resolve(__dirname, '../../uploads'));
+const THUMBNAILS_DIR = path.resolve(UPLOADS_DIR, 'thumbnails');
+
+export const adminRouter = Router();
+
+// Middleware to guard admin-only endpoints
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!isAdminUser(req)) {
+    return res.status(403).json({
+      error: 'Admin access required. Please log in as an administrator.'
+    });
+  }
+  next();
+}
+
+// Middleware to guard moderation endpoints (accessible by both Admins and Moderators)
+export function requireModerator(req: Request, res: Response, next: NextFunction) {
+  if (!isModeratorUser(req)) {
+    return res.status(403).json({
+      error: 'Moderator or Admin access required. Please log in with a moderator or administrator account.'
+    });
+  }
+  next();
+}
+
+// 1. Verify Admin / Moderator Status
+adminRouter.get('/check', (req: Request, res: Response) => {
+  const is_admin = isAdminUser(req);
+  const is_moderator = isModeratorUser(req);
+  const user = getAuthenticatedUser(req);
+  res.json({
+    is_admin,
+    is_moderator,
+    role: user?.role || (is_admin ? 'admin' : (is_moderator ? 'moderator' : 'user')),
+    user: user ? { id: user.id, username: user.username, role: user.role } : null
+  });
+});
+
+// 2. Admin Dashboard Stats
+adminRouter.get('/stats', requireModerator, (_req: Request, res: Response) => {
+  try {
+    const totalItems = (db.prepare('SELECT COUNT(*) as c FROM items').get() as any).c;
+    const totalReports = (db.prepare('SELECT COUNT(*) as c FROM reports').get() as any).c;
+    const totalUsers = (db.prepare('SELECT COUNT(*) as c FROM users').get() as any).c;
+    const hiddenItems = (db.prepare('SELECT COUNT(*) as c FROM items WHERE is_hidden = 1').get() as any).c;
+    const reportedItems = (db.prepare('SELECT COUNT(DISTINCT item_id) as c FROM reports').get() as any).c;
+    const totalDownloads = (db.prepare('SELECT SUM(downloads_count) as s FROM items').get() as any).s || 0;
+
+    res.json({
+      total_items: totalItems,
+      total_reports: totalReports,
+      total_users: totalUsers,
+      hidden_items: hiddenItems,
+      reported_items: reportedItems,
+      total_downloads: totalDownloads
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. List All Reports (with item details)
+adminRouter.get('/reports', requireModerator, (req: Request, res: Response) => {
+  try {
+    const query = `
+      SELECT r.id as report_id, r.item_id, r.client_uuid, r.reason, r.details, r.created_at as reported_at,
+             i.title as item_title, i.type as item_type, i.author as item_author, i.reports_count,
+             i.is_hidden as item_is_hidden, i.version as item_version, i.thumbnail_path as item_thumbnail_path,
+             i.file_size as item_file_size, i.created_at as item_created_at
+      FROM reports r
+      LEFT JOIN items i ON r.item_id = i.id
+      ORDER BY r.created_at DESC
+    `;
+    const rows = db.prepare(query).all();
+    res.json({ reports: rows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Dismiss a Single Report
+adminRouter.post('/reports/:id/dismiss', requireModerator, (req: Request, res: Response) => {
+  try {
+    const reportId = Number(req.params.id);
+    const report = db.prepare('SELECT item_id FROM reports WHERE id = ?').get(reportId) as any;
+    if (!report) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    db.prepare('DELETE FROM reports WHERE id = ?').run(reportId);
+
+    // Update item reports_count to actual count of remaining reports
+    const countRow = db.prepare('SELECT COUNT(*) as c FROM reports WHERE item_id = ?').get(report.item_id) as any;
+    const remaining = countRow ? countRow.c : 0;
+    db.prepare('UPDATE items SET reports_count = ? WHERE id = ?').run(remaining, report.item_id);
+
+    res.json({ success: true, message: 'Report dismissed', remaining_reports: remaining });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Clear All Reports for an Item (and unhide)
+adminRouter.post('/items/:id/clear-reports', requireModerator, (req: Request, res: Response) => {
+  try {
+    const itemId = String(req.params.id);
+    db.prepare('DELETE FROM reports WHERE item_id = ?').run(itemId);
+    db.prepare('UPDATE items SET reports_count = 0, is_hidden = 0 WHERE id = ?').run(itemId);
+    res.json({ success: true, message: 'All reports cleared and item unhidden.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Toggle Hide / Unhide Item
+adminRouter.post('/items/:id/toggle-hide', requireModerator, (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const item = db.prepare('SELECT id, is_hidden, title FROM items WHERE id = ?').get(id) as any;
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    const newHidden = item.is_hidden ? 0 : 1;
+    db.prepare('UPDATE items SET is_hidden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newHidden, id);
+
+    res.json({
+      success: true,
+      id,
+      is_hidden: newHidden,
+      message: newHidden ? `Item '${item.title}' is now hidden from public view.` : `Item '${item.title}' is now visible.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Force Delete Any Item (Moderator or Admin action)
+adminRouter.delete('/items/:id', requireModerator, (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const item = db.prepare('SELECT * FROM items WHERE id = ?').get(id) as any;
+    if (!item) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    // Clean up physical files
+    try {
+      if (item.file_path) {
+        const mainFile = path.resolve(UPLOADS_DIR, item.file_path);
+        if (fs.existsSync(mainFile)) fs.unlinkSync(mainFile);
+      }
+      if (item.thumbnail_path) {
+        const thumbFile = path.resolve(THUMBNAILS_DIR, item.thumbnail_path);
+        if (fs.existsSync(thumbFile)) fs.unlinkSync(thumbFile);
+      }
+    } catch (e) {
+      console.warn('Moderator/Admin delete file cleanup error:', e);
+    }
+
+    // Cascade delete database record
+    db.prepare('DELETE FROM items WHERE id = ?').run(id);
+
+    res.json({ success: true, message: `Item '${item.title}' was deleted permanently by moderation.`, id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. List All Items for Management (including hidden & reported)
+adminRouter.get('/items', requireModerator, (req: Request, res: Response) => {
+  try {
+    const q = (req.query.q as string || '').trim().toLowerCase();
+    const type = req.query.type as string;
+    const filter = (req.query.filter as string || 'all').toLowerCase(); // 'all', 'reported', 'hidden'
+
+    let conditions: string[] = [];
+    let params: any[] = [];
+
+    if (q) {
+      conditions.push('(LOWER(id) = ? OR LOWER(id) LIKE ? OR LOWER(title) LIKE ? OR LOWER(author) LIKE ? OR LOWER(description) LIKE ?)');
+      params.push(q, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+    }
+
+    if (type && type !== 'all') {
+      conditions.push('type = ?');
+      params.push(type);
+    }
+
+    if (filter === 'reported') {
+      conditions.push('reports_count > 0');
+    } else if (filter === 'hidden') {
+      conditions.push('is_hidden = 1');
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const query = `
+      SELECT id, user_id, type, title, description, author, parent_set_id, version, set_hash,
+             file_path, file_size, thumbnail_path, likes_count, favorites_count, downloads_count,
+             reports_count, is_hidden, created_at, updated_at
+      FROM items
+      ${whereClause}
+      ORDER BY reports_count DESC, created_at DESC
+      LIMIT 100
+    `;
+
+    const items = db.prepare(query).all(...params);
+    res.json({ items });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+import { usersRouter } from './users.js';
+
+// Mount dedicated Users Router for /users subroutes (for backward compatibility)
+adminRouter.use('/users', usersRouter);
+

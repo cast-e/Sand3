@@ -1,7 +1,11 @@
 # Sand3
  Fast celullar automaton with fully customizable materials and rules.
 
-![Sand3](./src/resources/sand3.png)
+<img src=./src/resources/sand3.png alt="Sand3" width="100"/>
+
+
+[![Download Sand3](https://img.shields.io/badge/Download-Sand3-ffa757?style=for-the-badge)]()
+[![Open Workshop](https://img.shields.io/badge/Open-Workshop-blue?style=for-the-badge)]()
 
 ## Features
 
@@ -97,8 +101,8 @@ All dependencies are included as a submodule in the "third-party/" directory.
 - [imgui](https://github.com/ocornut/imgui) - Dear ImGui.
 - [volk](https://github.com/zeux/volk) - Meta-loader for Vulkan API.
 - [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) - Vulkan API header files.
+- [famfamfam-silk](https://github.com/legacy-icons/famfamfam-silk) - The Silk icon pack.
 
 ## Credits
 
 - [Roboto](https://fonts.google.com/specimen/Roboto) for the font.
-- [famfamfam-silk](https://github.com/legacy-icons/famfamfam-silk) for the icons.

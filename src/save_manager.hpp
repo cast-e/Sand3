@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,10 @@ struct SaveFileInfo {
 	uint32_t height = 0;
 	uint64_t file_size = 0;
 	bool dimensions_differ = false;
+	bool is_online = false;
+	std::string workshop_id;
+	std::string author;
+	uint32_t version = 1;
 };
 
 struct StampFileInfo {
@@ -25,6 +30,10 @@ struct StampFileInfo {
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint64_t file_size = 0;
+	bool is_online = false;
+	std::string workshop_id;
+	std::string author;
+	uint32_t version = 1;
 };
 
 class SaveManager {
@@ -33,9 +42,23 @@ public:
 
 	static std::string get_saves_directory(const std::string& current_set);
 
+	static void set_save_workshop_info(const std::string& name_or_filename, const std::string& current_set,
+									   const std::string& workshop_id, const std::string& workshop_hash,
+									   const std::string& author, uint32_t version = 1);
+	static void set_stamp_workshop_info(const std::string& name_or_filename, const std::string& current_set,
+										const std::string& workshop_id, const std::string& workshop_hash,
+										const std::string& author, uint32_t version = 1);
+
 	static bool save_to_file(const std::string& name, const std::string& current_set);
+	static void save_to_file_async(const std::string& name, const std::string& current_set,
+								   std::function<void(bool success)> callback);
+
 	static bool load_from_file(const std::string& path_or_name, const std::string& current_set, std::string& loaded_set,
 							   LoadPlacement placement = LoadPlacement::Center);
+	static void load_from_file_async(const std::string& path_or_name, const std::string& current_set,
+									 LoadPlacement placement,
+									 std::function<void(bool success, const std::string& loaded_set)> callback);
+
 	static bool inspect_save_file(const std::string& path_or_name, const std::string& current_set, SaveFileInfo& info);
 	static std::vector<SaveFileInfo> get_save_files(const std::string& current_set);
 	static bool delete_save_file(const std::string& filename, const std::string& current_set);
@@ -44,8 +67,16 @@ public:
 
 	static bool save_stamp_to_file(const std::string& name, const std::string& current_set,
 								   const std::vector<uint8_t>& cells, uint32_t width, uint32_t height);
+	static void save_stamp_to_file_async(const std::string& name, const std::string& current_set,
+										 const std::vector<uint8_t>& cells, uint32_t width, uint32_t height,
+										 std::function<void(bool success)> callback);
+
 	static bool load_stamp_from_file(const std::string& path_or_name, const std::string& current_set,
 									 std::vector<uint8_t>& out_cells, uint32_t& out_width, uint32_t& out_height);
+	static void load_stamp_from_file_async(
+		const std::string& path_or_name, const std::string& current_set,
+		std::function<void(bool success, const std::vector<uint8_t>& cells, uint32_t width, uint32_t height)> callback);
+
 	static bool inspect_stamp_file(const std::string& path_or_name, const std::string& current_set,
 								   StampFileInfo& info);
 	static std::vector<StampFileInfo> get_stamp_files(const std::string& current_set);

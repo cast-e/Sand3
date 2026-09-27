@@ -6,15 +6,31 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <thread>
 
 #include "const.hpp"
 #include "grid.hpp"
 #include "set_manager.hpp"
 #include "undo_manager.hpp"
+#include "window.hpp"
+#include "workshop_client.hpp"
 
 void SaveManager::bwt_encode(const uint8_t* in_data, size_t N, std::vector<uint8_t>& out_L, uint16_t& out_primary_id) {
 	if (N == 0) {
 		out_L.clear();
+		out_primary_id = 0;
+		return;
+	}
+
+	bool all_same = true;
+	for (size_t i = 1; i < N; ++i) {
+		if (in_data[i] != in_data[0]) {
+			all_same = false;
+			break;
+		}
+	}
+	if (all_same) {
+		out_L.assign(N, in_data[0]);
 		out_primary_id = 0;
 		return;
 	}
@@ -198,6 +214,49 @@ bool SaveManager::save_to_file(const std::string& name, const std::string& curre
 	return write_chunked_data(file, grid_bytes.data(), grid_bytes.size());
 }
 
+void SaveManager::save_to_file_async(const std::string& name, const std::string& current_set,
+									 std::function<void(bool success)> callback) {
+	Window::increment_busy();
+
+	std::string saves_dir = get_saves_directory(current_set);
+	std::string filename = name;
+	if (filename.length() < 5 || filename.substr(filename.length() - 5) != ".save") {
+		filename += ".save";
+	}
+	std::string filepath = saves_dir + filename;
+
+	uint32_t width = Grid::get_width();
+	uint32_t height = Grid::get_height();
+	if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+		Grid::sync_from_gpu();
+	}
+
+	std::vector<uint8_t> grid_bytes(Grid::get_size());
+	for (uint32_t y = 0; y < height; ++y) {
+		for (uint32_t x = 0; x < width; ++x) {
+			grid_bytes[y * width + x] = Grid::get_cell(x, y);
+		}
+	}
+
+	std::thread([filepath, current_set, width, height, grid_bytes = std::move(grid_bytes), callback]() {
+		bool ok = false;
+		std::ofstream file(filepath, std::ios::binary);
+		if (file.is_open()) {
+			file << current_set << "\n";
+			file.write(reinterpret_cast<const char*>(&width), sizeof(width));
+			file.write(reinterpret_cast<const char*>(&height), sizeof(height));
+			ok = write_chunked_data(file, grid_bytes.data(), grid_bytes.size());
+		}
+
+		WorkshopClient::enqueue_main_thread([callback, ok]() {
+			Window::decrement_busy();
+			if (callback) {
+				callback(ok);
+			}
+		});
+	}).detach();
+}
+
 bool SaveManager::load_from_file(const std::string& path_or_name, const std::string& current_set,
 								 std::string& loaded_set, LoadPlacement placement) {
 	std::string filepath = path_or_name;
@@ -282,6 +341,111 @@ bool SaveManager::load_from_file(const std::string& path_or_name, const std::str
 	return true;
 }
 
+void SaveManager::load_from_file_async(const std::string& path_or_name, const std::string& current_set,
+									   LoadPlacement placement,
+									   std::function<void(bool success, const std::string& loaded_set)> callback) {
+	Window::increment_busy();
+
+	std::string filepath = path_or_name;
+	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
+		filepath = get_saves_directory(current_set) + path_or_name;
+	}
+	if (filepath.length() < 5 || filepath.substr(filepath.length() - 5) != ".save") {
+		filepath += ".save";
+	}
+
+	std::thread([filepath, current_set, placement, callback]() {
+		std::string loaded_set = "";
+		uint32_t saved_width = 0, saved_height = 0;
+		std::vector<uint8_t> saved_cells;
+		bool read_ok = false;
+
+		std::ifstream file(filepath, std::ios::binary);
+		if (file.is_open()) {
+			std::string set_line;
+			if (std::getline(file, set_line)) {
+				while (!set_line.empty() &&
+					   (set_line.back() == '\r' || set_line.back() == '\n' || set_line.back() == ' ')) {
+					set_line.pop_back();
+				}
+				loaded_set = set_line;
+
+				uint32_t num_blocks = 0;
+				file.read(reinterpret_cast<char*>(&saved_width), sizeof(saved_width));
+				file.read(reinterpret_cast<char*>(&saved_height), sizeof(saved_height));
+				file.read(reinterpret_cast<char*>(&num_blocks), sizeof(num_blocks));
+				if (file && saved_width > 0 && saved_height > 0) {
+					size_t saved_total = static_cast<size_t>(saved_width) * saved_height;
+					saved_cells.resize(saved_total);
+					read_ok = read_chunked_data(file, num_blocks, saved_total, saved_cells.data());
+				}
+			}
+		}
+
+		WorkshopClient::enqueue_main_thread([callback, read_ok, loaded_set, current_set, placement, saved_width,
+											 saved_height, saved_cells = std::move(saved_cells)]() {
+			Window::decrement_busy();
+			if (!read_ok) {
+				if (callback) {
+					callback(false, "");
+				}
+				return;
+			}
+
+			if (loaded_set != current_set) {
+				SetManager::set_current_set(loaded_set);
+			}
+
+			if (placement == LoadPlacement::ResizeGrid &&
+				(saved_width != Grid::get_width() || saved_height != Grid::get_height())) {
+				Grid::resize(saved_width, saved_height, false);
+			}
+
+			Grid::clear();
+
+			if (saved_width == Grid::get_width() && saved_height == Grid::get_height()) {
+				for (uint32_t y = 0; y < saved_height; ++y) {
+					for (uint32_t x = 0; x < saved_width; ++x) {
+						Grid::set_cell(x, y, saved_cells[y * saved_width + x]);
+					}
+				}
+			} else if (placement == LoadPlacement::TopLeft) {
+				uint32_t copy_w = std::min(saved_width, Grid::get_width());
+				uint32_t copy_h = std::min(saved_height, Grid::get_height());
+				for (uint32_t y = 0; y < copy_h; ++y) {
+					for (uint32_t x = 0; x < copy_w; ++x) {
+						Grid::set_cell(x, y, saved_cells[y * saved_width + x]);
+					}
+				}
+			} else {
+				int offset_x = (static_cast<int>(Grid::get_width()) - static_cast<int>(saved_width)) / 2;
+				int offset_y = (static_cast<int>(Grid::get_height()) - static_cast<int>(saved_height)) / 2;
+				for (uint32_t sy = 0; sy < saved_height; ++sy) {
+					int gy = offset_y + static_cast<int>(sy);
+					if (gy < 0 || gy >= static_cast<int>(Grid::get_height()))
+						continue;
+					for (uint32_t sx = 0; sx < saved_width; ++sx) {
+						int gx = offset_x + static_cast<int>(sx);
+						if (gx < 0 || gx >= static_cast<int>(Grid::get_width()))
+							continue;
+						Grid::set_cell(static_cast<uint32_t>(gx), static_cast<uint32_t>(gy),
+									   saved_cells[sy * saved_width + sx]);
+					}
+				}
+			}
+
+			if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+				Grid::sync_to_gpu();
+			}
+			UndoManager::init();
+
+			if (callback) {
+				callback(true, loaded_set);
+			}
+		});
+	}).detach();
+}
+
 bool SaveManager::inspect_save_file(const std::string& path_or_name, const std::string& current_set,
 									SaveFileInfo& info) {
 	std::string filepath = path_or_name;
@@ -315,12 +479,93 @@ bool SaveManager::inspect_save_file(const std::string& path_or_name, const std::
 	info.width = width;
 	info.height = height;
 	info.dimensions_differ = (width != Grid::get_width() || height != Grid::get_height());
+	info.is_online = false;
+	info.workshop_id = "";
+	info.author = "";
+	info.version = 1;
 	try {
 		info.file_size = std::filesystem::file_size(filepath);
 	} catch (...) {
 		info.file_size = 0;
 	}
+
+	std::string meta_path = filepath + ".ini";
+	if (std::filesystem::exists(meta_path)) {
+		std::ifstream mf(meta_path);
+		std::string mline;
+		while (std::getline(mf, mline)) {
+			size_t eq = mline.find('=');
+			if (eq == std::string::npos)
+				continue;
+			std::string k = mline.substr(0, eq);
+			std::string v = mline.substr(eq + 1);
+			while (!k.empty() && (k.back() == ' ' || k.back() == '\t' || k.back() == '\r'))
+				k.pop_back();
+			while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\r'))
+				v.pop_back();
+			size_t kp = k.find_first_not_of(" \t");
+			if (kp != std::string::npos)
+				k = k.substr(kp);
+			size_t vp = v.find_first_not_of(" \t");
+			if (vp != std::string::npos)
+				v = v.substr(vp);
+
+			if (k == "workshop_id") {
+				info.workshop_id = v;
+				if (!v.empty())
+					info.is_online = true;
+			} else if (k == "author") {
+				info.author = v;
+			} else if (k == "version") {
+				try {
+					info.version = static_cast<uint32_t>(std::stoul(v));
+				} catch (...) {}
+			}
+		}
+	}
 	return true;
+}
+
+void SaveManager::set_save_workshop_info(const std::string& name_or_filename, const std::string& current_set,
+										 const std::string& workshop_id, const std::string& workshop_hash,
+										 const std::string& author, uint32_t version) {
+	std::string filepath = name_or_filename;
+	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
+		filepath = get_saves_directory(current_set) + name_or_filename;
+	}
+	if (filepath.length() < 5 || filepath.substr(filepath.length() - 5) != ".save") {
+		filepath += ".save";
+	}
+	std::string meta_path = filepath + ".ini";
+	std::ofstream out(meta_path);
+	if (out.is_open()) {
+		out << "[Workshop]\n";
+		out << "workshop_id = " << workshop_id << "\n";
+		out << "workshop_hash = " << workshop_hash << "\n";
+		out << "author = " << author << "\n";
+		out << "version = " << version << "\n";
+	}
+}
+
+void SaveManager::set_stamp_workshop_info(const std::string& name_or_filename, const std::string& current_set,
+										  const std::string& workshop_id, const std::string& workshop_hash,
+										  const std::string& author, uint32_t version) {
+	std::string filepath = name_or_filename;
+	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
+		filepath = get_saves_directory(current_set) + name_or_filename;
+	}
+	if (filepath.length() < 6 || filepath.substr(filepath.length() - 6) != ".stamp") {
+		filepath += ".stamp";
+	}
+	std::string meta_path = filepath + ".ini";
+	std::ofstream out(meta_path);
+	if (out.is_open()) {
+		out << "[Workshop]\n";
+		out << "workshop_id = " << workshop_id << "\n";
+		out << "workshop_hash = " << workshop_hash << "\n";
+		out << "author = " << author << "\n";
+		out << "version = " << version << "\n";
+	}
 }
 
 std::vector<SaveFileInfo> SaveManager::get_save_files(const std::string& current_set) {
@@ -389,6 +634,43 @@ bool SaveManager::save_stamp_to_file(const std::string& name, const std::string&
 	return write_chunked_data(file, cells.data(), cells.size());
 }
 
+void SaveManager::save_stamp_to_file_async(const std::string& name, const std::string& current_set,
+										   const std::vector<uint8_t>& cells, uint32_t width, uint32_t height,
+										   std::function<void(bool success)> callback) {
+	if (cells.empty() || width == 0 || height == 0 || cells.size() != static_cast<size_t>(width) * height) {
+		if (callback) {
+			callback(false);
+		}
+		return;
+	}
+	Window::increment_busy();
+
+	std::string saves_dir = get_saves_directory(current_set);
+	std::string filename = name;
+	if (filename.length() < 6 || filename.substr(filename.length() - 6) != ".stamp") {
+		filename += ".stamp";
+	}
+	std::string filepath = saves_dir + filename;
+
+	std::thread([filepath, current_set, width, height, cells, callback]() {
+		bool ok = false;
+		std::ofstream file(filepath, std::ios::binary);
+		if (file.is_open()) {
+			file << current_set << "\n";
+			file.write(reinterpret_cast<const char*>(&width), sizeof(width));
+			file.write(reinterpret_cast<const char*>(&height), sizeof(height));
+			ok = write_chunked_data(file, cells.data(), cells.size());
+		}
+
+		WorkshopClient::enqueue_main_thread([callback, ok]() {
+			Window::decrement_busy();
+			if (callback) {
+				callback(ok);
+			}
+		});
+	}).detach();
+}
+
 bool SaveManager::load_stamp_from_file(const std::string& path_or_name, const std::string& current_set,
 									   std::vector<uint8_t>& out_cells, uint32_t& out_width, uint32_t& out_height) {
 	std::string filepath = path_or_name;
@@ -420,6 +702,48 @@ bool SaveManager::load_stamp_from_file(const std::string& path_or_name, const st
 	out_cells.resize(static_cast<size_t>(width) * height);
 
 	return read_chunked_data(file, num_blocks, out_cells.size(), out_cells.data());
+}
+
+void SaveManager::load_stamp_from_file_async(
+	const std::string& path_or_name, const std::string& current_set,
+	std::function<void(bool success, const std::vector<uint8_t>& cells, uint32_t width, uint32_t height)> callback) {
+	Window::increment_busy();
+
+	std::string filepath = path_or_name;
+	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
+		filepath = get_saves_directory(current_set) + path_or_name;
+	}
+	if (filepath.length() < 6 || filepath.substr(filepath.length() - 6) != ".stamp") {
+		filepath += ".stamp";
+	}
+
+	std::thread([filepath, callback]() {
+		std::vector<uint8_t> cells;
+		uint32_t width = 0, height = 0;
+		bool ok = false;
+
+		std::ifstream file(filepath, std::ios::binary);
+		if (file.is_open()) {
+			std::string set_line;
+			if (std::getline(file, set_line)) {
+				uint32_t num_blocks = 0;
+				file.read(reinterpret_cast<char*>(&width), sizeof(width));
+				file.read(reinterpret_cast<char*>(&height), sizeof(height));
+				file.read(reinterpret_cast<char*>(&num_blocks), sizeof(num_blocks));
+				if (file && width > 0 && height > 0) {
+					cells.resize(static_cast<size_t>(width) * height);
+					ok = read_chunked_data(file, num_blocks, cells.size(), cells.data());
+				}
+			}
+		}
+
+		WorkshopClient::enqueue_main_thread([callback, ok, cells = std::move(cells), width, height]() {
+			Window::decrement_busy();
+			if (callback) {
+				callback(ok, cells, width, height);
+			}
+		});
+	}).detach();
 }
 
 bool SaveManager::inspect_stamp_file(const std::string& path_or_name, const std::string& current_set,
@@ -454,10 +778,49 @@ bool SaveManager::inspect_stamp_file(const std::string& path_or_name, const std:
 	info.set_name = set_line;
 	info.width = width;
 	info.height = height;
+	info.is_online = false;
+	info.workshop_id = "";
+	info.author = "";
+	info.version = 1;
 	try {
 		info.file_size = std::filesystem::file_size(filepath);
 	} catch (...) {
 		info.file_size = 0;
+	}
+
+	std::string meta_path = filepath + ".ini";
+	if (std::filesystem::exists(meta_path)) {
+		std::ifstream mf(meta_path);
+		std::string mline;
+		while (std::getline(mf, mline)) {
+			size_t eq = mline.find('=');
+			if (eq == std::string::npos)
+				continue;
+			std::string k = mline.substr(0, eq);
+			std::string v = mline.substr(eq + 1);
+			while (!k.empty() && (k.back() == ' ' || k.back() == '\t' || k.back() == '\r'))
+				k.pop_back();
+			while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\r'))
+				v.pop_back();
+			size_t kp = k.find_first_not_of(" \t");
+			if (kp != std::string::npos)
+				k = k.substr(kp);
+			size_t vp = v.find_first_not_of(" \t");
+			if (vp != std::string::npos)
+				v = v.substr(vp);
+
+			if (k == "workshop_id") {
+				info.workshop_id = v;
+				if (!v.empty())
+					info.is_online = true;
+			} else if (k == "author") {
+				info.author = v;
+			} else if (k == "version") {
+				try {
+					info.version = static_cast<uint32_t>(std::stoul(v));
+				} catch (...) {}
+			}
+		}
 	}
 	return true;
 }

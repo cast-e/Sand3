@@ -1,0 +1,305 @@
+<div class="home-container">
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-header">
+      <div class="hero-brand">
+        <img src="favicon.ico" alt="Sand3" class="silk-icon-lg" />
+        <h1>Sand3</h1>
+      </div>
+      <p class="hero-tagline">
+        Fast, hardware-accelerated cellular automaton with fully customizable materials and 5x5 neighborhood rules.
+      </p>
+
+      <div class="hero-badges">
+        @if (latestRelease(); as rel) {
+        <a [href]="rel.html_url" target="_blank" class="badge" [class.badge-yellow]="rel.prerelease"
+          [class.badge-green]="!rel.prerelease">
+          <img src="/icons/tag_blue.png" class="silk-icon" alt="tag" />
+          {{ rel.prerelease ? 'Pre-release' : 'Latest' }}: {{ rel.tag_name }}
+        </a>
+        }
+        <a href="https://github.com/cast-e/Sand3" target="_blank" class="badge badge-blue">
+          <img src="/icons/application_osx_terminal.png" class="silk-icon" alt="github" />
+          cast-e/Sand3 on GitHub
+        </a>
+        <a routerLink="/workshop" class="badge badge-purple">
+          <img src="/icons/package.png" class="silk-icon" alt="workshop" />
+          Community Workshop
+        </a>
+      </div>
+    </div>
+
+    <!-- Quick CTA to Workshop -->
+    <div class="workshop-cta-banner">
+      <div class="cta-text">
+        <img src="/icons/package_go.png" class="silk-icon" alt="Workshop" />
+        <strong>Looking for custom rules, saves, or stamps?</strong>
+        <span>Explore user-made Sets, Saves, and Stamps in the online Workshop, or share your own items.</span>
+      </div>
+      <a routerLink="/workshop" class="btn btn-primary">
+        <img src="favicon.ico" class="silk-icon" alt="Explore" />
+        Enter Workshop
+      </a>
+    </div>
+  </section>
+
+  <!-- Side-by-Side Main Container: Integrated Documentation (Centered/Left) & Compact Releases (Right) -->
+  <div class="home-split-layout">
+    <!-- Left / Center Column: Integrated Documentation -->
+    <div class="doc-content-column">
+      <!-- About Sand3 -->
+      <section class="card mb-4">
+        <div class="card-header">
+          <h3>
+            <img src="/icons/application.png" class="silk-icon" alt="About" />
+            About Sand3
+          </h3>
+        </div>
+        <div class="card-body">
+          <p>
+            <strong>Sand3</strong> is an open-source, high-performance cellular automaton sandbox engine designed for
+            experimenting with complex particle dynamics, physical reactions, and cellular life. Every material in the
+            simulation can be created, styled, and given arbitrary reaction rules evaluated on a 5x5 grid neighborhood.
+          </p>
+          <div class="features-pill-grid">
+            <div class="pill-item">
+              <img src="/icons/lightning.png" class="silk-icon" alt="GPU" />
+              <div>
+                <strong>Dual GPU/CPU Engine</strong>
+                <span>Hardware-accelerated Vulkan compute shaders with a multithreaded CPU fallback.</span>
+              </div>
+            </div>
+            <div class="pill-item">
+              <img src="/icons/palette.png" class="silk-icon" alt="Materials" />
+              <div>
+                <strong>Up to 255 Materials</strong>
+                <span>Full RGB colors, inheritance hierarchies, and custom density & physical states.</span>
+              </div>
+            </div>
+            <div class="pill-item">
+              <img src="/icons/cog.png" class="silk-icon" alt="5x5 Rules" />
+              <div>
+                <strong>5x5 Neighborhood Rules</strong>
+                <span>Defines complex emergent behaviors, rotational symmetries, and probabilities.</span>
+              </div>
+            </div>
+            <div class="pill-item">
+              <img src="/icons/paintbrush.png" class="silk-icon" alt="Tools" />
+              <div>
+                <strong>Creative Tool Suite</strong>
+                <span>Square/Circle brushes, straight lines, flood fill, stamps, and undo/redo history.</span>
+              </div>
+            </div>
+            <div class="pill-item">
+              <img src="/icons/disk.png" class="silk-icon" alt="Compression" />
+              <div>
+                <strong>Compressed Storage</strong>
+                <span>Lossless BWT + RLE compression algorithm for efficient .save and .stamp files.</span>
+              </div>
+            </div>
+            <div class="pill-item">
+              <img src="/icons/world.png" class="silk-icon" alt="Workshop" />
+              <div>
+                <strong>Integrated Workshop</strong>
+                <span>One-click downloading, automatic set resolution, and community item sharing.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quickstart & Instructions -->
+      <section class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3>
+            <img src="/icons/application_osx_terminal.png" class="silk-icon" alt="Run" />
+            Quickstart & Running Instructions
+          </h3>
+          <div class="tab-toggles">
+            <button class="btn btn-sm" [class.btn-primary]="activeTab() === 'linux'" (click)="activeTab.set('linux')">
+              <img src="/icons/tux.png" class="silk-icon" alt="Linux" /> Linux
+            </button>
+            <button class="btn btn-sm" [class.btn-primary]="activeTab() === 'windows'"
+              (click)="activeTab.set('windows')">
+              <img src="/icons/application.png" class="silk-icon" alt="Windows" /> Windows
+            </button>
+          </div>
+        </div>
+        <div class="card-body">
+          @if (activeTab() === 'linux') {
+          <h4>Running on Linux</h4>
+          <p class="text-muted">
+            Sand3 runs as a standalone binary with zero external runtime package dependencies. Requires a Vulkan-capable
+            GPU driver (Mesa, NVIDIA, or AMD).
+          </p>
+          <pre><code># 1. Download and extract the archive:
+unzip sand3-*-linux.zip
+cd bin/linux
+
+# 2. Grant executable permission and run:
+chmod +x sand3
+./sand3</code></pre>
+          } @else {
+          <h4>Running on Windows</h4>
+          <p class="text-muted">
+            Prerequisites: 64-bit Windows 10 or 11 with Vulkan-compatible graphics drivers.
+          </p>
+          <pre><code># 1. Extract the downloaded sand3-*-win64.zip archive
+# 2. Run the standalone executable:
+.\bin\win64\sand3.exe</code></pre>
+          }
+        </div>
+      </section>
+
+      <!-- Simulation Mechanics & Rules Guide -->
+      <section class="card mb-4">
+        <div class="card-header">
+          <h3>
+            <img src="/icons/book_open.png" class="silk-icon" alt="Guide" />
+            Simulation Architecture & Rules
+          </h3>
+        </div>
+        <div class="card-body">
+          <p>
+            Unlike traditional 3x3 Moore-neighborhood cellular automata, Sand3 utilizes a full <strong>5x5 neighborhood
+              matrix</strong>
+            centered on each cell. This allows modeling momentum, fluid dispersion, cellular growth, gas diffusion, and
+            mechanical collision:
+          </p>
+          <div class="rule-explanation-box">
+            <div class="rule-box-header">
+              <span class="badge badge-blue">WHEN Matrix (5x5)</span>
+              <span>➔</span>
+              <span class="badge badge-green">THEN Matrix (5x5)</span>
+            </div>
+            <p class="text-muted small">
+              Rules can match multiple possible materials per neighbor cell, specify execution chances (probabilities),
+              and apply
+              horizontal flip, vertical flip, or 90° rotation symmetries automatically.
+            </p>
+          </div>
+          <p class="mt-3">
+            Materials can inherit base rules from parent materials (e.g. all liquids inheriting standard gravity flow,
+            with custom rules added on top).
+          </p>
+        </div>
+      </section>
+
+      <!-- Building from Source -->
+      <section class="card mb-4">
+        <div class="card-header">
+          <h3>
+            <img src="/icons/cog.png" class="silk-icon" alt="Build" />
+            Building from Source
+          </h3>
+        </div>
+        <div class="card-body">
+          <p class="text-muted">
+            Requires a C++20 compiler (GCC 12+ or Clang 16+) and CMake 3.25+. All third-party dependencies (SDL3, ImGui,
+            Volk, fmt, JSON) are bundled in the repository.
+          </p>
+          <pre><code># Clone repository with all submodules
+git clone --recursive https://github.com/cast-e/Sand3.git
+cd Sand3
+
+# Build on Linux (Release)
+cmake -B build --preset linux-gcc
+cmake --build build
+
+# Cross-compile for Windows with MinGW-w64
+cmake -B build --preset windows-mingw
+cmake --build build</code></pre>
+        </div>
+      </section>
+    </div>
+
+    <!-- Right Column: Compact Downloads & Releases -->
+    <div class="releases-sidebar-column">
+      <!-- Quick Downloads Card -->
+      <div class="card sidebar-download-card mb-4">
+        <div class="card-header">
+          <h3>
+            <img src="/icons/arrow_down.png" class="silk-icon" alt="Download" />
+            Downloads
+          </h3>
+        </div>
+        <div class="card-body">
+          @if (getLinuxAsset(); as asset) {
+          <a [href]="asset.browser_download_url" class="btn btn-primary btn-block mb-2">
+            <img src="/icons/tux.png" class="silk-icon" alt="Linux" />
+            Download for Linux
+            <span class="asset-size">({{ formatBytes(asset.size) }})</span>
+          </a>
+          } @else {
+          <a href="https://github.com/cast-e/Sand3/releases" target="_blank" class="btn btn-primary btn-block mb-2">
+            <img src="/icons/tux.png" class="silk-icon" alt="Linux" />
+            Linux Builds
+          </a>
+          }
+
+          @if (getWindowsAsset(); as asset) {
+          <a [href]="asset.browser_download_url" class="btn btn-block">
+            <img src="/icons/application.png" class="silk-icon" alt="Windows" />
+            Download for Windows
+            <span class="asset-size">({{ formatBytes(asset.size) }})</span>
+          </a>
+          } @else {
+          <a href="https://github.com/cast-e/Sand3/releases" target="_blank" class="btn btn-block">
+            <img src="/icons/application.png" class="silk-icon" alt="Windows" />
+            Windows Builds
+          </a>
+          }
+        </div>
+      </div>
+
+      <!-- Compact GitHub Releases Section -->
+      <div class="card releases-compact-card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3>
+            <img src="/icons/time.png" class="silk-icon" alt="Releases" />
+            Releases & Changelog
+          </h3>
+          <span class="badge badge-blue">{{ allReleases().length }}</span>
+        </div>
+
+        <div class="releases-compact-list">
+          @for (rel of allReleases(); track rel.tag_name) {
+          <div class="compact-release-item">
+            <div class="release-item-header">
+              <div class="tag-title-wrap">
+                <span class="tag-badge">{{ rel.tag_name }}</span>
+                @if (rel.prerelease) {
+                <span class="badge badge-yellow">Pre</span>
+                }
+              </div>
+              <span class="release-date">{{ rel.published_at | date:'shortDate' }}</span>
+            </div>
+
+            <h4 class="release-name">{{ rel.name }}</h4>
+
+            <!-- Assets Downloads -->
+            @if (rel.assets.length > 0) {
+            <div class="compact-assets">
+              @for (asset of rel.assets; track asset.name) {
+              <a [href]="asset.browser_download_url" class="compact-asset-btn" title="{{ asset.name }}">
+                <img src="/icons/package.png" class="silk-icon" alt="zip" />
+                {{ asset.name.includes('linux') ? 'Linux' : asset.name.includes('win') ? 'Windows' : asset.name }}
+                <span class="subtext">({{ formatBytes(asset.size) }})</span>
+              </a>
+              }
+            </div>
+            }
+
+            <!-- Collapsible / Scrollable Changelog Body -->
+            <div class="compact-release-body markdown-body" [innerHTML]="rel.body | markdown"></div>
+          </div>
+          } @empty {
+          <div class="empty-state p-3 text-center">
+            <p class="text-muted">Loading releases from GitHub...</p>
+          </div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

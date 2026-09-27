@@ -1,0 +1,317 @@
+<div class="detail-container">
+  @if (loading()) {
+  <div class="loading-state">
+    <img src="/icons/arrow_refresh.png" class="silk-icon spinner" alt="Loading" />
+    <p>Loading set details...</p>
+  </div>
+  } @else if (item(); as set) {
+  <!-- Breadcrumb -->
+  <div class="breadcrumb">
+    <a routerLink="/workshop">
+      <img src="/icons/arrow_left.png" class="silk-icon" alt="Back" />
+      Workshop
+    </a>
+    <span>/</span>
+    <a routerLink="/workshop" [queryParams]="{ type: 'set' }">Sets</a>
+    <span>/</span>
+    <span class="active-crumb">{{ set.title }}</span>
+  </div>
+
+  <!-- Compatibility Warning Banner -->
+  <div class="warning-banner">
+    <img src="/icons/error.png" class="silk-icon" alt="Notice" />
+    <div class="banner-text">
+      <strong>Online Set Compatibility:</strong> If you modify an online set's materials or cellular rules locally,
+      any newly created saves or stamps will have a mismatched hash and cannot be attached to this set on the workshop.
+      To preserve compatibility, keep the set unchanged or publish your changes as a new set.
+    </div>
+  </div>
+
+  <!-- Set Overview Card -->
+  <div class="card set-overview-card">
+    <div class="card-header">
+      <div class="set-title-group">
+        <span class="badge badge-blue">
+          <img src="/icons/package.png" class="silk-icon" alt="Set" /> Set
+        </span>
+        @if (set.version && set.version > 1) {
+        <span class="badge badge-version">v{{ set.version }}</span>
+        }
+        <h1>{{ set.title }}</h1>
+      </div>
+
+      <div class="header-action-group">
+        <button (click)="openInSand3(set)" class="btn btn-primary" title="Open in Sand3">
+          <img src="/icons/application_go.png" class="silk-icon" alt="Open" />
+          Open Set
+        </button>
+        <button class="btn" [class.active]="set.is_liked" (click)="toggleLike()">
+          <img src="/icons/heart.png" class="silk-icon" alt="Like" />
+          {{ set.likes_count }}
+        </button>
+        <button class="btn" [class.active]="set.is_favorited" (click)="toggleFavorite()">
+          <img src="/icons/star.png" class="silk-icon" alt="Favorite" />
+          {{ set.favorites_count }}
+        </button>
+        @if (isOwner()) {
+        <button class="btn" (click)="openEditModal()" title="Edit set details">
+          <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
+          Edit
+        </button>
+        <button class="btn btn-danger" (click)="deleteSet()" title="Delete set">
+          <img src="/icons/delete.png" class="silk-icon" alt="Delete" />
+        </button>
+        }
+      </div>
+    </div>
+
+    <div class="side-by-side-container">
+      <!-- Optional Thumbnail preview -->
+      @if (set.thumbnail_path) {
+      <div class="set-thumb-banner">
+        <img [src]="api.getThumbnailUrl(set.id)" alt="{{ set.title }}" class="set-thumb-img" />
+      </div>
+      }
+
+      <div class="card-body">
+        <div class="author-line">
+          Created by <strong>{{ set.author }}</strong> on {{ set.created_at | date:'mediumDate' }}
+          @if (set.set_hash) {
+          <span class="hash-tag">Hash: <code>{{ set.set_hash.substring(0, 10) }}...</code></span>
+          }
+        </div>
+
+        <p class="set-description">{{ set.description || 'No description provided.' }}</p>
+
+        <!-- Metadata Spec Grid (Sets DO NOT have dimensions) -->
+        <div class="meta-spec-grid">
+          @if (parseMeta(set.meta_json); as m) {
+          <div class="spec-card">
+            <span class="spec-label">Materials</span>
+            <span class="spec-val"><img src="/icons/palette.png" class="silk-icon" alt="mat" /> {{ m.materials_count ||
+              'Default' }}</span>
+          </div>
+          <div class="spec-card">
+            <span class="spec-label">Cellular Rules</span>
+            <span class="spec-val"><img src="/icons/script_code.png" class="silk-icon" alt="rules" /> {{ m.rules_count
+              ||
+              'Default' }}</span>
+          </div>
+          <div class="spec-card">
+            <span class="spec-label">Version</span>
+            <span class="spec-val"><img src="/icons/page_white_stack.png" class="silk-icon" alt="ver" /> v{{ set.version
+              || 1 }}</span>
+          </div>
+          <div class="spec-card">
+            <span class="spec-label">Total Downloads</span>
+            <span class="spec-val"><img src="/icons/bullet_arrow_down.png" class="silk-icon" alt="dl" /> {{
+              set.downloads_count }}</span>
+          </div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saves & Stamps Tabbed Section -->
+  <div class="items-section">
+    <div class="section-title-row">
+      <div class="tab-buttons">
+        <button class="btn" [class.active]="activeTab() === 'saves'" (click)="activeTab.set('saves')">
+          <img src="/icons/disk.png" class="silk-icon" alt="Saves" />
+          Saves ({{ saves().length }})
+        </button>
+        <button class="btn" [class.active]="activeTab() === 'stamps'" (click)="activeTab.set('stamps')">
+          <img src="/icons/shape_handles.png" class="silk-icon" alt="Stamps" />
+          Stamps ({{ stamps().length }})
+        </button>
+      </div>
+    </div>
+
+    <!-- Saves View -->
+    @if (activeTab() === 'saves') {
+    @if (saves().length === 0) {
+    <div class="card empty-saves-card">
+      <div class="card-body">
+        <p>No saves have been published for this set yet.</p>
+        <span class="text-muted">Be the first to build a world with these rules and share it!</span>
+      </div>
+    </div>
+    } @else {
+    <div class="items-grid">
+      @for (save of saves(); track save.id) {
+      <div class="card item-card">
+        @if (save.thumbnail_path) {
+        <div class="item-thumb">
+          <img [src]="api.getThumbnailUrl(save.id)" alt="{{ save.title }}" />
+        </div>
+        }
+        <div class="card-header">
+          <span class="item-title">{{ save.title }}</span>
+          <span class="item-author">by {{ save.author }}</span>
+        </div>
+        <div class="card-body">
+          <p class="item-desc">{{ save.description || 'No description provided.' }}</p>
+          @if (getDimensions(save); as dims) {
+          <span class="meta-pill"><img src="/icons/shape_square.png" class="silk-icon" alt="dim" /> {{ dims }}</span>
+          }
+        </div>
+        <div class="card-footer item-actions">
+          <button (click)="openInSand3(save)" class="btn btn-sm btn-primary" title="Open in Sand3">
+            <img src="/icons/application_go.png" class="silk-icon" alt="Open" />
+            Open Save
+          </button>
+          <span class="stat-pill">
+            <img src="/icons/heart.png" class="silk-icon" alt="likes" /> {{ save.likes_count }}
+          </span>
+          <span class="stat-pill">
+            <img src="/icons/star.png" class="silk-icon" alt="stars" /> {{ save.favorites_count }}
+          </span>
+        </div>
+      </div>
+      }
+    </div>
+    }
+    }
+
+    <!-- Stamps View -->
+    @if (activeTab() === 'stamps') {
+    @if (stamps().length === 0) {
+    <div class="card empty-saves-card">
+      <div class="card-body">
+        <p>No stamps have been published for this set yet.</p>
+        <span class="text-muted">Capture a stamp in Sand3 with this set and upload it to the workshop!</span>
+      </div>
+    </div>
+    } @else {
+    <div class="items-grid">
+      @for (stamp of stamps(); track stamp.id) {
+      <div class="card item-card">
+        @if (stamp.thumbnail_path) {
+        <div class="item-thumb">
+          <img [src]="api.getThumbnailUrl(stamp.id)" alt="{{ stamp.title }}" />
+        </div>
+        }
+        <div class="card-header">
+          <span class="item-title">{{ stamp.title }}</span>
+          <span class="item-author">by {{ stamp.author }}</span>
+        </div>
+        <div class="card-body">
+          <p class="item-desc">{{ stamp.description || 'No description provided.' }}</p>
+          @if (getDimensions(stamp); as dims) {
+          <span class="meta-pill"><img src="/icons/shape_square.png" class="silk-icon" alt="dim" /> {{ dims }}</span>
+          }
+        </div>
+        <div class="card-footer item-actions">
+          <button (click)="openInSand3(stamp)" class="btn btn-sm btn-primary" title="Open in Sand3">
+            <img src="/icons/application_go.png" class="silk-icon" alt="Open" />
+            Open Stamp
+          </button>
+          <span class="stat-pill">
+            <img src="/icons/heart.png" class="silk-icon" alt="likes" /> {{ stamp.likes_count }}
+          </span>
+          <span class="stat-pill">
+            <img src="/icons/star.png" class="silk-icon" alt="stars" /> {{ stamp.favorites_count }}
+          </span>
+        </div>
+      </div>
+      }
+    </div>
+    }
+    }
+  </div>
+
+  <!-- Edit Set Modal -->
+  @if (editingItem()) {
+  <div class="modal-backdrop" (click)="closeEditModal()">
+    <div class="card modal-content" (click)="$event.stopPropagation()">
+      <div class="card-header">
+        <h3>
+          <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
+          Edit Set "{{ set.title }}"
+        </h3>
+        <button class="close-btn" (click)="closeEditModal()">✕</button>
+      </div>
+
+      <div class="card-body">
+        @if (editError()) {
+        <div class="alert alert-danger" style="margin-bottom: 12px;">
+          {{ editError() }}
+        </div>
+        }
+
+        <div class="form-group">
+          <label>Title:</label>
+          <input type="text" class="input" [ngModel]="editTitle()" (ngModelChange)="editTitle.set($event)" />
+        </div>
+
+        <div class="form-group">
+          <label>Description:</label>
+          <textarea class="textarea" rows="4" [ngModel]="editDescription()"
+            (ngModelChange)="editDescription.set($event)"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Thumbnail / Palette Preview (PNG / JPEG):</label>
+          <input type="file" accept="image/png, image/jpeg" class="input file-input"
+            (change)="onThumbnailSelected($event)" />
+          @if (editThumbnailData()) {
+          <div class="thumb-preview-box">
+            <img [src]="editThumbnailData()" alt="Preview" class="preview-img" />
+          </div>
+          }
+        </div>
+      </div>
+
+      <div class="card-footer modal-actions">
+        <button class="btn btn-primary" [disabled]="editLoading()" (click)="submitEdit()">
+          <img src="/icons/disk.png" class="silk-icon" alt="Save" />
+          {{ editLoading() ? 'Saving...' : 'Save Changes' }}
+        </button>
+        <button class="btn" (click)="closeEditModal()">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+  }
+
+  <!-- Usage Guide Modal Dialog (shown when custom protocol fails and fallback download starts) -->
+  @if (showUsageModal() && currentOpenItem(); as it) {
+  <div class="modal-backdrop" (click)="closeUsageModal()">
+    <div class="modal-card" (click)="$event.stopPropagation()">
+      <div class="modal-header">
+        <h2>
+          <img src="/icons/help.png" class="silk-icon" alt="Help" />
+          How to use in Sand3
+        </h2>
+        <button class="close-btn" (click)="closeUsageModal()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <p class="subtext">
+          You can load this {{ it.type }} directly inside Sand3:
+        </p>
+
+        <ol style="padding-left: 20px; line-height: 1.8; margin-bottom: 20px; color: var(--text);">
+          <li>Open <strong>Sand3</strong>.</li>
+          <li>Go to the <strong>Workshop</strong> tab to browse and activate with 1-click.</li>
+          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.</li>
+        </ol>
+
+        <div style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <span style="font-size: 13px; color: var(--text-muted);">Need the file again?</span>
+          <a [href]="getDownloadUrl(it.id)" class="btn btn-sm btn-primary" download>
+            <img src="/icons/arrow_down.png" class="silk-icon" alt="Download" /> Download file
+          </a>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-sm" (click)="closeUsageModal()">Got it</button>
+      </div>
+    </div>
+  </div>
+  }
+  }
+</div>

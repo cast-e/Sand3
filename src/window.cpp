@@ -10,6 +10,13 @@
 #include "resources/sand3_png.h"
 #include "vulkan.hpp"
 
+#include <atomic>
+
+static SDL_Cursor* s_wait_cursor = nullptr;
+static SDL_Cursor* s_default_cursor = nullptr;
+static bool s_is_wait_cursor = false;
+static std::atomic<int> s_busy_count{0};
+
 SDL_Window* Window::window = nullptr;
 SDL_Renderer* Window::renderer = nullptr;
 SDL_Texture* Window::texture = nullptr;
@@ -71,6 +78,15 @@ void Window::shutdown() {
 		SDL_DestroyWindow(window);
 		window = nullptr;
 	}
+	if (s_wait_cursor) {
+		SDL_DestroyCursor(s_wait_cursor);
+		s_wait_cursor = nullptr;
+	}
+	if (s_default_cursor) {
+		SDL_DestroyCursor(s_default_cursor);
+		s_default_cursor = nullptr;
+	}
+	s_is_wait_cursor = false;
 	SDL_Quit();
 }
 
@@ -178,3 +194,36 @@ SDL_FRect Window::get_dst_rect() { return dst_rect; }
 
 void Window::set_background_color(const ImVec4& color) { background_color = color; }
 ImVec4 Window::get_background_color() { return background_color; }
+
+void Window::increment_busy() {
+	s_busy_count.fetch_add(1);
+}
+
+void Window::decrement_busy() {
+	int prev = s_busy_count.fetch_sub(1);
+	if (prev <= 1) {
+		s_busy_count.store(0);
+	}
+}
+
+bool Window::is_busy() {
+	return s_busy_count.load() > 0;
+}
+
+void Window::set_cursor_wait(bool wait) {
+	if (wait == s_is_wait_cursor) {
+		return;
+	}
+	s_is_wait_cursor = wait;
+	if (!s_wait_cursor) {
+		s_wait_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_WAIT);
+	}
+	if (!s_default_cursor) {
+		s_default_cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
+	}
+	if (wait && s_wait_cursor) {
+		SDL_SetCursor(s_wait_cursor);
+	} else if (s_default_cursor) {
+		SDL_SetCursor(s_default_cursor);
+	}
+}

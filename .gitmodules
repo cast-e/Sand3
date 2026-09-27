@@ -16,3 +16,6 @@
 [submodule "third_party/volk"]
 	path = third_party/volk
 	url = https://github.com/zeux/volk.git
+[submodule "third_party/famfamfam-silk"]
+	path = third_party/famfamfam-silk
+	url = https://github.com/legacy-icons/famfamfam-silk.git

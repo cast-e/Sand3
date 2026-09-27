@@ -13,6 +13,7 @@
 #include "shortcut_manager.hpp"
 #include "vulkan.hpp"
 #include "window.hpp"
+#include "workshop_client.hpp"
 
 Config ConfigManager::config;
 const Config ConfigManager::default_config{};
@@ -169,15 +170,30 @@ void ConfigManager::load() {
 						config.ui.material_list_height = std::stoi(val);
 					else if (key == "background_color")
 						parse_color_string(val, config.ui.background_color);
+					else if (key == "selection_box_color" || key == "selection_box_border")
+						parse_color_string(val, config.ui.selection_box_color);
+					else if (key == "selection_box_fill" || key == "selection_box_bg")
+						parse_color_string(val, config.ui.selection_box_fill);
 				} catch (...) {}
 			} else if (section == "Shortcuts") {
 				ShortcutManager::load_from_config(key, val);
 			} else if (section == "Colors") {
 				color_overrides[key] = val;
+			} else if (section == "Workshop") {
+				if (key == "token") {
+					config.workshop.token = val;
+				} else if (key == "username") {
+					config.workshop.username = val;
+				}
 			}
 		}
 
 		in.close();
+	}
+
+	if (!config.workshop.token.empty()) {
+		WorkshopClient::set_auth_token(config.workshop.token);
+		WorkshopClient::check_auth([](bool, const std::string&) {});
 	}
 
 	Window::set_background_color(config.ui.background_color);
@@ -185,7 +201,13 @@ void ConfigManager::load() {
 	Window::set_vsync(config.vsync);
 	Window::set_target_fps(static_cast<uint32_t>(config.target_fps));
 	Grid::set_processing_mode(static_cast<ProcessingMode>(config.processing_mode));
-	Grid::configure_threads(static_cast<uint32_t>(config.thread_count));
+	uint32_t max_threads = std::max(1u, Grid::get_num_strips_y() / 2);
+	uint32_t tc = config.thread_count;
+	if (tc == 0 || tc > max_threads) {
+		tc = max_threads;
+		config.thread_count = tc;
+	}
+	Grid::configure_threads(tc);
 	Vulkan::set_prevent_downclock(config.prevent_downclock);
 
 	SDL_Window* window = Window::get_window();
@@ -221,7 +243,11 @@ void ConfigManager::save() {
 	config.vsync = Window::get_vsync();
 	config.target_fps = static_cast<uint32_t>(Window::get_target_fps());
 	config.processing_mode = static_cast<uint32_t>(Grid::get_processing_mode());
-	config.thread_count = static_cast<uint32_t>(Grid::get_thread_count());
+	uint32_t saved_tc = Grid::get_thread_count();
+	if (saved_tc == 0) {
+		saved_tc = std::max(1u, Grid::get_num_strips_y() / 2);
+	}
+	config.thread_count = saved_tc;
 	config.prevent_downclock = Vulkan::is_prevent_downclock_enabled();
 
 	std::ofstream out("config.ini");
@@ -306,6 +332,10 @@ void ConfigManager::save() {
 		ui_lines.push_back("material_list_height = " + std::to_string(config.ui.material_list_height));
 	if (color_differs(config.ui.background_color, default_config.ui.background_color))
 		ui_lines.push_back("background_color = " + color_to_hex(config.ui.background_color));
+	if (color_differs(config.ui.selection_box_color, default_config.ui.selection_box_color))
+		ui_lines.push_back("selection_box_color = " + color_to_hex(config.ui.selection_box_color));
+	if (color_differs(config.ui.selection_box_fill, default_config.ui.selection_box_fill))
+		ui_lines.push_back("selection_box_fill = " + color_to_hex(config.ui.selection_box_fill));
 
 	if (!ui_lines.empty()) {
 		out << "[UI]\n";
@@ -329,6 +359,15 @@ void ConfigManager::save() {
 		for (const auto& [name, val] : color_overrides) {
 			out << name << " = " << val << "\n";
 		}
+		out << "\n";
+	}
+
+	if (!config.workshop.token.empty() || !config.workshop.username.empty()) {
+		out << "[Workshop]\n";
+		if (!config.workshop.token.empty())
+			out << "token = " << config.workshop.token << "\n";
+		if (!config.workshop.username.empty())
+			out << "username = " << config.workshop.username << "\n";
 		out << "\n";
 	}
 
