@@ -3192,10 +3192,6 @@ namespace {
 	int s_publish_target_h = 0;
 
 	void open_share_for_set(const std::string& set_name) {
-		if (!WorkshopClient::is_logged_in()) {
-			ToastManager::warning("Please log in to publish to Community Workshop.");
-			return;
-		}
 		s_publish_target_set = set_name;
 		s_publish_target_save = "";
 		s_publish_target_stamp = "";
@@ -3212,10 +3208,6 @@ namespace {
 
 	void open_share_for_save(const std::string& filename, const std::string& name, const std::string& parent_set, int w,
 							 int h) {
-		if (!WorkshopClient::is_logged_in()) {
-			ToastManager::warning("Please log in to publish to Community Workshop.");
-			return;
-		}
 		s_publish_target_set = parent_set;
 		s_publish_target_save = filename;
 		s_publish_target_stamp = "";
@@ -3235,10 +3227,6 @@ namespace {
 
 	void open_share_for_stamp(const std::string& filename, const std::string& name, const std::string& parent_set,
 							  int w, int h) {
-		if (!WorkshopClient::is_logged_in()) {
-			ToastManager::warning("Please log in to publish to Community Workshop.");
-			return;
-		}
 		s_publish_target_set = parent_set;
 		s_publish_target_save = "";
 		s_publish_target_stamp = filename;
@@ -3257,10 +3245,6 @@ namespace {
 	}
 
 	void open_share_for_theme() {
-		if (!WorkshopClient::is_logged_in()) {
-			ToastManager::warning("Please log in to publish to Community Workshop.");
-			return;
-		}
 		s_publish_target_set = "";
 		s_publish_target_save = "";
 		s_publish_target_stamp = "";
@@ -3272,6 +3256,10 @@ namespace {
 		std::snprintf(s_publish_author, sizeof(s_publish_author), "%s", auth_user.c_str());
 		std::snprintf(s_publish_desc, sizeof(s_publish_desc), "Custom UI theme for Sand3");
 	}
+
+	void check_item_existence(const std::string& item_id, const std::string& type, const std::string& name_or_file,
+							  const std::string& set_context = "", bool force = false);
+	void validate_all_online_and_cached_items(bool force = false);
 }  // namespace
 
 void UI::render_manage_sets() {
@@ -3300,6 +3288,9 @@ void UI::render_manage_sets() {
 			bool is_owner = is_logged_in && !s_meta.author.empty() && (s_meta.author == cur_user);
 
 			if (is_online) {
+				if (!s_meta.workshop_id.empty()) {
+					check_item_existence(s_meta.workshop_id, "set", s, current_set, false);
+				}
 				if (is_transient) {
 					display_name += " [Cached]";
 				} else {
@@ -3307,7 +3298,7 @@ void UI::render_manage_sets() {
 				}
 			}
 
-			bool show_share = !is_online;
+			bool show_share = !is_online && is_logged_in;
 			bool show_update = is_online && is_owner;
 			bool show_download = is_online && is_transient;
 
@@ -3338,18 +3329,10 @@ void UI::render_manage_sets() {
 				ImGui::SameLine(0, btn_gap);
 				ImGui::SetCursorPosY(start_y);
 				if (UI::button_with_icon("##share_set", IconManager::get(IconID::Transmit), ImVec2(btn_sz, row_h))) {
-					if (!is_logged_in) {
-						ToastManager::warning("Please log in to publish to Community Workshop.");
-					} else {
-						open_share_for_set(s);
-					}
+					open_share_for_set(s);
 				}
 				if (ImGui::IsItemHovered()) {
-					if (!is_logged_in) {
-						ImGui::SetTooltip("Log in to share '%s' to Community Workshop", s.c_str());
-					} else {
-						ImGui::SetTooltip("Share set '%s' to Community Workshop", s.c_str());
-					}
+					ImGui::SetTooltip("Share set '%s' to Community Workshop", s.c_str());
 				}
 			}
 
@@ -3357,17 +3340,25 @@ void UI::render_manage_sets() {
 				ImGui::SameLine(0, btn_gap);
 				ImGui::SetCursorPosY(start_y);
 				if (UI::button_with_icon("##update_set", IconManager::get(IconID::Update), ImVec2(btn_sz, row_h))) {
-					if (!is_logged_in) {
-						ToastManager::warning("Please log in to publish to Community Workshop.");
-					} else if (!s_meta.workshop_id.empty()) {
-						WorkshopItemClient it;
-						it.id = s_meta.workshop_id;
-						it.title = s_meta.name.empty() ? s : s_meta.name;
-						it.description = s_meta.description;
-						it.type = "set";
-						it.version = s_meta.version;
-						it.author = s_meta.author;
-						WorkshopItemEditor::open_update_modal(it, []() { refresh_workshop_items(); });
+					if (!s_meta.workshop_id.empty()) {
+						std::string wid = s_meta.workshop_id;
+						std::string wset = s;
+						WorkshopClient::check_item_exists(wid, [wset, wid, s_meta](bool exists, int http_status) {
+							if (!exists && http_status == 404) {
+								SetManager::clear_workshop_info(wset);
+								ToastManager::warning(
+									fmt::format("Set '{}' was deleted from the workshop. Converted to local.", wset));
+							} else {
+								WorkshopItemClient it;
+								it.id = wid;
+								it.title = s_meta.name.empty() ? wset : s_meta.name;
+								it.description = s_meta.description;
+								it.type = "set";
+								it.version = s_meta.version;
+								it.author = s_meta.author;
+								WorkshopItemEditor::open_update_modal(it, []() { refresh_workshop_items(); });
+							}
+						});
 					} else {
 						open_share_for_set(s);
 					}
@@ -3381,14 +3372,25 @@ void UI::render_manage_sets() {
 				ImGui::SameLine(0, btn_gap);
 				ImGui::SetCursorPosY(start_y);
 				if (UI::button_with_icon("##download_set", IconManager::get(IconID::Save), ImVec2(btn_sz, row_h))) {
-					bool ok = WorkshopCache::promote_to_local(s_meta.workshop_id, "set",
-															  s_meta.name.empty() ? s : s_meta.name,
-															  SetManager::get_current_set(), s_meta.workshop_hash);
-					if (ok) {
-						SetManager::set_workshop_info(s_meta.name.empty() ? s : s_meta.name, s_meta.workshop_id,
-													  s_meta.workshop_hash, s_meta.version, s_meta.author);
-						ToastManager::success("Saved to local storage!");
-					}
+					std::string wid = s_meta.workshop_id;
+					std::string wset = s;
+					WorkshopClient::check_item_exists(wid, [wset, wid, s_meta](bool exists, int http_status) {
+						if (!exists && http_status == 404) {
+							SetManager::clear_workshop_info(wset);
+							ToastManager::warning(
+								fmt::format("Set '{}' was deleted from the workshop. Converted to local.", wset));
+						} else {
+							bool ok = WorkshopCache::promote_to_local(
+								s_meta.workshop_id, "set", s_meta.name.empty() ? wset : s_meta.name,
+								SetManager::get_current_set(), s_meta.workshop_hash);
+							if (ok) {
+								SetManager::set_workshop_info(s_meta.name.empty() ? wset : s_meta.name,
+															  s_meta.workshop_id, s_meta.workshop_hash, s_meta.version,
+															  s_meta.author);
+								ToastManager::success("Saved to local storage!");
+							}
+						}
+					});
 				}
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Download '%s' to your computer", s.c_str());
@@ -3564,6 +3566,9 @@ void UI::render_save_load() {
 
 					std::string tag = "";
 					if (is_online) {
+						if (!sfile.workshop_id.empty()) {
+							check_item_existence(sfile.workshop_id, "save", sfile.filename, current_set, false);
+						}
 						tag = is_transient ? " [Cached]" : " [Online]";
 					} else if (sfile.dimensions_differ) {
 						tag = " [Diff Size]";
@@ -3621,16 +3626,29 @@ void UI::render_save_load() {
 						ImGui::SetCursorPosY(start_y);
 						if (UI::button_with_icon("##update_save", IconManager::get(IconID::Update),
 												 ImVec2(btn_sz, row_h))) {
-							if (!is_logged_in) {
-								ToastManager::warning("Please log in to publish to Community Workshop.");
-							} else if (!sfile.workshop_id.empty()) {
-								WorkshopItemClient it;
-								it.id = sfile.workshop_id;
-								it.title = sfile.name;
-								it.type = "save";
-								it.version = sfile.version;
-								it.author = sfile.author;
-								WorkshopItemEditor::open_update_modal(it, []() { refresh_workshop_items(); });
+							if (!sfile.workshop_id.empty()) {
+								std::string wid = sfile.workshop_id;
+								std::string wfn = sfile.filename;
+								std::string wset = current_set;
+								std::string wname = sfile.name;
+								uint32_t wver = sfile.version;
+								std::string wauth = sfile.author;
+								WorkshopClient::check_item_exists(wid, [wset, wfn, wname, wid, wver,
+																		wauth](bool exists, int http_status) {
+									if (!exists && http_status == 404) {
+										SaveManager::clear_save_workshop_info(wfn, wset);
+										ToastManager::warning(fmt::format(
+											"Save '{}' was deleted from the workshop. Converted to local.", wname));
+									} else {
+										WorkshopItemClient it;
+										it.id = wid;
+										it.title = wname;
+										it.type = "save";
+										it.version = wver;
+										it.author = wauth;
+										WorkshopItemEditor::open_update_modal(it, []() { refresh_workshop_items(); });
+									}
+								});
 							} else {
 								open_share_for_save(sfile.filename, sfile.name, current_set, sfile.width, sfile.height);
 							}
@@ -3645,13 +3663,26 @@ void UI::render_save_load() {
 						ImGui::SetCursorPosY(start_y);
 						if (UI::button_with_icon("##download_save", IconManager::get(IconID::Save),
 												 ImVec2(btn_sz, row_h))) {
-							bool ok =
-								WorkshopCache::promote_to_local(sfile.workshop_id, "save", sfile.name, current_set);
-							if (ok) {
-								SaveManager::set_save_workshop_info(sfile.name, current_set, sfile.workshop_id, "",
-																	sfile.author, sfile.version);
-								ToastManager::success("Saved save to local storage!");
-							}
+							std::string wid = sfile.workshop_id;
+							std::string wfn = sfile.filename;
+							std::string wset = current_set;
+							std::string wname = sfile.name;
+							WorkshopClient::check_item_exists(wid, [wset, wfn, wname, wid, sfile](bool exists,
+																								  int http_status) {
+								if (!exists && http_status == 404) {
+									SaveManager::clear_save_workshop_info(wfn, wset);
+									ToastManager::warning(fmt::format(
+										"Save '{}' was deleted from the workshop. Converted to local.", wname));
+								} else {
+									bool ok =
+										WorkshopCache::promote_to_local(sfile.workshop_id, "save", sfile.name, wset);
+									if (ok) {
+										SaveManager::set_save_workshop_info(sfile.name, wset, sfile.workshop_id, "",
+																			sfile.author, sfile.version);
+										ToastManager::success("Saved save to local storage!");
+									}
+								}
+							});
 						}
 						if (ImGui::IsItemHovered()) {
 							ImGui::SetTooltip("Download '%s' to local storage", sfile.name.c_str());
@@ -3774,6 +3805,9 @@ void UI::render_save_load() {
 
 					std::string tag = "";
 					if (is_online) {
+						if (!stfile.workshop_id.empty()) {
+							check_item_existence(stfile.workshop_id, "stamp", stfile.filename, current_set, false);
+						}
 						tag = is_transient ? " [Cached]" : " [Online]";
 					}
 
@@ -3820,16 +3854,29 @@ void UI::render_save_load() {
 						ImGui::SetCursorPosY(start_y);
 						if (UI::button_with_icon("##update_stamp", IconManager::get(IconID::Update),
 												 ImVec2(btn_sz, row_h))) {
-							if (!is_logged_in) {
-								ToastManager::warning("Please log in to publish to Community Workshop.");
-							} else if (!stfile.workshop_id.empty()) {
-								WorkshopItemClient it;
-								it.id = stfile.workshop_id;
-								it.title = stfile.name;
-								it.type = "stamp";
-								it.version = stfile.version;
-								it.author = stfile.author;
-								WorkshopItemEditor::open_update_modal(it, []() { refresh_workshop_items(); });
+							if (!stfile.workshop_id.empty()) {
+								std::string wid = stfile.workshop_id;
+								std::string wfn = stfile.filename;
+								std::string wset = current_set;
+								std::string wname = stfile.name;
+								uint32_t wver = stfile.version;
+								std::string wauth = stfile.author;
+								WorkshopClient::check_item_exists(wid, [wset, wfn, wname, wid, wver,
+																		wauth](bool exists, int http_status) {
+									if (!exists && http_status == 404) {
+										SaveManager::clear_stamp_workshop_info(wfn, wset);
+										ToastManager::warning(fmt::format(
+											"Stamp '{}' was deleted from the workshop. Converted to local.", wname));
+									} else {
+										WorkshopItemClient it;
+										it.id = wid;
+										it.title = wname;
+										it.type = "stamp";
+										it.version = wver;
+										it.author = wauth;
+										WorkshopItemEditor::open_update_modal(it, []() { refresh_workshop_items(); });
+									}
+								});
 							} else {
 								open_share_for_stamp(stfile.filename, stfile.name, current_set, stfile.width,
 													 stfile.height);
@@ -3845,13 +3892,26 @@ void UI::render_save_load() {
 						ImGui::SetCursorPosY(start_y);
 						if (UI::button_with_icon("##download_stamp", IconManager::get(IconID::Save),
 												 ImVec2(btn_sz, row_h))) {
-							bool ok =
-								WorkshopCache::promote_to_local(stfile.workshop_id, "stamp", stfile.name, current_set);
-							if (ok) {
-								SaveManager::set_stamp_workshop_info(stfile.name, current_set, stfile.workshop_id, "",
-																	 stfile.author, stfile.version);
-								ToastManager::success("Saved stamp to local storage!");
-							}
+							std::string wid = stfile.workshop_id;
+							std::string wfn = stfile.filename;
+							std::string wset = current_set;
+							std::string wname = stfile.name;
+							WorkshopClient::check_item_exists(wid, [wset, wfn, wname, wid, stfile](bool exists,
+																								   int http_status) {
+								if (!exists && http_status == 404) {
+									SaveManager::clear_stamp_workshop_info(wfn, wset);
+									ToastManager::warning(fmt::format(
+										"Stamp '{}' was deleted from the workshop. Converted to local.", wname));
+								} else {
+									bool ok =
+										WorkshopCache::promote_to_local(stfile.workshop_id, "stamp", stfile.name, wset);
+									if (ok) {
+										SaveManager::set_stamp_workshop_info(stfile.name, wset, stfile.workshop_id, "",
+																			 stfile.author, stfile.version);
+										ToastManager::success("Saved stamp to local storage!");
+									}
+								}
+							});
 						}
 						if (ImGui::IsItemHovered()) {
 							ImGui::SetTooltip("Download '%s' to local storage", stfile.name.c_str());
@@ -3999,7 +4059,102 @@ namespace {
 	char s_report_details[256] = "";
 	std::string s_report_status = "";
 
+	static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_item_last_checked;
+	static std::unordered_set<std::string> s_item_checking_in_flight;
+
+	void check_item_existence(const std::string& item_id, const std::string& type, const std::string& name_or_file,
+							  const std::string& set_context, bool force) {
+		if (item_id.empty()) {
+			return;
+		}
+
+		auto now = std::chrono::steady_clock::now();
+		if (!force) {
+			auto it = s_item_last_checked.find(item_id);
+			if (it != s_item_last_checked.end()) {
+				auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count();
+				if (elapsed < 10) {
+					return;
+				}
+			}
+		}
+
+		if (s_item_checking_in_flight.find(item_id) != s_item_checking_in_flight.end()) {
+			return;
+		}
+
+		s_item_checking_in_flight.insert(item_id);
+		s_item_last_checked[item_id] = now;
+
+		WorkshopClient::check_item_exists(
+			item_id, [item_id, type, name_or_file, set_context](bool exists, int http_status) {
+				s_item_checking_in_flight.erase(item_id);
+				if (!exists && http_status == 404) {
+					if (type == "set") {
+						SetManager::clear_workshop_info(name_or_file);
+						ToastManager::warning(
+							fmt::format("Set '{}' was deleted from the workshop. Converted to local.", name_or_file));
+					} else if (type == "save") {
+						SaveManager::clear_save_workshop_info(name_or_file, set_context);
+						ToastManager::warning(
+							fmt::format("Save '{}' was deleted from the workshop. Converted to local.", name_or_file));
+					} else if (type == "stamp") {
+						SaveManager::clear_stamp_workshop_info(name_or_file, set_context);
+						ToastManager::warning(
+							fmt::format("Stamp '{}' was deleted from the workshop. Converted to local.", name_or_file));
+					}
+					WorkshopCache::remove_transient_by_id(item_id);
+
+					for (auto it = s_workshop_items.begin(); it != s_workshop_items.end();) {
+						if (it->id == item_id) {
+							it = s_workshop_items.erase(it);
+						} else {
+							++it;
+						}
+					}
+				}
+			});
+	}
+
+	void validate_all_online_and_cached_items(bool force) {
+		std::string cur_set = SetManager::get_current_set();
+
+		for (const auto& s : SetManager::get_sets()) {
+			SetMetadata sm = SetManager::load_set_metadata(s);
+			if ((sm.is_online || SetManager::is_set_online(s)) && !sm.workshop_id.empty()) {
+				check_item_existence(sm.workshop_id, "set", s, cur_set, force);
+			}
+		}
+
+		auto saves = SaveManager::get_save_files(cur_set);
+		for (const auto& sf : saves) {
+			if (sf.is_online && !sf.workshop_id.empty()) {
+				check_item_existence(sf.workshop_id, "save", sf.filename, cur_set, force);
+			}
+		}
+
+		auto stamps = SaveManager::get_stamp_files(cur_set);
+		for (const auto& st : stamps) {
+			if (st.is_online && !st.workshop_id.empty()) {
+				check_item_existence(st.workshop_id, "stamp", st.filename, cur_set, force);
+			}
+		}
+
+		for (const auto& path : WorkshopCache::get_transient_paths()) {
+			size_t slash = path.find_last_of("/\\");
+			std::string fname = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+			size_t underscore = fname.find('_');
+			if (underscore != std::string::npos) {
+				std::string tid = fname.substr(0, underscore);
+				if (tid.length() >= 8) {
+					check_item_existence(tid, "cache", fname, cur_set, force);
+				}
+			}
+		}
+	}
+
 	void refresh_workshop_items() {
+		validate_all_online_and_cached_items(true);
 		s_workshop_loading = true;
 		s_workshop_error = "";
 
@@ -4338,6 +4493,7 @@ namespace {
 }  // namespace
 
 void UI::refresh_workshop_items() { ::refresh_workshop_items(); }
+void UI::validate_online_items(bool force) { ::validate_all_online_and_cached_items(force); }
 
 void UI::handle_uri(const std::string& uri) {
 	std::string item_id = "";
@@ -5298,11 +5454,7 @@ namespace {
 				ImGui::Separator();
 				ImGui::Spacing();
 
-				if (!WorkshopClient::is_logged_in()) {
-					ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
-									   "You must be logged in to publish items to the Workshop.");
-					ImGui::TextDisabled("Please log in using your account in the Workshop tab.");
-				} else if (s_publishing) {
+				if (s_publishing) {
 					ImGui::Text("Uploading and publishing item...");
 				} else {
 					if (UI::button_with_icon("Upload & Publish", IconManager::get(IconID::Transmit), ImVec2(150, 26))) {

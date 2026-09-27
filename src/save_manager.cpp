@@ -13,6 +13,7 @@
 #include "set_manager.hpp"
 #include "undo_manager.hpp"
 #include "window.hpp"
+#include "workshop_cache.hpp"
 #include "workshop_client.hpp"
 
 void SaveManager::bwt_encode(const uint8_t* in_data, size_t N, std::vector<uint8_t>& out_L, uint16_t& out_primary_id) {
@@ -547,6 +548,20 @@ void SaveManager::set_save_workshop_info(const std::string& name_or_filename, co
 	}
 }
 
+void SaveManager::clear_save_workshop_info(const std::string& name_or_filename, const std::string& current_set) {
+	std::string filepath = name_or_filename;
+	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
+		filepath = get_saves_directory(current_set) + name_or_filename;
+	}
+	if (filepath.length() < 5 || filepath.substr(filepath.length() - 5) != ".save") {
+		filepath += ".save";
+	}
+	std::string meta_path = filepath + ".ini";
+	std::error_code ec;
+	std::filesystem::remove(meta_path, ec);
+	WorkshopCache::remove_transient(filepath);
+}
+
 void SaveManager::set_stamp_workshop_info(const std::string& name_or_filename, const std::string& current_set,
 										  const std::string& workshop_id, const std::string& workshop_hash,
 										  const std::string& author, uint32_t version) {
@@ -566,6 +581,20 @@ void SaveManager::set_stamp_workshop_info(const std::string& name_or_filename, c
 		out << "author = " << author << "\n";
 		out << "version = " << version << "\n";
 	}
+}
+
+void SaveManager::clear_stamp_workshop_info(const std::string& name_or_filename, const std::string& current_set) {
+	std::string filepath = name_or_filename;
+	if (filepath.find('/') == std::string::npos && filepath.find('\\') == std::string::npos) {
+		filepath = get_saves_directory(current_set) + name_or_filename;
+	}
+	if (filepath.length() < 6 || filepath.substr(filepath.length() - 6) != ".stamp") {
+		filepath += ".stamp";
+	}
+	std::string meta_path = filepath + ".ini";
+	std::error_code ec;
+	std::filesystem::remove(meta_path, ec);
+	WorkshopCache::remove_transient(filepath);
 }
 
 std::vector<SaveFileInfo> SaveManager::get_save_files(const std::string& current_set) {

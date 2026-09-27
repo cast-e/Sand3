@@ -13,8 +13,8 @@ const THUMBNAILS_DIR = path.resolve(UPLOADS_DIR, 'thumbnails');
 export const adminRouter = Router();
 
 // Middleware to guard admin-only endpoints
-export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!isAdminUser(req)) {
+export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!(await isAdminUser(req))) {
     return res.status(403).json({
       error: 'Admin access required. Please log in as an administrator.'
     });
@@ -23,8 +23,8 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 // Middleware to guard moderation endpoints (accessible by both Admins and Moderators)
-export function requireModerator(req: Request, res: Response, next: NextFunction) {
-  if (!isModeratorUser(req)) {
+export async function requireModerator(req: Request, res: Response, next: NextFunction) {
+  if (!(await isModeratorUser(req))) {
     return res.status(403).json({
       error: 'Moderator or Admin access required. Please log in with a moderator or administrator account.'
     });
@@ -33,10 +33,10 @@ export function requireModerator(req: Request, res: Response, next: NextFunction
 }
 
 // 1. Verify Admin / Moderator Status
-adminRouter.get('/check', (req: Request, res: Response) => {
-  const is_admin = isAdminUser(req);
-  const is_moderator = isModeratorUser(req);
-  const user = getAuthenticatedUser(req);
+adminRouter.get('/check', async (req: Request, res: Response) => {
+  const is_admin = await isAdminUser(req);
+  const is_moderator = await isModeratorUser(req);
+  const user = await getAuthenticatedUser(req);
   res.json({
     is_admin,
     is_moderator,
@@ -46,22 +46,22 @@ adminRouter.get('/check', (req: Request, res: Response) => {
 });
 
 // 2. Admin Dashboard Stats
-adminRouter.get('/stats', requireModerator, (_req: Request, res: Response) => {
+adminRouter.get('/stats', requireModerator, async (_req: Request, res: Response) => {
   try {
-    const totalItems = (db.prepare('SELECT COUNT(*) as c FROM items').get() as any).c;
-    const totalReports = (db.prepare('SELECT COUNT(*) as c FROM reports').get() as any).c;
-    const totalUsers = (db.prepare('SELECT COUNT(*) as c FROM users').get() as any).c;
-    const hiddenItems = (db.prepare('SELECT COUNT(*) as c FROM items WHERE is_hidden = 1').get() as any).c;
-    const reportedItems = (db.prepare('SELECT COUNT(DISTINCT item_id) as c FROM reports').get() as any).c;
-    const totalDownloads = (db.prepare('SELECT SUM(downloads_count) as s FROM items').get() as any).s || 0;
+    const totalItemsRow = await db.prepare('SELECT COUNT(*) as c FROM items').get();
+    const totalReportsRow = await db.prepare('SELECT COUNT(*) as c FROM reports').get();
+    const totalUsersRow = await db.prepare('SELECT COUNT(*) as c FROM users').get();
+    const hiddenItemsRow = await db.prepare('SELECT COUNT(*) as c FROM items WHERE is_hidden = 1').get();
+    const reportedItemsRow = await db.prepare('SELECT COUNT(DISTINCT item_id) as c FROM reports').get();
+    const totalDownloadsRow = await db.prepare('SELECT COALESCE(SUM(downloads_count), 0) as s FROM items').get();
 
     res.json({
-      total_items: totalItems,
-      total_reports: totalReports,
-      total_users: totalUsers,
-      hidden_items: hiddenItems,
-      reported_items: reportedItems,
-      total_downloads: totalDownloads
+      total_items: Number(totalItemsRow?.c || 0),
+      total_reports: Number(totalReportsRow?.c || 0),
+      total_users: Number(totalUsersRow?.c || 0),
+      hidden_items: Number(hiddenItemsRow?.c || 0),
+      reported_items: Number(reportedItemsRow?.c || 0),
+      total_downloads: Number(totalDownloadsRow?.s || 0)
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -69,7 +69,7 @@ adminRouter.get('/stats', requireModerator, (_req: Request, res: Response) => {
 });
 
 // 3. List All Reports (with item details)
-adminRouter.get('/reports', requireModerator, (req: Request, res: Response) => {
+adminRouter.get('/reports', requireModerator, async (req: Request, res: Response) => {
   try {
     const query = `
       SELECT r.id as report_id, r.item_id, r.client_uuid, r.reason, r.details, r.created_at as reported_at,
@@ -80,7 +80,7 @@ adminRouter.get('/reports', requireModerator, (req: Request, res: Response) => {
       LEFT JOIN items i ON r.item_id = i.id
       ORDER BY r.created_at DESC
     `;
-    const rows = db.prepare(query).all();
+    const rows = await db.prepare(query).all();
     res.json({ reports: rows });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -88,20 +88,20 @@ adminRouter.get('/reports', requireModerator, (req: Request, res: Response) => {
 });
 
 // 4. Dismiss a Single Report
-adminRouter.post('/reports/:id/dismiss', requireModerator, (req: Request, res: Response) => {
+adminRouter.post('/reports/:id/dismiss', requireModerator, async (req: Request, res: Response) => {
   try {
     const reportId = Number(req.params.id);
-    const report = db.prepare('SELECT item_id FROM reports WHERE id = ?').get(reportId) as any;
+    const report = (await db.prepare('SELECT item_id FROM reports WHERE id = ?').get(reportId)) as any;
     if (!report) {
       return res.status(404).json({ error: 'Report not found' });
     }
 
-    db.prepare('DELETE FROM reports WHERE id = ?').run(reportId);
+    await db.prepare('DELETE FROM reports WHERE id = ?').run(reportId);
 
     // Update item reports_count to actual count of remaining reports
-    const countRow = db.prepare('SELECT COUNT(*) as c FROM reports WHERE item_id = ?').get(report.item_id) as any;
-    const remaining = countRow ? countRow.c : 0;
-    db.prepare('UPDATE items SET reports_count = ? WHERE id = ?').run(remaining, report.item_id);
+    const countRow = (await db.prepare('SELECT COUNT(*) as c FROM reports WHERE item_id = ?').get(report.item_id)) as any;
+    const remaining = countRow ? Number(countRow.c) : 0;
+    await db.prepare('UPDATE items SET reports_count = ? WHERE id = ?').run(remaining, report.item_id);
 
     res.json({ success: true, message: 'Report dismissed', remaining_reports: remaining });
   } catch (err: any) {
@@ -110,11 +110,11 @@ adminRouter.post('/reports/:id/dismiss', requireModerator, (req: Request, res: R
 });
 
 // 5. Clear All Reports for an Item (and unhide)
-adminRouter.post('/items/:id/clear-reports', requireModerator, (req: Request, res: Response) => {
+adminRouter.post('/items/:id/clear-reports', requireModerator, async (req: Request, res: Response) => {
   try {
     const itemId = String(req.params.id);
-    db.prepare('DELETE FROM reports WHERE item_id = ?').run(itemId);
-    db.prepare('UPDATE items SET reports_count = 0, is_hidden = 0 WHERE id = ?').run(itemId);
+    await db.prepare('DELETE FROM reports WHERE item_id = ?').run(itemId);
+    await db.prepare('UPDATE items SET reports_count = 0, is_hidden = 0 WHERE id = ?').run(itemId);
     res.json({ success: true, message: 'All reports cleared and item unhidden.' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -122,16 +122,16 @@ adminRouter.post('/items/:id/clear-reports', requireModerator, (req: Request, re
 });
 
 // 6. Toggle Hide / Unhide Item
-adminRouter.post('/items/:id/toggle-hide', requireModerator, (req: Request, res: Response) => {
+adminRouter.post('/items/:id/toggle-hide', requireModerator, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const item = db.prepare('SELECT id, is_hidden, title FROM items WHERE id = ?').get(id) as any;
+    const item = (await db.prepare('SELECT id, is_hidden, title FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
       return res.status(404).json({ error: 'Item not found' });
     }
 
     const newHidden = item.is_hidden ? 0 : 1;
-    db.prepare('UPDATE items SET is_hidden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newHidden, id);
+    await db.prepare('UPDATE items SET is_hidden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newHidden, id);
 
     res.json({
       success: true,
@@ -145,10 +145,10 @@ adminRouter.post('/items/:id/toggle-hide', requireModerator, (req: Request, res:
 });
 
 // 7. Force Delete Any Item (Moderator or Admin action)
-adminRouter.delete('/items/:id', requireModerator, (req: Request, res: Response) => {
+adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const item = db.prepare('SELECT * FROM items WHERE id = ?').get(id) as any;
+    const item = (await db.prepare('SELECT * FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
       return res.status(404).json({ error: 'Item not found' });
     }
@@ -168,7 +168,7 @@ adminRouter.delete('/items/:id', requireModerator, (req: Request, res: Response)
     }
 
     // Cascade delete database record
-    db.prepare('DELETE FROM items WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM items WHERE id = ?').run(id);
 
     res.json({ success: true, message: `Item '${item.title}' was deleted permanently by moderation.`, id });
   } catch (err: any) {
@@ -177,7 +177,7 @@ adminRouter.delete('/items/:id', requireModerator, (req: Request, res: Response)
 });
 
 // 8. List All Items for Management (including hidden & reported)
-adminRouter.get('/items', requireModerator, (req: Request, res: Response) => {
+adminRouter.get('/items', requireModerator, async (req: Request, res: Response) => {
   try {
     const q = (req.query.q as string || '').trim().toLowerCase();
     const type = req.query.type as string;
@@ -213,7 +213,7 @@ adminRouter.get('/items', requireModerator, (req: Request, res: Response) => {
       LIMIT 100
     `;
 
-    const items = db.prepare(query).all(...params);
+    const items = await db.prepare(query).all(...params);
     res.json({ items });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -224,4 +224,3 @@ import { usersRouter } from './users.js';
 
 // Mount dedicated Users Router for /users subroutes (for backward compatibility)
 adminRouter.use('/users', usersRouter);
-

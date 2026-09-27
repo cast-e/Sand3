@@ -66,6 +66,9 @@ public:
 	static void fetch_item(const std::string& id,
 						   std::function<void(bool success, const WorkshopItemClient& item)> callback);
 
+	static void check_item_exists(const std::string& id,
+								  std::function<void(bool exists, int http_status)> callback);
+
 	static void
 	fetch_set_saves(const std::string& set_id,
 					std::function<void(bool success, const std::vector<WorkshopItemClient>& saves)> callback);

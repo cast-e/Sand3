@@ -56,7 +56,6 @@
             Unlock Dashboard
           </button>
         </div>
-        <small class="helper-text">Default local development key is <code>sand3admin</code>.</small>
       </div>
     </div>
   </div>
@@ -428,42 +427,49 @@
             <td>
               <div class="row-actions">
                 @if (auth.isAdmin()) {
-                  @if (u.username.toLowerCase() !== 'cast_e' && u.id !== 'c7831b24-de86-45ae-b049-9ecdf88a3219' && u.id !== 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d') {
-                    @if (u.role !== 'admin' && !u.is_admin) {
-                      @if (u.role !== 'moderator') {
-                      <button class="btn btn-sm" (click)="changeUserRole(u, 'moderator')" title="Grant Moderator privileges (can moderate creations, cannot remove users)">
-                        <img src="/icons/user_suit.png" class="silk-icon" alt="Mod" />
-                        Make Mod
-                      </button>
-                      } @else {
-                      <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'user')" title="Revoke Moderator privileges">
-                        <img src="/icons/user.png" class="silk-icon" alt="User" />
-                        Demote Mod
-                      </button>
-                      }
-                      <button class="btn btn-sm btn-primary" (click)="changeUserRole(u, 'admin')" title="Grant full Administrator privileges">
-                        <img src="/icons/shield_add.png" class="silk-icon" alt="Admin" />
-                        Make Admin
-                      </button>
-                    } @else {
-                      <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'moderator')" title="Demote to Moderator">
-                        <img src="/icons/user_suit.png" class="silk-icon" alt="Mod" />
-                        Set Mod
-                      </button>
-                      <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'user')" title="Revoke Administrator privileges">
-                        <img src="/icons/shield_delete.png" class="silk-icon" alt="User" />
-                        Demote User
-                      </button>
-                    }
-                    <button class="btn btn-sm btn-danger" (click)="userDelete(u)" title="Permanently delete user">
-                      <img src="/icons/delete.png" class="silk-icon" alt="Delete" />
-                      Delete
-                    </button>
-                  } @else {
-                    <span class="badge badge-purple">Platform Owner</span>
-                  }
+                @if (u.id !== auth.currentUser()?.id) {
+                @if (u.role !== 'admin' && !u.is_admin) {
+                @if (u.role !== 'moderator') {
+                <button class="btn btn-sm" (click)="changeUserRole(u, 'moderator')"
+                  title="Grant Moderator privileges (can moderate creations, cannot remove users)">
+                  <img src="/icons/user_suit.png" class="silk-icon" alt="Mod" />
+                  Make Mod
+                </button>
                 } @else {
-                  <span class="badge" title="Moderators can moderate creations & reports, but cannot modify users.">Read-only (Admin only)</span>
+                <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'user')"
+                  title="Revoke Moderator privileges">
+                  <img src="/icons/user.png" class="silk-icon" alt="User" />
+                  Demote Mod
+                </button>
+                }
+                <button class="btn btn-sm btn-primary" (click)="changeUserRole(u, 'admin')"
+                  title="Grant full Administrator privileges">
+                  <img src="/icons/shield_add.png" class="silk-icon" alt="Admin" />
+                  Make Admin
+                </button>
+                } @else {
+                <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'moderator')"
+                  title="Demote to Moderator">
+                  <img src="/icons/user_suit.png" class="silk-icon" alt="Mod" />
+                  Set Mod
+                </button>
+                <button class="btn btn-sm btn-outline-warning" (click)="changeUserRole(u, 'user')"
+                  title="Revoke Administrator privileges">
+                  <img src="/icons/shield_delete.png" class="silk-icon" alt="User" />
+                  Demote User
+                </button>
+                }
+                <button class="btn btn-sm btn-danger" (click)="userDelete(u)" title="Permanently delete user">
+                  <img src="/icons/delete.png" class="silk-icon" alt="Delete" />
+                  Delete
+                </button>
+                } @else {
+                <span class="badge badge-purple">Platform Owner</span>
+                }
+                } @else {
+                <span class="badge"
+                  title="Moderators can moderate creations & reports, but cannot modify users.">Read-only (Admin
+                  only)</span>
                 }
               </div>
             </td>

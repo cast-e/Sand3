@@ -1,138 +1,130 @@
-import { DatabaseSync } from 'node:sqlite';
-import path from 'node:path';
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { neon } from '@neondatabase/serverless';
+import { config } from './config.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DATA_DIR = process.env.DATA_DIR || (process.env.VERCEL ? '/tmp/sand3-data' : path.resolve(__dirname, '../data'));
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!config.databaseUrl) {
+  console.warn('[DB] Warning: DATABASE_URL environment variable is not set. Set it in Vercel or your .env file.');
 }
 
-const DB_PATH = process.env.DB_PATH || path.join(DATA_DIR, 'workshop.db');
+// Neon serverless SQL connection over HTTP/WebSockets
+export const sql = neon(config.databaseUrl || 'postgresql://localhost/dummy');
 
-// If on Vercel or custom DATA_DIR, copy bundled db if present and DB_PATH does not exist yet
-const bundledDbPath = path.resolve(__dirname, '../data/workshop.db');
-if (DB_PATH !== bundledDbPath && !fs.existsSync(DB_PATH) && fs.existsSync(bundledDbPath)) {
-  try {
-    fs.copyFileSync(bundledDbPath, DB_PATH);
-  } catch (err) {
-    console.warn('[DB] Could not copy bundled database:', err);
-  }
-}
+export function translateSql(query: string): string {
+  let paramIdx = 1;
+  // Convert ? to $1, $2, ...
+  let converted = query.replace(/\?/g, () => `$${paramIdx++}`);
 
-export const db = new DatabaseSync(DB_PATH);
+  // Date and time functions
+  converted = converted.replace(/datetime\('now'\)/gi, 'CURRENT_TIMESTAMP');
+  converted = converted.replace(/datetime\(([^)]+)\)/gi, '$1');
 
-// Enable WAL mode and foreign keys for durability and performance
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA foreign_keys = ON;');
+  // SQLite COLLATE NOCASE removal
+  converted = converted.replace(/COLLATE\s+NOCASE/gi, '');
 
-// Initialize users and sessions tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    username TEXT UNIQUE NOT NULL COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+  // Cast COUNT(...) and SUM(...) to integers to avoid PostgreSQL bigint string conversions
+  converted = converted.replace(/COUNT\(([^)]+)\)(?!::int)/gi, 'COUNT($1)::int');
+  converted = converted.replace(/COALESCE\(SUM\(([^)]+)\),\s*0\)/gi, 'COALESCE(SUM($1)::int, 0)');
 
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-`);
-
-// Add is_admin and role columns to users if not present
-const userCols = db.prepare("PRAGMA table_info(users)").all() as any[];
-if (!userCols.some((c: any) => c.name === 'is_admin')) {
-  try {
-    db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0;');
-  } catch {}
-}
-if (!userCols.some((c: any) => c.name === 'role')) {
-  try {
-    db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';");
-    db.exec("UPDATE users SET role = 'admin' WHERE is_admin = 1;");
-  } catch {}
-}
-
-// Ensure Cast_E and admin token e3b8937e-ac6c-4c8c-a59a-f3f243c8182d exist and have admin rights
-try {
-  const adminUser = db.prepare('SELECT id FROM users WHERE id = ? OR username = ?').get('c7831b24-de86-45ae-b049-9ecdf88a3219', 'Cast_E') as any;
-  if (!adminUser) {
-    db.prepare(`
-      INSERT OR IGNORE INTO users (id, username, password_hash, is_admin, role)
-      VALUES (?, ?, ?, 1, 'admin')
-    `).run('c7831b24-de86-45ae-b049-9ecdf88a3219', 'Cast_E', 'bootstrap:bootstrap');
-  } else {
-    db.prepare("UPDATE users SET is_admin = 1, role = 'admin' WHERE id = ?").run(adminUser.id);
-  }
-
-  const adminSession = db.prepare('SELECT token FROM sessions WHERE token = ?').get('e3b8937e-ac6c-4c8c-a59a-f3f243c8182d');
-  if (!adminSession) {
-    const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare(`
-      INSERT OR REPLACE INTO sessions (token, user_id, expires_at)
-      VALUES (?, ?, ?)
-    `).run('e3b8937e-ac6c-4c8c-a59a-f3f243c8182d', 'c7831b24-de86-45ae-b049-9ecdf88a3219', futureExpiry);
-  }
-
-  // Also ensure if e3b8937e-ac6c-4c8c-a59a-f3f243c8182d was registered as user ID, it is set as admin
-  db.prepare("UPDATE users SET is_admin = 1, role = 'admin' WHERE id = 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d'").run();
-} catch (e) {
-  console.warn('[DB] Admin bootstrap warning:', e);
-}
-
-// Check if items table needs migration or creation
-const tableInfo = db.prepare("PRAGMA table_info(items)").all() as any[];
-if (tableInfo.length === 0) {
-  db.exec(`
-    CREATE TABLE items (
-      id TEXT PRIMARY KEY,
-      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-      type TEXT NOT NULL CHECK(type IN ('set', 'save', 'stamp', 'theme')),
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      author TEXT NOT NULL,
-      parent_set_id TEXT REFERENCES items(id) ON DELETE SET NULL,
-      version INTEGER DEFAULT 1,
-      set_hash TEXT DEFAULT '',
-      file_path TEXT NOT NULL,
-      file_size INTEGER NOT NULL,
-      thumbnail_path TEXT DEFAULT '',
-      meta_json TEXT DEFAULT '{}',
-      likes_count INTEGER DEFAULT 0,
-      favorites_count INTEGER DEFAULT 0,
-      downloads_count INTEGER DEFAULT 0,
-      reports_count INTEGER DEFAULT 0,
-      is_hidden INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  // INSERT OR REPLACE / INSERT OR IGNORE translation
+  if (/INSERT\s+OR\s+REPLACE\s+INTO\s+sessions/i.test(converted)) {
+    converted = converted.replace(
+      /INSERT\s+OR\s+REPLACE\s+INTO\s+sessions\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i,
+      'INSERT INTO sessions ($1) VALUES ($2) ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at'
     );
-  `);
-} else {
-  const colNames = new Set(tableInfo.map((c) => c.name));
-  if (!colNames.has('user_id')) db.exec('ALTER TABLE items ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE SET NULL;');
-  if (!colNames.has('version')) db.exec('ALTER TABLE items ADD COLUMN version INTEGER DEFAULT 1;');
-  if (!colNames.has('set_hash')) db.exec("ALTER TABLE items ADD COLUMN set_hash TEXT DEFAULT '';");
-  if (!colNames.has('thumbnail_path')) db.exec("ALTER TABLE items ADD COLUMN thumbnail_path TEXT DEFAULT '';");
+  }
+  if (/INSERT\s+OR\s+IGNORE\s+INTO\s+users/i.test(converted)) {
+    converted = converted.replace(
+      /INSERT\s+OR\s+IGNORE\s+INTO\s+users\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i,
+      'INSERT INTO users ($1) VALUES ($2) ON CONFLICT (id) DO NOTHING'
+    );
+  }
 
-  const sqlRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='items'").get() as any;
-  if (sqlRow && sqlRow.sql && !sqlRow.sql.includes('theme')) {
-    db.exec(`
-      CREATE TABLE items_new (
+  return converted;
+}
+
+export interface PreparedStatement {
+  get(...params: any[]): Promise<any | undefined>;
+  all(...params: any[]): Promise<any[]>;
+  run(...params: any[]): Promise<{ changes: number }>;
+}
+
+export const db = {
+  prepare(queryText: string): PreparedStatement {
+    return {
+      async get(...params: any[]): Promise<any | undefined> {
+        const translated = translateSql(queryText);
+        const flatParams = params.flat();
+        const rows = (await sql.query(translated, flatParams)) as any[];
+        return rows && rows.length > 0 ? rows[0] : undefined;
+      },
+      async all(...params: any[]): Promise<any[]> {
+        const translated = translateSql(queryText);
+        const flatParams = params.flat();
+        const rows = (await sql.query(translated, flatParams)) as any[];
+        return rows || [];
+      },
+      async run(...params: any[]): Promise<{ changes: number }> {
+        const translated = translateSql(queryText);
+        const flatParams = params.flat();
+        await sql.query(translated, flatParams);
+        return { changes: 1 };
+      }
+    };
+  },
+  async query(queryText: string, params: any[] = []): Promise<any[]> {
+    const translated = translateSql(queryText);
+    const flatParams = params.flat();
+    return (await sql.query(translated, flatParams)) as any[];
+  },
+  async exec(statement: string): Promise<void> {
+    const stmts = statement
+      .split(';')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const s of stmts) {
+      await sql.query(s);
+    }
+  }
+};
+
+export async function initDb(): Promise<void> {
+  if (!config.databaseUrl) {
+    return;
+  }
+
+  try {
+    // 1. Users table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_admin INTEGER DEFAULT 0,
+        role TEXT DEFAULT 'user',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 2. Sessions table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    `);
+
+    // 3. Items table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS items (
         id TEXT PRIMARY KEY,
         user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
         type TEXT NOT NULL CHECK(type IN ('set', 'save', 'stamp', 'theme')),
         title TEXT NOT NULL,
         description TEXT DEFAULT '',
         author TEXT NOT NULL,
-        parent_set_id TEXT REFERENCES items_new(id) ON DELETE SET NULL,
+        parent_set_id TEXT REFERENCES items(id) ON DELETE SET NULL,
         version INTEGER DEFAULT 1,
         set_hash TEXT DEFAULT '',
         file_path TEXT NOT NULL,
@@ -144,43 +136,80 @@ if (tableInfo.length === 0) {
         downloads_count INTEGER DEFAULT 0,
         reports_count INTEGER DEFAULT 0,
         is_hidden INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
-      INSERT INTO items_new (id, user_id, type, title, description, author, parent_set_id, version, set_hash, file_path, file_size, thumbnail_path, meta_json, likes_count, favorites_count, downloads_count, reports_count, is_hidden, created_at, updated_at)
-      SELECT id, user_id, type, title, description, author, parent_set_id, COALESCE(version, 1), COALESCE(set_hash, ''), file_path, file_size, COALESCE(thumbnail_path, ''), meta_json, likes_count, favorites_count, downloads_count, reports_count, is_hidden, created_at, updated_at FROM items;
-      DROP TABLE items;
-      ALTER TABLE items_new RENAME TO items;
+      CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
+      CREATE INDEX IF NOT EXISTS idx_items_parent_set_id ON items(parent_set_id);
+      CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id);
+      CREATE INDEX IF NOT EXISTS idx_items_set_hash ON items(set_hash);
+      CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
+      CREATE INDEX IF NOT EXISTS idx_items_likes ON items(likes_count DESC);
     `);
+
+    // 4. Interactions table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS interactions (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        client_uuid TEXT NOT NULL,
+        interaction_type TEXT NOT NULL CHECK(interaction_type IN ('like', 'favorite')),
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(item_id, client_uuid, interaction_type)
+      );
+      CREATE INDEX IF NOT EXISTS idx_interactions_lookup ON interactions(item_id, client_uuid);
+    `);
+
+    // 5. Reports table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS reports (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        client_uuid TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK(reason IN ('broken', 'offensive', 'spam', 'other')),
+        details TEXT DEFAULT '',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // 6. Bootstrap Administrator account if configured
+    if (config.adminUsername) {
+      const existing = (await db
+        .prepare('SELECT id, is_admin, role FROM users WHERE LOWER(username) = LOWER(?)')
+        .get(config.adminUsername)) as any;
+
+      const adminId = existing?.id || config.adminUserId || 'admin-root';
+
+      if (!existing) {
+        await db
+          .prepare(
+            `INSERT INTO users (id, username, password_hash, is_admin, role)
+             VALUES (?, ?, 'bootstrap:bootstrap', 1, 'admin')
+             ON CONFLICT (id) DO UPDATE SET is_admin = 1, role = 'admin'`
+          )
+          .run(adminId, config.adminUsername);
+      } else if (!existing.is_admin || existing.role !== 'admin') {
+        await db.prepare("UPDATE users SET is_admin = 1, role = 'admin' WHERE id = ?").run(existing.id);
+      }
+
+      // If ADMIN_TOKEN is set in environment, register or refresh active session for admin
+      if (config.adminToken) {
+        const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+        await db
+          .prepare(
+            `INSERT INTO sessions (token, user_id, expires_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at, user_id = EXCLUDED.user_id`
+          )
+          .run(config.adminToken, adminId, futureExpiry);
+      }
+    }
+
+    console.log('[DB] Neon PostgreSQL tables and bootstrap verified successfully.');
+  } catch (err) {
+    console.warn('[DB] Neon initDb notice:', err);
   }
 }
 
-// Create indexes
-db.exec(`
-  CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
-  CREATE INDEX IF NOT EXISTS idx_items_parent_set_id ON items(parent_set_id);
-  CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id);
-  CREATE INDEX IF NOT EXISTS idx_items_set_hash ON items(set_hash);
-  CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
-  CREATE INDEX IF NOT EXISTS idx_items_likes ON items(likes_count DESC);
-
-  CREATE TABLE IF NOT EXISTS interactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-    client_uuid TEXT NOT NULL,
-    interaction_type TEXT NOT NULL CHECK(interaction_type IN ('like', 'favorite')),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(item_id, client_uuid, interaction_type)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_interactions_lookup ON interactions(item_id, client_uuid);
-
-  CREATE TABLE IF NOT EXISTS reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-    client_uuid TEXT NOT NULL,
-    reason TEXT NOT NULL CHECK(reason IN ('broken', 'offensive', 'spam', 'other')),
-    details TEXT DEFAULT '',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`);
+// Automatically trigger initialization
+initDb().catch((err) => console.error('[DB] Failed initializing DB:', err));

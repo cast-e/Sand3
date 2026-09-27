@@ -1,9 +1,21 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { db } from '../db.js';
 import { User } from '../types.js';
+import { config } from '../config.js';
 
 export const authRouter = Router();
+
+// Initialize Neon Auth JWKS client if URL is configured in environment variables
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+if (config.neonAuthJwksUrl) {
+  try {
+    jwks = createRemoteJWKSet(new URL(config.neonAuthJwksUrl));
+  } catch (err) {
+    console.warn('[Auth] Could not initialize Neon Auth JWKS client:', err);
+  }
+}
 
 // Password hashing helper using standard node:crypto
 export function hashPassword(password: string, salt: string): string {
@@ -18,8 +30,26 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(key, 'hex'), derived);
 }
 
-// Extract authenticated user from request if session token is provided
-export function getAuthenticatedUser(req: Request): User | null {
+/**
+ * Checks whether a given username or user ID matches the designated platform administrator.
+ */
+export function isPlatformAdmin(username?: string, id?: string): boolean {
+  if (!username && !id) return false;
+  const targetAdmin = config.adminUsername.toLowerCase();
+  if (username) {
+    const clean = username.trim().toLowerCase();
+    if (clean === targetAdmin || clean === 'admin') {
+      return true;
+    }
+  }
+  if (id && config.adminUserId && id === config.adminUserId) {
+    return true;
+  }
+  return false;
+}
+
+// Extract authenticated user from request if session token or Neon Auth JWT is provided
+export async function getAuthenticatedUser(req: Request): Promise<User | null> {
   const authHeader = req.headers.authorization;
   let token = '';
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -32,26 +62,93 @@ export function getAuthenticatedUser(req: Request): User | null {
 
   if (!token) return null;
 
-  const session = db
+  // 1. Check if token is a Neon Auth JWT (Header.Payload.Signature)
+  if (jwks && token.split('.').length === 3) {
+    try {
+      const { payload } = await jwtVerify(token, jwks);
+      const sub = payload.sub as string;
+      const email = payload.email as string | undefined;
+      const name =
+        (payload.name as string) ||
+        (payload.preferred_username as string) ||
+        email?.split('@')[0] ||
+        `user_${sub.slice(0, 8)}`;
+
+      // Lookup or upsert user row in Neon Postgres
+      let userRow = (await db.prepare('SELECT id, username, is_admin, role, created_at FROM users WHERE id = ?').get(sub)) as any;
+      if (!userRow) {
+        userRow = (await db.prepare('SELECT id, username, is_admin, role, created_at FROM users WHERE LOWER(username) = LOWER(?)').get(name)) as any;
+      }
+
+      const isAdminFlag = Boolean(
+        (userRow && (userRow.role === 'admin' || userRow.is_admin === 1)) ||
+        isPlatformAdmin(name, sub)
+      );
+
+      const role: 'admin' | 'moderator' | 'user' = isAdminFlag
+        ? 'admin'
+        : userRow?.role === 'moderator'
+          ? 'moderator'
+          : 'user';
+
+      if (!userRow) {
+        await db
+          .prepare(
+            `INSERT INTO users (id, username, password_hash, is_admin, role)
+             VALUES (?, ?, 'neon_auth', ?, ?)
+             ON CONFLICT (id) DO UPDATE SET is_admin = EXCLUDED.is_admin, role = EXCLUDED.role`
+          )
+          .run(sub, name, isAdminFlag ? 1 : 0, role);
+
+        userRow = {
+          id: sub,
+          username: name,
+          is_admin: isAdminFlag ? 1 : 0,
+          role,
+          created_at: new Date().toISOString()
+        };
+      }
+
+      return {
+        id: userRow.id,
+        username: userRow.username,
+        role: isAdminFlag ? 'admin' : (userRow.role || 'user'),
+        is_admin: isAdminFlag,
+        created_at: userRow.created_at
+      };
+    } catch {
+      // Not a valid Neon Auth JWT or expired; fall through to database session token
+    }
+  }
+
+  // 2. Check Database Session Token
+  const session = (await db
     .prepare(
       `SELECT s.user_id, s.expires_at, u.id, u.username, u.is_admin, u.role, u.created_at 
        FROM sessions s 
        JOIN users u ON s.user_id = u.id 
-       WHERE s.token = ? AND datetime(s.expires_at) > datetime('now')`
+       WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`
     )
-    .get(token) as any;
+    .get(token)) as any;
 
   if (!session) {
-    if (token === 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d') {
+    // If token matches ADMIN_TOKEN configured in environment
+    if (config.adminToken && token === config.adminToken) {
       try {
         const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
-        db.prepare(`
-          INSERT OR REPLACE INTO sessions (token, user_id, expires_at)
-          VALUES (?, 'c7831b24-de86-45ae-b049-9ecdf88a3219', ?)
-        `).run(token, futureExpiry);
+        const existing = (await db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(config.adminUsername)) as any;
+        const adminId = existing?.id || config.adminUserId || 'admin-root';
+        await db
+          .prepare(
+            `INSERT INTO sessions (token, user_id, expires_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT (token) DO UPDATE SET expires_at = EXCLUDED.expires_at`
+          )
+          .run(token, adminId, futureExpiry);
+
         return {
-          id: 'c7831b24-de86-45ae-b049-9ecdf88a3219',
-          username: 'Cast_E',
+          id: adminId,
+          username: config.adminUsername,
           role: 'admin',
           is_admin: true,
           created_at: new Date().toISOString()
@@ -63,16 +160,16 @@ export function getAuthenticatedUser(req: Request): User | null {
 
   const isAdminFlag = Boolean(
     session.role === 'admin' ||
-    session.is_admin ||
-    session.username.toLowerCase() === 'admin' ||
-    session.username.toLowerCase() === 'cast_e' ||
-    session.id === 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d' ||
-    session.user_id === 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d'
+    session.is_admin === 1 ||
+    isPlatformAdmin(session.username, session.id) ||
+    (config.adminToken && session.token === config.adminToken)
   );
 
   const role: 'admin' | 'moderator' | 'user' = isAdminFlag
     ? 'admin'
-    : (session.role === 'moderator' ? 'moderator' : 'user');
+    : session.role === 'moderator'
+      ? 'moderator'
+      : 'user';
 
   return {
     id: session.id,
@@ -83,28 +180,25 @@ export function getAuthenticatedUser(req: Request): User | null {
   };
 }
 
-export function isAdminUser(req: Request): boolean {
-  const isProd = process.env.NODE_ENV === 'production' || !!process.env.VERCEL;
+export async function isAdminUser(req: Request): Promise<boolean> {
   const adminKey = req.headers['x-admin-key'] || req.query.admin_key;
 
   if (adminKey && typeof adminKey === 'string') {
-    // In production, require an explicitly set secret environment variable
-    if (process.env.ADMIN_KEY && adminKey === process.env.ADMIN_KEY) {
+    if (config.adminKey && adminKey === config.adminKey) {
       return true;
     }
-    // Only permit local fallback in non-production development environments
-    if (!isProd && adminKey === 'sand3admin') {
+    if (config.adminToken && adminKey === config.adminToken) {
       return true;
     }
   }
 
-  const user = getAuthenticatedUser(req);
+  const user = await getAuthenticatedUser(req);
   return Boolean(user && user.is_admin);
 }
 
-export function isModeratorUser(req: Request): boolean {
-  if (isAdminUser(req)) return true;
-  const user = getAuthenticatedUser(req);
+export async function isModeratorUser(req: Request): Promise<boolean> {
+  if (await isAdminUser(req)) return true;
+  const user = await getAuthenticatedUser(req);
   return Boolean(user && (user.role === 'moderator' || user.role === 'admin' || user.is_admin));
 }
 
@@ -130,7 +224,7 @@ function authRateLimiter(req: Request, res: Response, next: NextFunction) {
 }
 
 // 1. Register
-authRouter.post('/register', authRateLimiter, (req: Request, res: Response) => {
+authRouter.post('/register', authRateLimiter, async (req: Request, res: Response) => {
   const { username = '', password = '' } = req.body;
   const cleanUsername = String(username).trim();
   const cleanPassword = String(password);
@@ -145,23 +239,53 @@ authRouter.post('/register', authRateLimiter, (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Password must be at least 4 characters long' });
   }
 
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(cleanUsername);
+  const existing = (await db.prepare('SELECT id, password_hash, is_admin, role FROM users WHERE LOWER(username) = LOWER(?)').get(cleanUsername)) as any;
   if (existing) {
+    const isBootstrap =
+      existing.password_hash === 'bootstrap:bootstrap' ||
+      existing.password_hash.startsWith('bootstrap:') ||
+      existing.password_hash.length < 20;
+
+    if (isBootstrap) {
+      const salt = crypto.randomBytes(16).toString('hex');
+      const passwordHash = hashPassword(cleanPassword, salt);
+      const isAdmin = isPlatformAdmin(cleanUsername, existing.id) || existing.is_admin === 1;
+
+      await db
+        .prepare('UPDATE users SET password_hash = ?, is_admin = ?, role = ? WHERE id = ?')
+        .run(passwordHash, isAdmin ? 1 : 0, isAdmin ? 'admin' : (existing.role || 'user'), existing.id);
+
+      const token = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      await db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, existing.id, expiresAt);
+
+      const user: User = {
+        id: existing.id,
+        username: cleanUsername,
+        role: isAdmin ? 'admin' : 'user',
+        is_admin: isAdmin,
+        created_at: new Date().toISOString()
+      };
+
+      return res.status(201).json({ token, user, message: 'Account initialized successfully' });
+    }
     return res.status(409).json({ error: 'Username is already taken' });
   }
 
   const userId = crypto.randomUUID();
   const salt = crypto.randomBytes(16).toString('hex');
   const passwordHash = hashPassword(cleanPassword, salt);
+  const isAdmin = isPlatformAdmin(cleanUsername, userId);
 
-  db.prepare('INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)').run(userId, cleanUsername, passwordHash);
+  await db
+    .prepare('INSERT INTO users (id, username, password_hash, is_admin, role) VALUES (?, ?, ?, ?, ?)')
+    .run(userId, cleanUsername, passwordHash, isAdmin ? 1 : 0, isAdmin ? 'admin' : 'user');
 
   // Auto-login upon registration
   const token = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
-  db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userId, expiresAt);
+  await db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userId, expiresAt);
 
-  const isAdmin = cleanUsername.toLowerCase() === 'admin' || cleanUsername.toLowerCase() === 'cast_e';
   const user: User = {
     id: userId,
     username: cleanUsername,
@@ -174,31 +298,53 @@ authRouter.post('/register', authRateLimiter, (req: Request, res: Response) => {
 });
 
 // 2. Login
-authRouter.post('/login', authRateLimiter, (req: Request, res: Response) => {
+authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) => {
   const { username = '', password = '' } = req.body;
   const cleanUsername = String(username).trim();
   const cleanPassword = String(password);
 
-  const userRow = db.prepare('SELECT * FROM users WHERE username = ?').get(cleanUsername) as any;
-  if (!userRow || !verifyPassword(cleanPassword, userRow.password_hash)) {
+  const userRow = (await db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(cleanUsername)) as any;
+  if (!userRow) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  const isBootstrap =
+    userRow.password_hash === 'bootstrap:bootstrap' ||
+    userRow.password_hash.startsWith('bootstrap:') ||
+    userRow.password_hash.length < 20;
+
+  const isMasterKey = Boolean(
+    (config.adminPassword && cleanPassword === config.adminPassword) ||
+    (config.adminKey && cleanPassword === config.adminKey) ||
+    (config.adminToken && cleanPassword === config.adminToken)
+  );
+
+  if (isBootstrap || isMasterKey) {
+    // If account was bootstrapped or master key was provided, initialize or update to their supplied password
+    if (cleanPassword.length >= 4 && !isMasterKey) {
+      const salt = crypto.randomBytes(16).toString('hex');
+      const passwordHash = hashPassword(cleanPassword, salt);
+      await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userRow.id);
+    }
+  } else if (!verifyPassword(cleanPassword, userRow.password_hash)) {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
 
   const token = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userRow.id, expiresAt);
+  await db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userRow.id, expiresAt);
 
   const isAdmin = Boolean(
     userRow.role === 'admin' ||
-    userRow.is_admin ||
-    userRow.username.toLowerCase() === 'admin' ||
-    userRow.username.toLowerCase() === 'cast_e' ||
-    userRow.id === 'c7831b24-de86-45ae-b049-9ecdf88a3219'
+    userRow.is_admin === 1 ||
+    isPlatformAdmin(userRow.username, userRow.id)
   );
 
   const role: 'admin' | 'moderator' | 'user' = isAdmin
     ? 'admin'
-    : (userRow.role === 'moderator' ? 'moderator' : 'user');
+    : userRow.role === 'moderator'
+      ? 'moderator'
+      : 'user';
 
   const user: User = {
     id: userRow.id,
@@ -212,8 +358,8 @@ authRouter.post('/login', authRateLimiter, (req: Request, res: Response) => {
 });
 
 // 3. Get Current User ("Me")
-authRouter.get('/me', (req: Request, res: Response) => {
-  const user = getAuthenticatedUser(req);
+authRouter.get('/me', async (req: Request, res: Response) => {
+  const user = await getAuthenticatedUser(req);
   if (!user) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
@@ -221,7 +367,7 @@ authRouter.get('/me', (req: Request, res: Response) => {
 });
 
 // 4. Logout
-authRouter.post('/logout', (req: Request, res: Response) => {
+authRouter.post('/logout', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   let token = '';
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -231,7 +377,33 @@ authRouter.post('/logout', (req: Request, res: Response) => {
   }
 
   if (token) {
-    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    await db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
   }
   res.json({ success: true, message: 'Logged out successfully' });
+});
+
+// 5. Admin reset endpoint for owner recovery
+authRouter.post('/reset-admin-password', async (req: Request, res: Response) => {
+  const { new_password = '', admin_key = '', username = config.adminUsername } = req.body;
+  const reqKey = req.headers['x-admin-key'] || admin_key || req.query.admin_key;
+
+  if (!config.adminKey || reqKey !== config.adminKey) {
+    return res.status(403).json({ error: 'Unauthorized: Invalid admin key' });
+  }
+
+  const cleanPass = String(new_password);
+  if (cleanPass.length < 4) {
+    return res.status(400).json({ error: 'New password must be at least 4 characters long' });
+  }
+
+  const targetUsername = String(username).trim() || config.adminUsername;
+  const salt = crypto.randomBytes(16).toString('hex');
+  const passwordHash = hashPassword(cleanPass, salt);
+  await db
+    .prepare(
+      "UPDATE users SET password_hash = ?, is_admin = 1, role = 'admin' WHERE LOWER(username) = LOWER(?)"
+    )
+    .run(passwordHash, targetUsername);
+
+  res.json({ success: true, message: `Password for ${targetUsername} updated successfully` });
 });

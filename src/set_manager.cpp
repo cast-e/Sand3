@@ -11,6 +11,7 @@
 #include "ui.hpp"
 #include "undo_manager.hpp"
 #include "window.hpp"
+#include "workshop_cache.hpp"
 
 namespace fs = std::filesystem;
 
@@ -379,6 +380,19 @@ void SetManager::set_workshop_info(const std::string& set_name, const std::strin
 	if (current_set_name == set_name) {
 		current_metadata = m;
 	}
+}
+
+void SetManager::clear_workshop_info(const std::string& set_name) {
+	SetMetadata m = load_set_metadata(set_name);
+	m.workshop_id = "";
+	m.workshop_hash = "";
+	m.is_online = false;
+	online_set_cache[set_name] = false;
+	save_set_metadata(set_name, m);
+	if (current_set_name == set_name) {
+		current_metadata = m;
+	}
+	WorkshopCache::remove_transient(std::string(SETS_DIRECTORY) + set_name);
 }
 
 std::string SetManager::get_current_material_shortcut(const std::string& mat_name) {

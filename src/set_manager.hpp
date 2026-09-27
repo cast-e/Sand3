@@ -44,6 +44,7 @@ public:
 	static bool is_set_online(const std::string& set_name);
 	static void mark_set_online(const std::string& set_name, bool online);
 	static void set_workshop_info(const std::string& set_name, const std::string& workshop_id, const std::string& workshop_hash, uint32_t version = 1, const std::string& author = "");
+	static void clear_workshop_info(const std::string& set_name);
 
 	static std::string get_current_material_shortcut(const std::string& mat_name);
 	static void set_current_material_shortcut(const std::string& mat_name, const std::string& key_combo);

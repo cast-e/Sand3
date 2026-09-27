@@ -670,6 +670,28 @@ void WorkshopClient::fetch_item(const std::string& id,
 	}).detach();
 }
 
+void WorkshopClient::check_item_exists(const std::string& id,
+									   std::function<void(bool exists, int http_status)> callback) {
+	if (id.empty()) {
+		if (callback) {
+			callback(false, 404);
+		}
+		return;
+	}
+	Window::increment_busy();
+	std::thread([id, callback]() {
+		std::string url = base_url + "/workshop/items/" + id + "?client_uuid=" + get_client_uuid();
+		int status = 0;
+		std::string resp = http_get(url, status);
+		bool exists = (status >= 200 && status < 300);
+		enqueue_task_completion([callback, exists, status]() {
+			if (callback) {
+				callback(exists, status);
+			}
+		});
+	}).detach();
+}
+
 void WorkshopClient::fetch_set_saves(
 	const std::string& set_id,
 	std::function<void(bool success, const std::vector<WorkshopItemClient>& saves)> callback) {

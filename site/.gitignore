@@ -49,3 +49,5 @@ server/uploads/*
 !server/uploads/.gitkeep
 *.db-shm
 *.db-wal
+
+.env

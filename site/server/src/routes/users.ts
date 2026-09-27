@@ -1,12 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../db.js';
-import { isAdminUser, isModeratorUser, getAuthenticatedUser } from './auth.js';
+import { isAdminUser, isModeratorUser, getAuthenticatedUser, isPlatformAdmin } from './auth.js';
 
 export const usersRouter = Router();
 
 // Middleware to ensure administrator access (users management, deleting users, role assignment)
-function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!isAdminUser(req)) {
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!(await isAdminUser(req))) {
     return res.status(403).json({
       error: 'Administrator access required. Moderators cannot manage or delete users.'
     });
@@ -15,8 +15,8 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 // Middleware to ensure moderator or admin access (reading users)
-function requireModerator(req: Request, res: Response, next: NextFunction) {
-  if (!isModeratorUser(req)) {
+async function requireModerator(req: Request, res: Response, next: NextFunction) {
+  if (!(await isModeratorUser(req))) {
     return res.status(403).json({
       error: 'Moderator or Administrator access required.'
     });
@@ -25,7 +25,7 @@ function requireModerator(req: Request, res: Response, next: NextFunction) {
 }
 
 // 1. List all users (accessible by Admin & Moderator)
-usersRouter.get('/', requireModerator, (req: Request, res: Response) => {
+usersRouter.get('/', requireModerator, async (req: Request, res: Response) => {
   try {
     const q = ((req.query.q as string) || '').trim().toLowerCase();
     let whereClause = '';
@@ -40,7 +40,7 @@ usersRouter.get('/', requireModerator, (req: Request, res: Response) => {
              COALESCE(u.role, CASE WHEN u.is_admin = 1 THEN 'admin' ELSE 'user' END) as role,
              u.is_admin, u.created_at,
              (SELECT COUNT(*) FROM items WHERE user_id = u.id) as items_count,
-             (SELECT COUNT(*) FROM sessions WHERE user_id = u.id AND datetime(expires_at) > datetime('now')) as active_sessions_count
+             (SELECT COUNT(*) FROM sessions WHERE user_id = u.id AND expires_at > CURRENT_TIMESTAMP) as active_sessions_count
       FROM users u
       ${whereClause}
       ORDER BY 
@@ -53,7 +53,7 @@ usersRouter.get('/', requireModerator, (req: Request, res: Response) => {
       LIMIT 100
     `;
 
-    const users = db.prepare(query).all(...params);
+    const users = await db.prepare(query).all(...params);
     res.json({ users });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -61,10 +61,10 @@ usersRouter.get('/', requireModerator, (req: Request, res: Response) => {
 });
 
 // 2. Get single user details by ID or username
-usersRouter.get('/:id', (req: Request, res: Response) => {
+usersRouter.get('/:id', async (req: Request, res: Response) => {
   try {
     const target = String(req.params.id);
-    const user = db
+    const user = (await db
       .prepare(
         `SELECT id, username,
                 COALESCE(role, CASE WHEN is_admin = 1 THEN 'admin' ELSE 'user' END) as role,
@@ -73,7 +73,7 @@ usersRouter.get('/:id', (req: Request, res: Response) => {
          FROM users
          WHERE id = ? OR LOWER(username) = LOWER(?)`
       )
-      .get(target, target) as any;
+      .get(target, target)) as any;
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -86,23 +86,23 @@ usersRouter.get('/:id', (req: Request, res: Response) => {
 });
 
 // 3. Set User Role ('admin' | 'moderator' | 'user') - strictly Administrator only!
-usersRouter.post('/:id/role', requireAdmin, (req: Request, res: Response) => {
+usersRouter.post('/:id/role', requireAdmin, async (req: Request, res: Response) => {
   try {
     const targetId = String(req.params.id);
     const { role = 'user' } = req.body;
-    const caller = getAuthenticatedUser(req);
+    const caller = await getAuthenticatedUser(req);
 
     if (!['admin', 'moderator', 'user'].includes(role)) {
       return res.status(400).json({ error: "Invalid role. Must be 'admin', 'moderator', or 'user'." });
     }
 
-    const user = db.prepare('SELECT id, username, is_admin, role FROM users WHERE id = ?').get(targetId) as any;
+    const user = (await db.prepare('SELECT id, username, is_admin, role FROM users WHERE id = ?').get(targetId)) as any;
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Protection 1: Prevent primary administrator account from being demoted
-    if (user.username.toLowerCase() === 'cast_e' || targetId === 'c7831b24-de86-45ae-b049-9ecdf88a3219') {
+    if (isPlatformAdmin(user.username, targetId)) {
       if (role !== 'admin') {
         return res.status(400).json({ error: 'The primary platform administrator cannot be demoted.' });
       }
@@ -114,9 +114,9 @@ usersRouter.post('/:id/role', requireAdmin, (req: Request, res: Response) => {
     }
 
     const newIsAdmin = role === 'admin' ? 1 : 0;
-    db.prepare('UPDATE users SET role = ?, is_admin = ? WHERE id = ?').run(role, newIsAdmin, targetId);
+    await db.prepare('UPDATE users SET role = ?, is_admin = ? WHERE id = ?').run(role, newIsAdmin, targetId);
 
-    const roleName = role === 'admin' ? 'Administrator' : (role === 'moderator' ? 'Moderator' : 'User');
+    const roleName = role === 'admin' ? 'Administrator' : role === 'moderator' ? 'Moderator' : 'User';
     res.json({
       success: true,
       user_id: targetId,
@@ -131,12 +131,12 @@ usersRouter.post('/:id/role', requireAdmin, (req: Request, res: Response) => {
 });
 
 // 4. Toggle admin privileges for a user (backward compatibility)
-usersRouter.post('/:id/toggle-admin', requireAdmin, (req: Request, res: Response) => {
+usersRouter.post('/:id/toggle-admin', requireAdmin, async (req: Request, res: Response) => {
   try {
     const targetId = String(req.params.id);
-    const caller = getAuthenticatedUser(req);
+    const caller = await getAuthenticatedUser(req);
 
-    const user = db.prepare('SELECT id, username, is_admin, role FROM users WHERE id = ?').get(targetId) as any;
+    const user = (await db.prepare('SELECT id, username, is_admin, role FROM users WHERE id = ?').get(targetId)) as any;
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -148,7 +148,7 @@ usersRouter.post('/:id/toggle-admin', requireAdmin, (req: Request, res: Response
 
     const newRole = user.is_admin ? 'user' : 'admin';
     const newAdmin = newRole === 'admin' ? 1 : 0;
-    db.prepare('UPDATE users SET role = ?, is_admin = ? WHERE id = ?').run(newRole, newAdmin, targetId);
+    await db.prepare('UPDATE users SET role = ?, is_admin = ? WHERE id = ?').run(newRole, newAdmin, targetId);
 
     res.json({
       success: true,
@@ -166,11 +166,11 @@ usersRouter.post('/:id/toggle-admin', requireAdmin, (req: Request, res: Response
 });
 
 // 5. Delete a user from the platform (requires Admin or Self - NOT Moderators!)
-usersRouter.delete('/:id', (req: Request, res: Response) => {
+usersRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const targetId = String(req.params.id);
-    const caller = getAuthenticatedUser(req);
-    const isAdmin = isAdminUser(req);
+    const caller = await getAuthenticatedUser(req);
+    const isAdmin = await isAdminUser(req);
 
     if (!caller && !isAdmin) {
       return res.status(401).json({ error: 'Authentication required to delete a user account.' });
@@ -182,13 +182,13 @@ usersRouter.delete('/:id', (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Moderators cannot remove users. Only Administrators have permission to delete accounts.' });
     }
 
-    const user = db.prepare('SELECT id, username, is_admin FROM users WHERE id = ?').get(targetId) as any;
+    const user = (await db.prepare('SELECT id, username, is_admin FROM users WHERE id = ?').get(targetId)) as any;
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     // Protection 1: Prevent primary administrator account from being deleted
-    if (user.username.toLowerCase() === 'cast_e' || targetId === 'c7831b24-de86-45ae-b049-9ecdf88a3219') {
+    if (isPlatformAdmin(user.username, targetId)) {
       return res.status(400).json({ error: 'The primary platform administrator account cannot be deleted.' });
     }
 
@@ -198,13 +198,13 @@ usersRouter.delete('/:id', (req: Request, res: Response) => {
     }
 
     // Step A: Terminate all active sessions for this user
-    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetId);
+    await db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetId);
 
     // Step B: Detach user ownership from published items so items aren\'t orphaned or broken
-    db.prepare('UPDATE items SET user_id = NULL WHERE user_id = ?').run(targetId);
+    await db.prepare('UPDATE items SET user_id = NULL WHERE user_id = ?').run(targetId);
 
     // Step C: Delete the user record
-    db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
+    await db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
 
     res.json({
       success: true,

@@ -18,11 +18,11 @@ export interface AuthResponse {
 function getAuthBaseUrl(): string {
   if (typeof window !== 'undefined') {
     if (window.location.port === '4200') {
-      return 'https://sand3.vercel.app/api/workshop/auth';
+      return (window as any).__SAND3_API_BASE_URL__ ? `${(window as any).__SAND3_API_BASE_URL__}/workshop/auth` : 'http://localhost:3000/api/workshop/auth';
     }
     return '/api/workshop/auth';
   }
-  return 'https://sand3.vercel.app/api/workshop/auth';
+  return '/api/workshop/auth';
 }
 
 @Injectable({
@@ -41,16 +41,7 @@ export class AuthService {
 
   isAdmin(): boolean {
     const u = this.currentUser();
-    return Boolean(
-      (u && (
-        u.role === 'admin' ||
-        u.is_admin ||
-        u.username.toLowerCase() === 'admin' ||
-        u.username.toLowerCase() === 'cast_e' ||
-        u.id === 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d'
-      )) ||
-      this.token() === 'e3b8937e-ac6c-4c8c-a59a-f3f243c8182d'
-    );
+    return Boolean(u && (u.role === 'admin' || u.is_admin));
   }
 
   isModerator(): boolean {

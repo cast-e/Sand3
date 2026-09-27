@@ -11,10 +11,10 @@ const UPLOADS_DIR = process.env.UPLOADS_DIR || (process.env.VERCEL ? '/tmp/sand3
 
 export const downloadsRouter = Router();
 
-downloadsRouter.get('/:id/download', (req, res) => {
+downloadsRouter.get('/:id/download', async (req, res) => {
   const id = String(req.params.id);
 
-  const item = db.prepare('SELECT * FROM items WHERE id = ? AND is_hidden = 0').get(id) as any;
+  const item = (await db.prepare('SELECT * FROM items WHERE id = ? AND is_hidden = 0').get(id)) as any;
   if (!item) {
     return res.status(404).json({ error: 'Item not found' });
   }
@@ -25,7 +25,7 @@ downloadsRouter.get('/:id/download', (req, res) => {
   }
 
   // Increment download count
-  db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);
+  await db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);
 
   // Determine appropriate download filename
   const ext = path.extname(item.file_path) || (item.type === 'save' ? '.save' : item.type === 'stamp' ? '.stamp' : '.zip');

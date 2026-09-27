@@ -45,9 +45,11 @@ public:
 	static void set_save_workshop_info(const std::string& name_or_filename, const std::string& current_set,
 									   const std::string& workshop_id, const std::string& workshop_hash,
 									   const std::string& author, uint32_t version = 1);
+	static void clear_save_workshop_info(const std::string& name_or_filename, const std::string& current_set);
 	static void set_stamp_workshop_info(const std::string& name_or_filename, const std::string& current_set,
 										const std::string& workshop_id, const std::string& workshop_hash,
 										const std::string& author, uint32_t version = 1);
+	static void clear_stamp_workshop_info(const std::string& name_or_filename, const std::string& current_set);
 
 	static bool save_to_file(const std::string& name, const std::string& current_set);
 	static void save_to_file_async(const std::string& name, const std::string& current_set,

@@ -108,7 +108,7 @@ const uploadFields = upload.fields([
 ]);
 
 // 1. List Workshop Items with filtering, search, sorting, and user filter
-itemsRouter.get('/', (req: Request, res: Response) => {
+itemsRouter.get('/', async (req: Request, res: Response) => {
   const {
     type = 'all',
     sort = 'popular',
@@ -174,9 +174,8 @@ itemsRouter.get('/', (req: Request, res: Response) => {
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   // Get total count
-  const countStmt = db.prepare(`SELECT COUNT(*) as total FROM items ${whereClause}`);
-  const countResult = countStmt.get(...params) as { total: number };
-  const total = countResult ? countResult.total : 0;
+  const countResult = (await db.prepare(`SELECT COUNT(*) as total FROM items ${whereClause}`).get(...params)) as any;
+  const total = countResult ? Number(countResult.total) : 0;
 
   // Get items with parent set title and child saves/stamps count
   const query = `
@@ -190,15 +189,13 @@ itemsRouter.get('/', (req: Request, res: Response) => {
     LIMIT ? OFFSET ?
   `;
 
-  const itemsStmt = db.prepare(query);
-  const rows = itemsStmt.all(...params, limitNum, offset) as any[];
+  const rows = (await db.prepare(query).all(...params, limitNum, offset)) as any[];
 
   // If client_uuid is supplied, annotate is_liked / is_favorited
   let likedSet = new Set<string>();
   let favoritedSet = new Set<string>();
   if (client_uuid) {
-    const interStmt = db.prepare(`SELECT item_id, interaction_type FROM interactions WHERE client_uuid = ?`);
-    const interactions = interStmt.all(client_uuid) as any[];
+    const interactions = (await db.prepare(`SELECT item_id, interaction_type FROM interactions WHERE client_uuid = ?`).all(client_uuid)) as any[];
     for (const inter of interactions) {
       if (inter.interaction_type === 'like') likedSet.add(inter.item_id);
       if (inter.interaction_type === 'favorite') favoritedSet.add(inter.item_id);
@@ -224,7 +221,7 @@ itemsRouter.get('/', (req: Request, res: Response) => {
 });
 
 // 2. Get Single Item Details
-itemsRouter.get('/:id', (req: Request, res: Response) => {
+itemsRouter.get('/:id', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const client_uuid = (req.query.client_uuid as string) || '';
 
@@ -237,8 +234,7 @@ itemsRouter.get('/:id', (req: Request, res: Response) => {
     WHERE i.id = ? AND i.is_hidden = 0
   `;
 
-  const itemStmt = db.prepare(query);
-  const row = itemStmt.get(id) as any;
+  const row = (await db.prepare(query).get(id)) as any;
   if (!row) {
     return res.status(404).json({ error: 'Item not found' });
   }
@@ -246,8 +242,7 @@ itemsRouter.get('/:id', (req: Request, res: Response) => {
   let is_liked = false;
   let is_favorited = false;
   if (client_uuid) {
-    const checkStmt = db.prepare(`SELECT interaction_type FROM interactions WHERE item_id = ? AND client_uuid = ?`);
-    const interactions = checkStmt.all(id, client_uuid) as any[];
+    const interactions = (await db.prepare(`SELECT interaction_type FROM interactions WHERE item_id = ? AND client_uuid = ?`).all(id, client_uuid)) as any[];
     for (const inter of interactions) {
       if (inter.interaction_type === 'like') is_liked = true;
       if (inter.interaction_type === 'favorite') is_favorited = true;
@@ -263,7 +258,7 @@ itemsRouter.get('/:id', (req: Request, res: Response) => {
 });
 
 // 3. Get Saves created for a specific Set
-itemsRouter.get('/sets/:id/saves', (req: Request, res: Response) => {
+itemsRouter.get('/sets/:id/saves', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const query = `
     SELECT i.*
@@ -271,13 +266,12 @@ itemsRouter.get('/sets/:id/saves', (req: Request, res: Response) => {
     WHERE i.parent_set_id = ? AND i.type = 'save' AND i.is_hidden = 0
     ORDER BY i.likes_count DESC, i.created_at DESC
   `;
-  const stmt = db.prepare(query);
-  const rows = stmt.all(id);
+  const rows = await db.prepare(query).all(id);
   res.json(rows);
 });
 
 // 4. Get Stamps created for a specific Set
-itemsRouter.get('/sets/:id/stamps', (req: Request, res: Response) => {
+itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const query = `
     SELECT i.*
@@ -285,15 +279,14 @@ itemsRouter.get('/sets/:id/stamps', (req: Request, res: Response) => {
     WHERE i.parent_set_id = ? AND i.type = 'stamp' AND i.is_hidden = 0
     ORDER BY i.likes_count DESC, i.created_at DESC
   `;
-  const stmt = db.prepare(query);
-  const rows = stmt.all(id);
+  const rows = await db.prepare(query).all(id);
   res.json(rows);
 });
 
 // 5. Get Item Thumbnail Image
-itemsRouter.get('/:id/thumbnail', (req: Request, res: Response) => {
+itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response) => {
   const id = String(req.params.id);
-  const item = db.prepare('SELECT thumbnail_path FROM items WHERE id = ?').get(id) as any;
+  const item = (await db.prepare('SELECT thumbnail_path FROM items WHERE id = ?').get(id)) as any;
   if (!item || !item.thumbnail_path) {
     return res.status(404).json({ error: 'No thumbnail available' });
   }
@@ -307,9 +300,9 @@ itemsRouter.get('/:id/thumbnail', (req: Request, res: Response) => {
 });
 
 // 6. Create / Publish Item
-itemsRouter.post('/', uploadFields, (req: Request, res: Response) => {
+itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
   try {
-    const authUser = getAuthenticatedUser(req);
+    const authUser = await getAuthenticatedUser(req);
     const body = req.body;
     const type = (body.type as ItemType) || 'save';
     const title = (body.title || '').trim();
@@ -340,7 +333,7 @@ itemsRouter.post('/', uploadFields, (req: Request, res: Response) => {
 
     // Hash verification when attaching to an online set
     if (parent_set_id && (type === 'save' || type === 'stamp')) {
-      const parentSet = db.prepare("SELECT id, title, set_hash FROM items WHERE id = ? AND type = 'set'").get(parent_set_id) as any;
+      const parentSet = (await db.prepare("SELECT id, title, set_hash FROM items WHERE id = ? AND type = 'set'").get(parent_set_id)) as any;
       if (!parentSet) {
         return res.status(404).json({ error: `Associated set with ID '${parent_set_id}' was not found` });
       }
@@ -403,14 +396,14 @@ itemsRouter.post('/', uploadFields, (req: Request, res: Response) => {
     }
 
     // Insert item
-    const insertStmt = db.prepare(`
-      INSERT INTO items (id, user_id, type, title, description, author, parent_set_id, version, set_hash, file_path, file_size, thumbnail_path, meta_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
-    `);
+    await db
+      .prepare(`
+        INSERT INTO items (id, user_id, type, title, description, author, parent_set_id, version, set_hash, file_path, file_size, thumbnail_path, meta_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+      `)
+      .run(id, userId, type, title, description, author, parent_set_id, finalSetHash, filePath, fileSize, thumbnailPath, meta_json);
 
-    insertStmt.run(id, userId, type, title, description, author, parent_set_id, finalSetHash, filePath, fileSize, thumbnailPath, meta_json);
-
-    const created = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
+    const created = await db.prepare('SELECT * FROM items WHERE id = ?').get(id);
     res.status(201).json(created);
   } catch (err: any) {
     console.error('Error creating workshop item:', err);
@@ -419,21 +412,22 @@ itemsRouter.post('/', uploadFields, (req: Request, res: Response) => {
 });
 
 // 7. Update / Edit Item Metadata (with Set Versioning)
-itemsRouter.put('/:id', uploadFields, (req: Request, res: Response) => {
+itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const authUser = getAuthenticatedUser(req);
+    const authUser = await getAuthenticatedUser(req);
     if (!authUser) {
       return res.status(401).json({ error: 'You must be logged in to edit this item' });
     }
 
-    const item = db.prepare('SELECT * FROM items WHERE id = ?').get(id) as any;
+    const item = (await db.prepare('SELECT * FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
       return res.status(404).json({ error: 'Item not found' });
     }
 
     // Check ownership: user_id must match OR author name must match if user_id wasn't set
-    const isOwner = (item.user_id && item.user_id === authUser.id) ||
+    const isOwner =
+      (item.user_id && item.user_id === authUser.id) ||
       (!item.user_id && item.author.toLowerCase() === authUser.username.toLowerCase());
     if (!isOwner) {
       return res.status(403).json({ error: 'You do not own this item' });
@@ -547,13 +541,15 @@ itemsRouter.put('/:id', uploadFields, (req: Request, res: Response) => {
     }
 
     // Update item
-    db.prepare(`
-      UPDATE items 
-      SET title = ?, description = ?, version = ?, set_hash = ?, file_path = ?, file_size = ?, thumbnail_path = ?, meta_json = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(title, description, version, set_hash, filePath, fileSize, thumbnailPath, meta_json, id);
+    await db
+      .prepare(`
+        UPDATE items 
+        SET title = ?, description = ?, version = ?, set_hash = ?, file_path = ?, file_size = ?, thumbnail_path = ?, meta_json = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `)
+      .run(title, description, version, set_hash, filePath, fileSize, thumbnailPath, meta_json, id);
 
-    const updated = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
+    const updated = await db.prepare('SELECT * FROM items WHERE id = ?').get(id);
     res.json(updated);
   } catch (err: any) {
     console.error('Error updating workshop item:', err);
@@ -562,20 +558,21 @@ itemsRouter.put('/:id', uploadFields, (req: Request, res: Response) => {
 });
 
 // 8. Delete / Remove Item
-itemsRouter.delete('/:id', (req: Request, res: Response) => {
+itemsRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
-    const authUser = getAuthenticatedUser(req);
+    const authUser = await getAuthenticatedUser(req);
     if (!authUser) {
       return res.status(401).json({ error: 'You must be logged in to delete this item' });
     }
 
-    const item = db.prepare('SELECT * FROM items WHERE id = ?').get(id) as any;
+    const item = (await db.prepare('SELECT * FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
       return res.status(404).json({ error: 'Item not found' });
     }
 
-    const isOwner = (item.user_id && item.user_id === authUser.id) ||
+    const isOwner =
+      (item.user_id && item.user_id === authUser.id) ||
       (!item.user_id && item.author.toLowerCase() === authUser.username.toLowerCase());
     if (!isOwner) {
       return res.status(403).json({ error: 'You do not own this item' });
@@ -594,7 +591,7 @@ itemsRouter.delete('/:id', (req: Request, res: Response) => {
     }
 
     // Delete item record (cascade deletes interactions and reports)
-    db.prepare('DELETE FROM items WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM items WHERE id = ?').run(id);
 
     res.json({ success: true, message: 'Item deleted successfully', id });
   } catch (err: any) {

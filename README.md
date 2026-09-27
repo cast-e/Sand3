@@ -4,8 +4,8 @@
 <img src=./src/resources/sand3.png alt="Sand3" width="100"/>
 
 
-[![Download Sand3](https://img.shields.io/badge/Download-Sand3-ffa757?style=for-the-badge)]()
-[![Open Workshop](https://img.shields.io/badge/Open-Workshop-blue?style=for-the-badge)]()
+[![Download Sand3](https://img.shields.io/badge/Download-Sand3-ffa757?style=for-the-badge)](https://sand3.vercel.app/)
+[![Open Workshop](https://img.shields.io/badge/Open-Workshop-blue?style=for-the-badge)](https://sand3.vercel.app/workshop)
 
 ## Features
 

@@ -70,11 +70,11 @@ export interface User {
 function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
     if (window.location.port === '4200') {
-      return 'https://sand3.vercel.app/api';
+      return (window as any).__SAND3_API_BASE_URL__ || 'http://localhost:3000/api';
     }
-    return 'https://sand3.vercel.app/api';
+    return (window as any).__SAND3_API_BASE_URL__ || '/api';
   }
-  return 'https://sand3.vercel.app/api';
+  return '/api';
 }
 
 @Injectable({

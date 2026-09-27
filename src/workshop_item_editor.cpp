@@ -12,9 +12,11 @@
 #include "const.hpp"
 #include "grid.hpp"
 #include "material_manager.hpp"
+#include "save_manager.hpp"
 #include "set_manager.hpp"
 #include "toast_manager.hpp"
 #include "ui.hpp"
+#include "workshop_cache.hpp"
 #include "zip_util.hpp"
 
 namespace {
@@ -100,6 +102,26 @@ namespace {
 }  // namespace
 
 void WorkshopItemEditor::open_edit_modal(const WorkshopItemClient& item, std::function<void()> on_success) {
+	if (item.id.empty()) return;
+	WorkshopClient::check_item_exists(item.id, [item, on_success](bool exists, int http_status) {
+		if (!exists && http_status == 404) {
+			if (item.type == "set") {
+				SetManager::clear_workshop_info(item.title);
+			} else if (item.type == "save") {
+				SaveManager::clear_save_workshop_info(item.title, SetManager::get_current_set());
+			} else if (item.type == "stamp") {
+				SaveManager::clear_stamp_workshop_info(item.title, SetManager::get_current_set());
+			}
+			WorkshopCache::remove_transient_by_id(item.id);
+			ToastManager::warning("Item '" + item.title + "' has been deleted on the workshop.");
+			s_show_edit_modal = false;
+			if (on_success) {
+				on_success();
+			}
+			return;
+		}
+	});
+
 	s_edit_item = item;
 	std::snprintf(s_edit_title, sizeof(s_edit_title), "%s", item.title.c_str());
 	std::snprintf(s_edit_desc, sizeof(s_edit_desc), "%s", item.description.c_str());
@@ -110,6 +132,26 @@ void WorkshopItemEditor::open_edit_modal(const WorkshopItemClient& item, std::fu
 }
 
 void WorkshopItemEditor::open_update_modal(const WorkshopItemClient& item, std::function<void()> on_success) {
+	if (item.id.empty()) return;
+	WorkshopClient::check_item_exists(item.id, [item, on_success](bool exists, int http_status) {
+		if (!exists && http_status == 404) {
+			if (item.type == "set") {
+				SetManager::clear_workshop_info(item.title);
+			} else if (item.type == "save") {
+				SaveManager::clear_save_workshop_info(item.title, SetManager::get_current_set());
+			} else if (item.type == "stamp") {
+				SaveManager::clear_stamp_workshop_info(item.title, SetManager::get_current_set());
+			}
+			WorkshopCache::remove_transient_by_id(item.id);
+			ToastManager::warning("Item '" + item.title + "' has been deleted on the workshop. Converted to local.");
+			s_show_update_modal = false;
+			if (on_success) {
+				on_success();
+			}
+			return;
+		}
+	});
+
 	s_update_item = item;
 	std::snprintf(s_update_title, sizeof(s_update_title), "%s", item.title.c_str());
 	std::snprintf(s_update_desc, sizeof(s_update_desc), "%s", item.description.c_str());
@@ -558,11 +600,31 @@ void WorkshopItemEditor::render_delete_modal() {
 			std::string item_id = s_delete_item.id;
 			std::string item_title = s_delete_item.title;
 
-			WorkshopClient::delete_item(item_id, [item_title](bool success, const std::string& err) {
+			WorkshopClient::delete_item(item_id, [item_id, item_title](bool success, const std::string& err) {
 				s_delete_saving = false;
 				if (success) {
 					ToastManager::success("Deleted '" + item_title + "' from Workshop.");
 					s_show_delete_modal = false;
+
+					for (const auto& s : SetManager::get_sets()) {
+						SetMetadata sm = SetManager::load_set_metadata(s);
+						if (sm.workshop_id == item_id) {
+							SetManager::clear_workshop_info(s);
+						}
+					}
+					std::string cur_set = SetManager::get_current_set();
+					for (const auto& sf : SaveManager::get_save_files(cur_set)) {
+						if (sf.workshop_id == item_id) {
+							SaveManager::clear_save_workshop_info(sf.filename, cur_set);
+						}
+					}
+					for (const auto& st : SaveManager::get_stamp_files(cur_set)) {
+						if (st.workshop_id == item_id) {
+							SaveManager::clear_stamp_workshop_info(st.filename, cur_set);
+						}
+					}
+					WorkshopCache::remove_transient_by_id(item_id);
+
 					if (s_delete_on_success) {
 						s_delete_on_success();
 					}

@@ -98,6 +98,7 @@ public:
 	static bool button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& size = ImVec2(0, 0));
 
 	static void refresh_workshop_items();
+	static void validate_online_items(bool force = false);
 	static void handle_uri(const std::string& uri);
 	static std::string generate_thumbnail_base64(int type_idx, const std::string& target_set,
 												 const std::string& target_file = "");
