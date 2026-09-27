@@ -4,27 +4,29 @@ import { isAdminUser, isModeratorUser, getAuthenticatedUser, isPlatformAdmin } f
 
 export const usersRouter = Router();
 
-async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!(await isAdminUser(req))) {
-    return res.status(403).json({
+    res.status(403).json({
       error: 'Administrator access required. Moderators cannot manage or delete users.'
     });
+    return;
   }
   next();
 }
 
-async function requireModerator(req: Request, res: Response, next: NextFunction) {
+async function requireModerator(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!(await isModeratorUser(req))) {
-    return res.status(403).json({
+    res.status(403).json({
       error: 'Moderator or Administrator access required.'
     });
+    return;
   }
   next();
 }
 
-usersRouter.get('/', requireModerator, async (req: Request, res: Response) => {
+usersRouter.get('/', requireModerator, async (req: Request, res: Response): Promise<void> => {
   try {
-    const q = ((req.query.q as string) || '').trim().toLowerCase();
+    const q = ((req.query['q'] as string) || '').trim().toLowerCase();
     let whereClause = '';
     let params: any[] = [];
     if (q) {
@@ -57,9 +59,9 @@ usersRouter.get('/', requireModerator, async (req: Request, res: Response) => {
   }
 });
 
-usersRouter.get('/:id', async (req: Request, res: Response) => {
+usersRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
-    const target = String(req.params.id);
+    const target = String(req.params['id']);
     const user = (await db
       .prepare(
         `SELECT id, username,
@@ -72,7 +74,8 @@ usersRouter.get('/:id', async (req: Request, res: Response) => {
       .get(target, target)) as any;
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
 
     res.json({ user });
@@ -81,29 +84,33 @@ usersRouter.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-usersRouter.post('/:id/role', requireAdmin, async (req: Request, res: Response) => {
+usersRouter.post('/:id/role', requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
-    const targetId = String(req.params.id);
+    const targetId = String(req.params['id']);
     const { role = 'user' } = req.body;
     const caller = await getAuthenticatedUser(req);
 
     if (!['admin', 'moderator', 'user'].includes(role)) {
-      return res.status(400).json({ error: "Invalid role. Must be 'admin', 'moderator', or 'user'." });
+      res.status(400).json({ error: "Invalid role. Must be 'admin', 'moderator', or 'user'." });
+      return;
     }
 
     const user = (await db.prepare('SELECT id, username, is_admin, role FROM users WHERE id = ?').get(targetId)) as any;
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
 
     if (isPlatformAdmin(user.username, targetId)) {
       if (role !== 'admin') {
-        return res.status(400).json({ error: 'The primary platform administrator cannot be demoted.' });
+        res.status(400).json({ error: 'The primary platform administrator cannot be demoted.' });
+        return;
       }
     }
 
     if (caller && caller.id === targetId && role !== 'admin') {
-      return res.status(400).json({ error: 'For security, you cannot revoke your own administrator privileges.' });
+      res.status(400).json({ error: 'For security, you cannot revoke your own administrator privileges.' });
+      return;
     }
 
     const newIsAdmin = role === 'admin' ? 1 : 0;
@@ -123,18 +130,20 @@ usersRouter.post('/:id/role', requireAdmin, async (req: Request, res: Response) 
   }
 });
 
-usersRouter.post('/:id/toggle-admin', requireAdmin, async (req: Request, res: Response) => {
+usersRouter.post('/:id/toggle-admin', requireAdmin, async (req: Request, res: Response): Promise<void> => {
   try {
-    const targetId = String(req.params.id);
+    const targetId = String(req.params['id']);
     const caller = await getAuthenticatedUser(req);
 
     const user = (await db.prepare('SELECT id, username, is_admin, role FROM users WHERE id = ?').get(targetId)) as any;
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
 
     if (caller && caller.id === targetId && user.is_admin) {
-      return res.status(400).json({ error: 'For security, you cannot revoke your own administrator privileges.' });
+      res.status(400).json({ error: 'For security, you cannot revoke your own administrator privileges.' });
+      return;
     }
 
     const newRole = user.is_admin ? 'user' : 'admin';
@@ -156,32 +165,37 @@ usersRouter.post('/:id/toggle-admin', requireAdmin, async (req: Request, res: Re
   }
 });
 
-usersRouter.delete('/:id', async (req: Request, res: Response) => {
+usersRouter.delete('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
-    const targetId = String(req.params.id);
+    const targetId = String(req.params['id']);
     const caller = await getAuthenticatedUser(req);
     const isAdmin = await isAdminUser(req);
 
     if (!caller && !isAdmin) {
-      return res.status(401).json({ error: 'Authentication required to delete a user account.' });
+      res.status(401).json({ error: 'Authentication required to delete a user account.' });
+      return;
     }
 
     const isSelf = caller && caller.id === targetId;
     if (!isAdmin && !isSelf) {
-      return res.status(403).json({ error: 'Moderators cannot remove users. Only Administrators have permission to delete accounts.' });
+      res.status(403).json({ error: 'Moderators cannot remove users. Only Administrators have permission to delete accounts.' });
+      return;
     }
 
     const user = (await db.prepare('SELECT id, username, is_admin FROM users WHERE id = ?').get(targetId)) as any;
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
 
     if (isPlatformAdmin(user.username, targetId)) {
-      return res.status(400).json({ error: 'The primary platform administrator account cannot be deleted.' });
+      res.status(400).json({ error: 'The primary platform administrator account cannot be deleted.' });
+      return;
     }
 
     if (caller && caller.id === targetId && user.is_admin) {
-      return res.status(400).json({ error: 'For security, you cannot delete your own active administrator account.' });
+      res.status(400).json({ error: 'For security, you cannot delete your own active administrator account.' });
+      return;
     }
 
     await db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetId);

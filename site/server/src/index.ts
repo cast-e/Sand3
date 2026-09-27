@@ -47,7 +47,7 @@ apiRouter.get('/workshop/health', async (_req, res) => {
   } else {
     try {
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Database query timed out after 3500ms. Check Neon compute status and IP allowlist.')), 3500)
+        setTimeout(() => reject(new Error('Database query timed out after 8000ms. Check Neon compute status and IP allowlist.')), 8000)
       );
       const queryPromise = db.prepare('SELECT 1 as connected').get();
       const result = (await Promise.race([queryPromise, timeoutPromise])) as any;

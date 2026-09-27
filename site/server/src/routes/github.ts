@@ -32,10 +32,12 @@ function setCached<T>(key: string, data: T): void {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-githubRouter.get('/latest-release', async (req, res) => {
+githubRouter.get('/latest-release', async (_req, res): Promise<void> => {
   const cacheKey = 'github:latest-release';
-  const cached = getCached(cacheKey, 5 * 60 * 1000); if (cached) {
-    return res.json(cached);
+  const cached = getCached(cacheKey, 5 * 60 * 1000);
+  if (cached) {
+    res.json(cached);
+    return;
   }
 
   try {
@@ -49,7 +51,8 @@ githubRouter.get('/latest-release', async (req, res) => {
 
     const releases: any[] = await response.json();
     if (!releases || releases.length === 0) {
-      return res.status(404).json({ error: 'No releases found' });
+      res.status(404).json({ error: 'No releases found' });
+      return;
     }
 
     const latest = releases[0];
@@ -96,10 +99,12 @@ githubRouter.get('/latest-release', async (req, res) => {
   }
 });
 
-githubRouter.get('/releases', async (req, res) => {
+githubRouter.get('/releases', async (_req, res): Promise<void> => {
   const cacheKey = 'github:all-releases';
-  const cached = getCached(cacheKey, 10 * 60 * 1000); if (cached) {
-    return res.json(cached);
+  const cached = getCached(cacheKey, 10 * 60 * 1000);
+  if (cached) {
+    res.json(cached);
+    return;
   }
 
   try {
@@ -135,10 +140,12 @@ githubRouter.get('/releases', async (req, res) => {
   }
 });
 
-githubRouter.get('/readme', async (req, res) => {
+githubRouter.get('/readme', async (_req, res): Promise<void> => {
   const cacheKey = 'github:readme';
-  const cached = getCached(cacheKey, 15 * 60 * 1000); if (cached) {
-    return res.json({ content: cached, source: 'cache' });
+  const cached = getCached(cacheKey, 15 * 60 * 1000);
+  if (cached) {
+    res.json({ content: cached, source: 'cache' });
+    return;
   }
 
   try {
@@ -146,7 +153,8 @@ githubRouter.get('/readme', async (req, res) => {
     if (response.ok) {
       const content = await response.text();
       setCached(cacheKey, content);
-      return res.json({ content, source: 'github' });
+      res.json({ content, source: 'github' });
+      return;
     }
   } catch (err: any) {
     console.warn('Could not fetch raw README from GitHub, falling back to local file:', err.message);
@@ -155,7 +163,8 @@ githubRouter.get('/readme', async (req, res) => {
   if (fs.existsSync(LOCAL_README_PATH)) {
     const localContent = fs.readFileSync(LOCAL_README_PATH, 'utf-8');
     setCached(cacheKey, localContent);
-    return res.json({ content: localContent, source: 'local' });
+    res.json({ content: localContent, source: 'local' });
+    return;
   }
 
   res.status(404).json({ error: 'README not found' });

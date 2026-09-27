@@ -12,16 +12,18 @@ const UPLOADS_DIR = process.env['UPLOADS_DIR'] || (process.env['VERCEL'] ? '/tmp
 export const downloadsRouter = Router();
 
 downloadsRouter.get('/:id/download', async (req, res) => {
-  const id = String(req.params.id);
+  const id = String(req.params['id']);
 
   const item = (await db.prepare('SELECT * FROM items WHERE id = ? AND is_hidden = 0').get(id)) as any;
   if (!item) {
-    return res.status(404).json({ error: 'Item not found' });
+    res.status(404).json({ error: 'Item not found' });
+    return;
   }
 
   const resolvedPath = path.resolve(UPLOADS_DIR, item.file_path);
   if (!resolvedPath.startsWith(UPLOADS_DIR) || !fs.existsSync(resolvedPath)) {
-    return res.status(404).json({ error: 'Physical file not found on server' });
+    res.status(404).json({ error: 'Physical file not found on server' });
+    return;
   }
 
   await db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);

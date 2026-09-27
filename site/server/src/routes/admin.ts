@@ -12,25 +12,27 @@ const THUMBNAILS_DIR = path.resolve(UPLOADS_DIR, 'thumbnails');
 
 export const adminRouter = Router();
 
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!(await isAdminUser(req))) {
-    return res.status(403).json({
+    res.status(403).json({
       error: 'Admin access required. Please log in as an administrator.'
     });
+    return;
   }
   next();
 }
 
-export async function requireModerator(req: Request, res: Response, next: NextFunction) {
+export async function requireModerator(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!(await isModeratorUser(req))) {
-    return res.status(403).json({
+    res.status(403).json({
       error: 'Moderator or Admin access required. Please log in with a moderator or administrator account.'
     });
+    return;
   }
   next();
 }
 
-adminRouter.get('/check', async (req: Request, res: Response) => {
+adminRouter.get('/check', async (req: Request, res: Response): Promise<void> => {
   const is_admin = await isAdminUser(req);
   const is_moderator = await isModeratorUser(req);
   const user = await getAuthenticatedUser(req);
@@ -42,7 +44,7 @@ adminRouter.get('/check', async (req: Request, res: Response) => {
   });
 });
 
-adminRouter.get('/stats', requireModerator, async (_req: Request, res: Response) => {
+adminRouter.get('/stats', requireModerator, async (_req: Request, res: Response): Promise<void> => {
   try {
     const totalItemsRow = await db.prepare('SELECT COUNT(*) as c FROM items').get();
     const totalReportsRow = await db.prepare('SELECT COUNT(*) as c FROM reports').get();
@@ -64,7 +66,7 @@ adminRouter.get('/stats', requireModerator, async (_req: Request, res: Response)
   }
 });
 
-adminRouter.get('/reports', requireModerator, async (req: Request, res: Response) => {
+adminRouter.get('/reports', requireModerator, async (_req: Request, res: Response): Promise<void> => {
   try {
     const query = `
       SELECT r.id as report_id, r.item_id, r.client_uuid, r.reason, r.details, r.created_at as reported_at,
@@ -82,12 +84,13 @@ adminRouter.get('/reports', requireModerator, async (req: Request, res: Response
   }
 });
 
-adminRouter.post('/reports/:id/dismiss', requireModerator, async (req: Request, res: Response) => {
+adminRouter.post('/reports/:id/dismiss', requireModerator, async (req: Request, res: Response): Promise<void> => {
   try {
-    const reportId = Number(req.params.id);
+    const reportId = Number(req.params['id']);
     const report = (await db.prepare('SELECT item_id FROM reports WHERE id = ?').get(reportId)) as any;
     if (!report) {
-      return res.status(404).json({ error: 'Report not found' });
+      res.status(404).json({ error: 'Report not found' });
+      return;
     }
 
     await db.prepare('DELETE FROM reports WHERE id = ?').run(reportId);
@@ -102,9 +105,9 @@ adminRouter.post('/reports/:id/dismiss', requireModerator, async (req: Request, 
   }
 });
 
-adminRouter.post('/items/:id/clear-reports', requireModerator, async (req: Request, res: Response) => {
+adminRouter.post('/items/:id/clear-reports', requireModerator, async (req: Request, res: Response): Promise<void> => {
   try {
-    const itemId = String(req.params.id);
+    const itemId = String(req.params['id']);
     await db.prepare('DELETE FROM reports WHERE item_id = ?').run(itemId);
     await db.prepare('UPDATE items SET reports_count = 0, is_hidden = 0 WHERE id = ?').run(itemId);
     res.json({ success: true, message: 'All reports cleared and item unhidden.' });
@@ -113,12 +116,13 @@ adminRouter.post('/items/:id/clear-reports', requireModerator, async (req: Reque
   }
 });
 
-adminRouter.post('/items/:id/toggle-hide', requireModerator, async (req: Request, res: Response) => {
+adminRouter.post('/items/:id/toggle-hide', requireModerator, async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(req.params.id);
+    const id = String(req.params['id']);
     const item = (await db.prepare('SELECT id, is_hidden, title FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
-      return res.status(404).json({ error: 'Item not found' });
+      res.status(404).json({ error: 'Item not found' });
+      return;
     }
 
     const newHidden = item.is_hidden ? 0 : 1;
@@ -135,12 +139,13 @@ adminRouter.post('/items/:id/toggle-hide', requireModerator, async (req: Request
   }
 });
 
-adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Response) => {
+adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(req.params.id);
+    const id = String(req.params['id']);
     const item = (await db.prepare('SELECT * FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
-      return res.status(404).json({ error: 'Item not found' });
+      res.status(404).json({ error: 'Item not found' });
+      return;
     }
 
     try {
@@ -164,11 +169,11 @@ adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Res
   }
 });
 
-adminRouter.get('/items', requireModerator, async (req: Request, res: Response) => {
+adminRouter.get('/items', requireModerator, async (req: Request, res: Response): Promise<void> => {
   try {
-    const q = (req.query.q as string || '').trim().toLowerCase();
-    const type = req.query.type as string;
-    const filter = (req.query.filter as string || 'all').toLowerCase();
+    const q = (req.query['q'] as string || '').trim().toLowerCase();
+    const type = req.query['type'] as string;
+    const filter = (req.query['filter'] as string || 'all').toLowerCase();
 
     let conditions: string[] = [];
     let params: any[] = [];

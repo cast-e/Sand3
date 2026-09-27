@@ -1,19 +1,21 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { db } from '../db.js';
 
 export const interactionsRouter = Router();
 
-interactionsRouter.post('/:id/like', async (req, res) => {
-  const id = String(req.params.id);
+interactionsRouter.post('/:id/like', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
   const { client_uuid } = req.body;
 
   if (!client_uuid) {
-    return res.status(400).json({ error: 'client_uuid is required' });
+    res.status(400).json({ error: 'client_uuid is required' });
+    return;
   }
 
   const item = (await db.prepare('SELECT id, likes_count FROM items WHERE id = ?').get(id)) as any;
   if (!item) {
-    return res.status(404).json({ error: 'Item not found' });
+    res.status(404).json({ error: 'Item not found' });
+    return;
   }
 
   const existing = (await db
@@ -43,17 +45,19 @@ interactionsRouter.post('/:id/like', async (req, res) => {
   });
 });
 
-interactionsRouter.post('/:id/favorite', async (req, res) => {
-  const id = String(req.params.id);
+interactionsRouter.post('/:id/favorite', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
   const { client_uuid } = req.body;
 
   if (!client_uuid) {
-    return res.status(400).json({ error: 'client_uuid is required' });
+    res.status(400).json({ error: 'client_uuid is required' });
+    return;
   }
 
   const item = (await db.prepare('SELECT id, favorites_count FROM items WHERE id = ?').get(id)) as any;
   if (!item) {
-    return res.status(404).json({ error: 'Item not found' });
+    res.status(404).json({ error: 'Item not found' });
+    return;
   }
 
   const existing = (await db
@@ -83,20 +87,23 @@ interactionsRouter.post('/:id/favorite', async (req, res) => {
   });
 });
 
-interactionsRouter.post('/:id/report', async (req, res) => {
-  const id = String(req.params.id);
+interactionsRouter.post('/:id/report', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
   const { client_uuid, reason = 'other', details = '' } = req.body;
 
   if (!client_uuid) {
-    return res.status(400).json({ error: 'client_uuid is required' });
+    res.status(400).json({ error: 'client_uuid is required' });
+    return;
   }
   if (!['broken', 'offensive', 'spam', 'other'].includes(reason)) {
-    return res.status(400).json({ error: 'Invalid report reason' });
+    res.status(400).json({ error: 'Invalid report reason' });
+    return;
   }
 
   const item = (await db.prepare('SELECT id, reports_count FROM items WHERE id = ?').get(id)) as any;
   if (!item) {
-    return res.status(404).json({ error: 'Item not found' });
+    res.status(404).json({ error: 'Item not found' });
+    return;
   }
 
   await db.prepare('INSERT INTO reports (item_id, client_uuid, reason, details) VALUES (?, ?, ?, ?)').run(
@@ -119,10 +126,11 @@ interactionsRouter.post('/:id/report', async (req, res) => {
   });
 });
 
-interactionsRouter.get('/user/favorites', async (req, res) => {
+interactionsRouter.get('/user/favorites', async (req: Request, res: Response): Promise<void> => {
   const { client_uuid } = req.query as { client_uuid: string };
   if (!client_uuid) {
-    return res.status(400).json({ error: 'client_uuid query parameter is required' });
+    res.status(400).json({ error: 'client_uuid query parameter is required' });
+    return;
   }
 
   const query = `

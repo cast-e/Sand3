@@ -5,8 +5,13 @@ if (!config.databaseUrl) {
   console.warn('[DB] Warning: DATABASE_URL environment variable is not set. Set it in Vercel or your .env file.');
 }
 
+function cleanUrl(url: string): string {
+  if (!url) return '';
+  return url.replace(/([?&])channel_binding=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
+}
+
 const DUMMY_URL = 'postgresql://dummy:dummy@localhost/dummy';
-export const sql = neon(config.databaseUrl || DUMMY_URL);
+export const sql = neon(cleanUrl(config.databaseUrl) || DUMMY_URL);
 
 export function translateSql(query: string): string {
   let paramIdx = 1;

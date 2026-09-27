@@ -53,8 +53,8 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
     token = authHeader.substring(7).trim();
   } else if (req.headers['x-session-token']) {
     token = String(req.headers['x-session-token']).trim();
-  } else if (typeof req.query.token === 'string') {
-    token = req.query.token.trim();
+  } else if (typeof req.query['token'] === 'string') {
+    token = (req.query['token'] as string).trim();
   }
 
   if (!token) return null;
@@ -63,10 +63,11 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
     try {
       const { payload } = await jwtVerify(token, jwks);
       const sub = payload.sub as string;
-      const email = payload.email as string | undefined;
+      const anyPayload = payload as Record<string, any>;
+      const email = anyPayload['email'] as string | undefined;
       const name =
-        (payload.name as string) ||
-        (payload.preferred_username as string) ||
+        (anyPayload['name'] as string) ||
+        (anyPayload['preferred_username'] as string) ||
         email?.split('@')[0] ||
         `user_${sub.slice(0, 8)}`;
 
@@ -173,7 +174,7 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
 }
 
 export async function isAdminUser(req: Request): Promise<boolean> {
-  const adminKey = req.headers['x-admin-key'] || req.query.admin_key;
+  const adminKey = req.headers['x-admin-key'] || req.query['admin_key'];
 
   if (adminKey && typeof adminKey === 'string') {
     if (config.adminKey && adminKey === config.adminKey) {
@@ -195,14 +196,15 @@ export async function isModeratorUser(req: Request): Promise<boolean> {
 }
 
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
-function authRateLimiter(req: Request, res: Response, next: NextFunction) {
+function authRateLimiter(req: Request, res: Response, next: NextFunction): void {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
   const now = Date.now();
   const entry = authAttempts.get(ip);
   if (entry) {
     if (now < entry.resetAt) {
       if (entry.count >= 20) {
-        return res.status(429).json({ error: 'Too many authentication attempts. Please wait a few minutes and try again.' });
+        res.status(429).json({ error: 'Too many authentication attempts. Please wait a few minutes and try again.' });
+        return;
       }
       entry.count++;
     } else {
@@ -214,19 +216,22 @@ function authRateLimiter(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-authRouter.post('/register', authRateLimiter, async (req: Request, res: Response) => {
+authRouter.post('/register', authRateLimiter, async (req: Request, res: Response): Promise<void> => {
   const { username = '', password = '' } = req.body;
   const cleanUsername = String(username).trim();
   const cleanPassword = String(password);
 
   if (cleanUsername.length < 3 || cleanUsername.length > 32) {
-    return res.status(400).json({ error: 'Username must be between 3 and 32 characters' });
+    res.status(400).json({ error: 'Username must be between 3 and 32 characters' });
+    return;
   }
   if (!/^[a-zA-Z0-9_\-\.]+$/.test(cleanUsername)) {
-    return res.status(400).json({ error: 'Username can only contain letters, numbers, hyphens, and underscores' });
+    res.status(400).json({ error: 'Username can only contain letters, numbers, hyphens, and underscores' });
+    return;
   }
   if (cleanPassword.length < 4) {
-    return res.status(400).json({ error: 'Password must be at least 4 characters long' });
+    res.status(400).json({ error: 'Password must be at least 4 characters long' });
+    return;
   }
 
   const existing = (await db.prepare('SELECT id, password_hash, is_admin, role FROM users WHERE LOWER(username) = LOWER(?)').get(cleanUsername)) as any;
@@ -257,9 +262,11 @@ authRouter.post('/register', authRateLimiter, async (req: Request, res: Response
         created_at: new Date().toISOString()
       };
 
-      return res.status(201).json({ token, user, message: 'Account initialized successfully' });
+      res.status(201).json({ token, user, message: 'Account initialized successfully' });
+      return;
     }
-    return res.status(409).json({ error: 'Username is already taken' });
+    res.status(409).json({ error: 'Username is already taken' });
+    return;
   }
 
   const userId = crypto.randomUUID();
@@ -286,14 +293,15 @@ authRouter.post('/register', authRateLimiter, async (req: Request, res: Response
   res.status(201).json({ token, user });
 });
 
-authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) => {
+authRouter.post('/login', authRateLimiter, async (req: Request, res: Response): Promise<void> => {
   const { username = '', password = '' } = req.body;
   const cleanUsername = String(username).trim();
   const cleanPassword = String(password);
 
   const userRow = (await db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(cleanUsername)) as any;
   if (!userRow) {
-    return res.status(401).json({ error: 'Invalid username or password' });
+    res.status(401).json({ error: 'Invalid username or password' });
+    return;
   }
 
   const isBootstrap =
@@ -314,7 +322,8 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userRow.id);
     }
   } else if (!verifyPassword(cleanPassword, userRow.password_hash)) {
-    return res.status(401).json({ error: 'Invalid username or password' });
+    res.status(401).json({ error: 'Invalid username or password' });
+    return;
   }
 
   const token = crypto.randomUUID();
@@ -344,15 +353,16 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
   res.json({ token, user });
 });
 
-authRouter.get('/me', async (req: Request, res: Response) => {
+authRouter.get('/me', async (req: Request, res: Response): Promise<void> => {
   const user = await getAuthenticatedUser(req);
   if (!user) {
-    return res.status(401).json({ error: 'Not authenticated' });
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
   }
   res.json({ user });
 });
 
-authRouter.post('/logout', async (req: Request, res: Response) => {
+authRouter.post('/logout', async (req: Request, res: Response): Promise<void> => {
   const authHeader = req.headers.authorization;
   let token = '';
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -367,17 +377,19 @@ authRouter.post('/logout', async (req: Request, res: Response) => {
   res.json({ success: true, message: 'Logged out successfully' });
 });
 
-authRouter.post('/reset-admin-password', async (req: Request, res: Response) => {
+authRouter.post('/reset-admin-password', async (req: Request, res: Response): Promise<void> => {
   const { new_password = '', admin_key = '', username = config.adminUsername } = req.body;
-  const reqKey = req.headers['x-admin-key'] || admin_key || req.query.admin_key;
+  const reqKey = req.headers['x-admin-key'] || admin_key || req.query['admin_key'];
 
   if (!config.adminKey || reqKey !== config.adminKey) {
-    return res.status(403).json({ error: 'Unauthorized: Invalid admin key' });
+    res.status(403).json({ error: 'Unauthorized: Invalid admin key' });
+    return;
   }
 
   const cleanPass = String(new_password);
   if (cleanPass.length < 4) {
-    return res.status(400).json({ error: 'New password must be at least 4 characters long' });
+    res.status(400).json({ error: 'New password must be at least 4 characters long' });
+    return;
   }
 
   const targetUsername = String(username).trim() || config.adminUsername;

@@ -215,9 +215,9 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
   });
 });
 
-itemsRouter.get('/:id', async (req: Request, res: Response) => {
-  const id = String(req.params.id);
-  const client_uuid = (req.query.client_uuid as string) || '';
+itemsRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
+  const client_uuid = (req.query['client_uuid'] as string) || '';
 
   const query = `
     SELECT i.*,
@@ -230,7 +230,8 @@ itemsRouter.get('/:id', async (req: Request, res: Response) => {
 
   const row = (await db.prepare(query).get(id)) as any;
   if (!row) {
-    return res.status(404).json({ error: 'Item not found' });
+    res.status(404).json({ error: 'Item not found' });
+    return;
   }
 
   let is_liked = false;
@@ -251,8 +252,8 @@ itemsRouter.get('/:id', async (req: Request, res: Response) => {
   });
 });
 
-itemsRouter.get('/sets/:id/saves', async (req: Request, res: Response) => {
-  const id = String(req.params.id);
+itemsRouter.get('/sets/:id/saves', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
   const query = `
     SELECT i.*
     FROM items i
@@ -263,8 +264,8 @@ itemsRouter.get('/sets/:id/saves', async (req: Request, res: Response) => {
   res.json(rows);
 });
 
-itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response) => {
-  const id = String(req.params.id);
+itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
   const query = `
     SELECT i.*
     FROM items i
@@ -275,22 +276,24 @@ itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response) => {
   res.json(rows);
 });
 
-itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response) => {
-  const id = String(req.params.id);
+itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
   const item = (await db.prepare('SELECT thumbnail_path FROM items WHERE id = ?').get(id)) as any;
   if (!item || !item.thumbnail_path) {
-    return res.status(404).json({ error: 'No thumbnail available' });
+    res.status(404).json({ error: 'No thumbnail available' });
+    return;
   }
 
   const thumbFile = path.resolve(THUMBNAILS_DIR, item.thumbnail_path);
   if (!thumbFile.startsWith(THUMBNAILS_DIR) || !fs.existsSync(thumbFile)) {
-    return res.status(404).json({ error: 'Thumbnail file missing' });
+    res.status(404).json({ error: 'Thumbnail file missing' });
+    return;
   }
 
   res.sendFile(thumbFile);
 });
 
-itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
+itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise<void> => {
   try {
     const authUser = await getAuthenticatedUser(req);
     const body = req.body;
@@ -303,10 +306,12 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
     let meta_json = body.meta_json || '{}';
 
     if (!['set', 'save', 'stamp', 'theme'].includes(type)) {
-      return res.status(400).json({ error: 'Invalid item type. Must be set, save, stamp, or theme' });
+      res.status(400).json({ error: 'Invalid item type. Must be set, save, stamp, or theme' });
+      return;
     }
     if (!title) {
-      return res.status(400).json({ error: 'Title is required' });
+      res.status(400).json({ error: 'Title is required' });
+      return;
     }
 
     try {
@@ -323,14 +328,16 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
     if (parent_set_id && (type === 'save' || type === 'stamp')) {
       const parentSet = (await db.prepare("SELECT id, title, set_hash FROM items WHERE id = ? AND type = 'set'").get(parent_set_id)) as any;
       if (!parentSet) {
-        return res.status(404).json({ error: `Associated set with ID '${parent_set_id}' was not found` });
+        res.status(404).json({ error: `Associated set with ID '${parent_set_id}' was not found` });
+        return;
       }
       if (set_hash && parentSet.set_hash && set_hash !== parentSet.set_hash) {
-        return res.status(409).json({
+        res.status(409).json({
           error: `Set compatibility mismatch: the materials/rules in your local set differ from online set '${parentSet.title}'. Existing saves/stamps cannot be bound to modified sets.`,
           online_hash: parentSet.set_hash,
           provided_hash: set_hash
         });
+        return;
       }
     }
 
@@ -352,7 +359,8 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
       filePath = filename;
       fileSize = buffer.length;
     } else {
-      return res.status(400).json({ error: 'File upload or file_data is required' });
+      res.status(400).json({ error: 'File upload or file_data is required' });
+      return;
     }
 
     let thumbnailPath = '';
@@ -394,24 +402,27 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
   }
 });
 
-itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
+itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(req.params.id);
+    const id = String(req.params['id']);
     const authUser = await getAuthenticatedUser(req);
     if (!authUser) {
-      return res.status(401).json({ error: 'You must be logged in to edit this item' });
+      res.status(401).json({ error: 'You must be logged in to edit this item' });
+      return;
     }
 
     const item = (await db.prepare('SELECT * FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
-      return res.status(404).json({ error: 'Item not found' });
+      res.status(404).json({ error: 'Item not found' });
+      return;
     }
 
     const isOwner =
       (item.user_id && item.user_id === authUser.id) ||
       (!item.user_id && item.author.toLowerCase() === authUser.username.toLowerCase());
     if (!isOwner) {
-      return res.status(403).json({ error: 'You do not own this item' });
+      res.status(403).json({ error: 'You do not own this item' });
+      return;
     }
 
     const body = req.body;
@@ -533,24 +544,27 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
   }
 });
 
-itemsRouter.delete('/:id', async (req: Request, res: Response) => {
+itemsRouter.delete('/:id', async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(req.params.id);
+    const id = String(req.params['id']);
     const authUser = await getAuthenticatedUser(req);
     if (!authUser) {
-      return res.status(401).json({ error: 'You must be logged in to delete this item' });
+      res.status(401).json({ error: 'You must be logged in to delete this item' });
+      return;
     }
 
     const item = (await db.prepare('SELECT * FROM items WHERE id = ?').get(id)) as any;
     if (!item) {
-      return res.status(404).json({ error: 'Item not found' });
+      res.status(404).json({ error: 'Item not found' });
+      return;
     }
 
     const isOwner =
       (item.user_id && item.user_id === authUser.id) ||
       (!item.user_id && item.author.toLowerCase() === authUser.username.toLowerCase());
     if (!isOwner) {
-      return res.status(403).json({ error: 'You do not own this item' });
+      res.status(403).json({ error: 'You do not own this item' });
+      return;
     }
 
     try {
