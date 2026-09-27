@@ -1,5 +1,4 @@
 <div class="workshop-container">
-  <!-- Controls Bar -->
   <div class="workshop-header">
     <div class="title-filter-row">
       <div class="category-tabs">
@@ -21,7 +20,6 @@
       </div>
     </div>
 
-    <!-- Search & Sort Bar -->
     <div class="search-sort-row">
       <div class="search-box">
         <img src="/icons/magnifier.png" class="silk-icon search-icon" alt="Search" />
@@ -45,7 +43,6 @@
     </div>
   </div>
 
-  <!-- Items Grid -->
   @if (loading()) {
   <div class="loading-state">
     <img src="/icons/arrow_refresh.png" class="silk-icon spinner" alt="Loading" />
@@ -64,7 +61,6 @@
   <div class="items-grid">
     @for (item of items(); track item.id) {
     <div class="card item-card">
-      <!-- Card Header -->
       <div class="card-header">
         <div class="item-title-meta">
           <span class="badge" [class.badge-blue]="item.type === 'set'" [class.badge-green]="item.type === 'save'"
@@ -90,14 +86,12 @@
         <span class="author-tag">by <strong>{{ item.author }}</strong></span>
       </div>
 
-      <!-- Thumbnail Preview if available -->
       @if (item.thumbnail_path) {
       <div class="card-thumb-container">
         <img [src]="api.getThumbnailUrl(item.id)" alt="{{ item.title }}" class="item-card-thumb" loading="lazy" />
       </div>
       }
 
-      <!-- Card Body -->
       <div class="card-body item-body">
         @if (item.parent_set_title) {
         <div class="parent-set-pill">
@@ -111,7 +105,6 @@
 
         <p class="item-desc">{{ item.description || 'No description provided.' }}</p>
 
-        <!-- Metadata Pills -->
         <div class="meta-tags">
           @if (parseMeta(item.meta_json); as m) {
           @if (m.materials_count) {
@@ -134,28 +127,23 @@
         </div>
       </div>
 
-      <!-- Card Footer -->
       <div class="card-footer item-actions">
-        <!-- Open in Sand3 / Download Button -->
         <button (click)="openInSand3(item, $event)" class="btn btn-sm btn-primary" title="Open in Sand3">
           <img src="/icons/application_go.png" class="silk-icon" alt="Open" />
           Open
         </button>
 
-        <!-- Social Action: Like -->
         <button class="btn btn-sm" [class.active]="item.is_liked" (click)="toggleLike(item, $event)" title="Like item">
           <img src="/icons/heart.png" class="silk-icon" alt="Like" />
           <span>{{ item.likes_count }}</span>
         </button>
 
-        <!-- Social Action: Favorite -->
         <button class="btn btn-sm" [class.active]="item.is_favorited" (click)="toggleFavorite(item, $event)"
           title="Add to favorites">
           <img src="/icons/star.png" class="silk-icon" alt="Favorite" />
           <span>{{ item.favorites_count }}</span>
         </button>
 
-        <!-- Owner Actions: Edit & Delete -->
         @if (isOwner(item)) {
         <button class="btn btn-sm btn-owner-edit" (click)="openEditModal(item, $event)" title="Edit item">
           <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
@@ -165,7 +153,6 @@
         </button>
         }
 
-        <!-- Social Action: Report -->
         <button class="btn btn-sm report-btn" (click)="openReportModal(item, $event)"
           title="Report broken or inappropriate item">
           <img src="/icons/flag_red.png" class="silk-icon" alt="Report" />
@@ -176,7 +163,6 @@
   </div>
   }
 
-  <!-- Edit Item Modal -->
   @if (editingItem(); as item) {
   <div class="modal-backdrop" (click)="closeEditModal()">
     <div class="card modal-content" (click)="$event.stopPropagation()">
@@ -231,7 +217,6 @@
   </div>
   }
 
-  <!-- Report Modal Overlay -->
   @if (reportingItem(); as item) {
   <div class="modal-backdrop" (click)="closeReportModal()">
     <div class="card modal-content" (click)="$event.stopPropagation()">
@@ -281,7 +266,6 @@
   </div>
   }
 
-  <!-- Usage Guide Modal Dialog (shown when custom protocol fails and fallback download starts) -->
   @if (showUsageModal() && currentOpenItem(); as it) {
   <div class="modal-backdrop" (click)="closeUsageModal()">
     <div class="modal-card" (click)="$event.stopPropagation()">
@@ -301,10 +285,12 @@
         <ol style="padding-left: 20px; line-height: 1.8; margin-bottom: 20px; color: var(--text);">
           <li>Open <strong>Sand3</strong>.</li>
           <li>Go to the <strong>Workshop</strong> tab to browse and activate with 1-click.</li>
-          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.</li>
+          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.
+          </li>
         </ol>
 
-        <div style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <div
+          style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
           <span style="font-size: 13px; color: var(--text-muted);">Need the file again?</span>
           <a [href]="getDownloadUrl(it.id)" class="btn btn-sm btn-primary" download>
             <img src="/icons/arrow_down.png" class="silk-icon" alt="Download" /> Download file

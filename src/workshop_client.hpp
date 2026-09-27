@@ -9,7 +9,7 @@
 
 struct WorkshopItemClient {
 	std::string id;
-	std::string type;  // "set", "save", "stamp", "theme"
+	std::string type;
 	std::string title;
 	std::string description;
 	std::string author;
@@ -66,8 +66,7 @@ public:
 	static void fetch_item(const std::string& id,
 						   std::function<void(bool success, const WorkshopItemClient& item)> callback);
 
-	static void check_item_exists(const std::string& id,
-								  std::function<void(bool exists, int http_status)> callback);
+	static void check_item_exists(const std::string& id, std::function<void(bool exists, int http_status)> callback);
 
 	static void
 	fetch_set_saves(const std::string& set_id,

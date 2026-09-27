@@ -1,5 +1,4 @@
 <div class="app-layout">
-  <!-- GitHub-styled Navigation Header -->
   <header class="header">
     <div class="header-inner">
       <div class="header-left">
@@ -53,12 +52,10 @@
     </div>
   </header>
 
-  <!-- Main View Container -->
   <main class="main-content">
     <router-outlet></router-outlet>
   </main>
 
-  <!-- GitHub-styled Footer -->
   <footer class="footer">
     <div class="footer-inner">
       <div class="footer-brand">
@@ -75,7 +72,6 @@
     </div>
   </footer>
 
-  <!-- Auth Modal Dialog -->
   @if (showAuthModal()) {
   <div class="modal-backdrop" (click)="closeAuthModal()">
     <div class="modal-card" (click)="$event.stopPropagation()">

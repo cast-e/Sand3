@@ -44,17 +44,16 @@ namespace ZipUtil {
 			crcs.push_back(c);
 
 			write_u32(zip_data, 0x04034b50);
-			write_u16(zip_data, 20);									 // version needed to extract (2.0)
-			write_u16(zip_data, 0);										 // general purpose bit flag
-			write_u16(zip_data, 0);										 // compression method (0 = stored)
-			write_u16(zip_data, 0);										 // last mod file time
-			write_u16(zip_data, 0);										 // last mod file date
-			write_u32(zip_data, c);										 // crc-32
-			write_u32(zip_data, static_cast<uint32_t>(content.size()));	 // compressed size
-			write_u32(zip_data, static_cast<uint32_t>(content.size()));	 // uncompressed size
-			write_u16(zip_data, static_cast<uint16_t>(fname.size()));	 // file name length
-			write_u16(zip_data, 0);										 // extra field length
-
+			write_u16(zip_data, 20);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u32(zip_data, c);
+			write_u32(zip_data, static_cast<uint32_t>(content.size()));
+			write_u32(zip_data, static_cast<uint32_t>(content.size()));
+			write_u16(zip_data, static_cast<uint16_t>(fname.size()));
+			write_u16(zip_data, 0);
 			for (char ch : fname)
 				zip_data.push_back(static_cast<uint8_t>(ch));
 
@@ -69,23 +68,22 @@ namespace ZipUtil {
 			uint32_t offset = local_header_offsets[i];
 
 			write_u32(zip_data, 0x02014b50);
-			write_u16(zip_data, 20);  // version made by
-			write_u16(zip_data, 20);  // version needed to extract
-			write_u16(zip_data, 0);	  // general purpose bit flag
-			write_u16(zip_data, 0);	  // compression method
-			write_u16(zip_data, 0);	  // last mod file time
-			write_u16(zip_data, 0);	  // last mod file date
-			write_u32(zip_data, c);	  // crc-32
+			write_u16(zip_data, 20);
+			write_u16(zip_data, 20);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u32(zip_data, c);
 			write_u32(zip_data, static_cast<uint32_t>(content.size()));
 			write_u32(zip_data, static_cast<uint32_t>(content.size()));
 			write_u16(zip_data, static_cast<uint16_t>(fname.size()));
-			write_u16(zip_data, 0);		  // extra field length
-			write_u16(zip_data, 0);		  // file comment length
-			write_u16(zip_data, 0);		  // disk number start
-			write_u16(zip_data, 0);		  // internal file attributes
-			write_u32(zip_data, 0);		  // external file attributes
-			write_u32(zip_data, offset);  // relative offset of local header
-
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u16(zip_data, 0);
+			write_u32(zip_data, 0);
+			write_u32(zip_data, offset);
 			for (char ch : fname)
 				zip_data.push_back(static_cast<uint8_t>(ch));
 		}
@@ -93,14 +91,13 @@ namespace ZipUtil {
 		uint32_t cd_size = static_cast<uint32_t>(zip_data.size() - cd_offset);
 
 		write_u32(zip_data, 0x06054b50);
-		write_u16(zip_data, 0);									   // disk number
-		write_u16(zip_data, 0);									   // disk with central directory
-		write_u16(zip_data, static_cast<uint16_t>(files.size()));  // entries on this disk
-		write_u16(zip_data, static_cast<uint16_t>(files.size()));  // total entries
-		write_u32(zip_data, cd_size);							   // size of central directory
-		write_u32(zip_data, cd_offset);							   // offset of central directory
-		write_u16(zip_data, 0);									   // comment length
-
+		write_u16(zip_data, 0);
+		write_u16(zip_data, 0);
+		write_u16(zip_data, static_cast<uint16_t>(files.size()));
+		write_u16(zip_data, static_cast<uint16_t>(files.size()));
+		write_u32(zip_data, cd_size);
+		write_u32(zip_data, cd_offset);
+		write_u16(zip_data, 0);
 		return zip_data;
 	}
 

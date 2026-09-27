@@ -5,7 +5,6 @@
     <p>Loading set details...</p>
   </div>
   } @else if (item(); as set) {
-  <!-- Breadcrumb -->
   <div class="breadcrumb">
     <a routerLink="/workshop">
       <img src="/icons/arrow_left.png" class="silk-icon" alt="Back" />
@@ -17,7 +16,6 @@
     <span class="active-crumb">{{ set.title }}</span>
   </div>
 
-  <!-- Compatibility Warning Banner -->
   <div class="warning-banner">
     <img src="/icons/error.png" class="silk-icon" alt="Notice" />
     <div class="banner-text">
@@ -27,7 +25,6 @@
     </div>
   </div>
 
-  <!-- Set Overview Card -->
   <div class="card set-overview-card">
     <div class="card-header">
       <div class="set-title-group">
@@ -66,7 +63,6 @@
     </div>
 
     <div class="side-by-side-container">
-      <!-- Optional Thumbnail preview -->
       @if (set.thumbnail_path) {
       <div class="set-thumb-banner">
         <img [src]="api.getThumbnailUrl(set.id)" alt="{{ set.title }}" class="set-thumb-img" />
@@ -83,7 +79,6 @@
 
         <p class="set-description">{{ set.description || 'No description provided.' }}</p>
 
-        <!-- Metadata Spec Grid (Sets DO NOT have dimensions) -->
         <div class="meta-spec-grid">
           @if (parseMeta(set.meta_json); as m) {
           <div class="spec-card">
@@ -113,7 +108,6 @@
     </div>
   </div>
 
-  <!-- Saves & Stamps Tabbed Section -->
   <div class="items-section">
     <div class="section-title-row">
       <div class="tab-buttons">
@@ -128,7 +122,6 @@
       </div>
     </div>
 
-    <!-- Saves View -->
     @if (activeTab() === 'saves') {
     @if (saves().length === 0) {
     <div class="card empty-saves-card">
@@ -174,7 +167,6 @@
     }
     }
 
-    <!-- Stamps View -->
     @if (activeTab() === 'stamps') {
     @if (stamps().length === 0) {
     <div class="card empty-saves-card">
@@ -221,7 +213,6 @@
     }
   </div>
 
-  <!-- Edit Set Modal -->
   @if (editingItem()) {
   <div class="modal-backdrop" (click)="closeEditModal()">
     <div class="card modal-content" (click)="$event.stopPropagation()">
@@ -276,7 +267,6 @@
   </div>
   }
 
-  <!-- Usage Guide Modal Dialog (shown when custom protocol fails and fallback download starts) -->
   @if (showUsageModal() && currentOpenItem(); as it) {
   <div class="modal-backdrop" (click)="closeUsageModal()">
     <div class="modal-card" (click)="$event.stopPropagation()">
@@ -296,10 +286,12 @@
         <ol style="padding-left: 20px; line-height: 1.8; margin-bottom: 20px; color: var(--text);">
           <li>Open <strong>Sand3</strong>.</li>
           <li>Go to the <strong>Workshop</strong> tab to browse and activate with 1-click.</li>
-          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.</li>
+          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.
+          </li>
         </ol>
 
-        <div style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <div
+          style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
           <span style="font-size: 13px; color: var(--text-muted);">Need the file again?</span>
           <a [href]="getDownloadUrl(it.id)" class="btn btn-sm btn-primary" download>
             <img src="/icons/arrow_down.png" class="silk-icon" alt="Download" /> Download file

@@ -31,7 +31,6 @@ export interface WorkshopItem {
   is_hidden: number;
   created_at: string;
   updated_at: string;
-  // Computed fields
   is_liked?: boolean;
   is_favorited?: boolean;
   parent_set_title?: string;

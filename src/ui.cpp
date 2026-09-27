@@ -360,11 +360,9 @@ static void render_pixel_spans(ImDrawList* draw_list, const std::vector<LineSpan
 		if (x0 >= x1)
 			continue;
 
-		// Left and Right edges
 		segs.push_back({x0, y, x0, y + 1});
 		segs.push_back({x1, y, x1, y + 1});
 
-		// Top edges
 		int prev_x0 = (k > 0) ? spans[k - 1].x0 : 0;
 		int prev_x1 = (k > 0) ? spans[k - 1].x1 : 0;
 		if (prev_x0 >= prev_x1) {
@@ -376,7 +374,6 @@ static void render_pixel_spans(ImDrawList* draw_list, const std::vector<LineSpan
 				segs.push_back({prev_x1, y, x1, y});
 		}
 
-		// Bottom edges
 		int next_x0 = (k + 1 < spans.size()) ? spans[k + 1].x0 : 0;
 		int next_x1 = (k + 1 < spans.size()) ? spans[k + 1].x1 : 0;
 		if (next_x0 >= next_x1) {
@@ -3178,7 +3175,7 @@ void UI::render_material_editor() {
 
 namespace {
 	bool s_show_publish_modal = false;
-	int s_publish_type_idx = 0;	 // 0=Save, 1=Set, 2=Stamp, 3=Theme
+	int s_publish_type_idx = 0;
 	char s_publish_title[128] = "";
 	char s_publish_author[64] = "";
 	char s_publish_desc[512] = "";
@@ -3195,7 +3192,7 @@ namespace {
 		s_publish_target_set = set_name;
 		s_publish_target_save = "";
 		s_publish_target_stamp = "";
-		s_publish_type_idx = 1;	 // Set
+		s_publish_type_idx = 1;
 		s_show_publish_modal = true;
 		s_publish_status = "";
 		std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", set_name.c_str());
@@ -3213,7 +3210,7 @@ namespace {
 		s_publish_target_stamp = "";
 		s_publish_target_w = w;
 		s_publish_target_h = h;
-		s_publish_type_idx = 0;	 // Save
+		s_publish_type_idx = 0;
 		s_show_publish_modal = true;
 		s_publish_status = "";
 		std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", name.c_str());
@@ -3232,7 +3229,7 @@ namespace {
 		s_publish_target_stamp = filename;
 		s_publish_target_w = w;
 		s_publish_target_h = h;
-		s_publish_type_idx = 2;	 // Stamp
+		s_publish_type_idx = 2;
 		s_show_publish_modal = true;
 		s_publish_status = "";
 		std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", name.c_str());
@@ -3248,7 +3245,7 @@ namespace {
 		s_publish_target_set = "";
 		s_publish_target_save = "";
 		s_publish_target_stamp = "";
-		s_publish_type_idx = 3;	 // Theme
+		s_publish_type_idx = 3;
 		s_show_publish_modal = true;
 		s_publish_status = "";
 		std::snprintf(s_publish_title, sizeof(s_publish_title), "My Custom Theme");
@@ -4039,8 +4036,8 @@ namespace {
 	bool s_workshop_my_items = false;
 
 	char s_workshop_search[128] = "";
-	int s_workshop_type_filter = 0;	 // 0=All, 1=Sets, 2=Saves, 3=Stamps, 4=Themes
-	int s_workshop_sort_idx = 0;	 // 0=Popular, 1=Liked, 2=Favorites, 3=Newest, 4=Downloads
+	int s_workshop_type_filter = 0;
+	int s_workshop_sort_idx = 0;
 	bool s_force_workshop_tab_selected = false;
 
 	bool s_show_auth_modal = false;
@@ -4486,7 +4483,7 @@ namespace {
 			std::string path = std::string(SETS_DIRECTORY) + parent_name + "/stamps/" + item.title + ".stamp";
 			return std::filesystem::exists(path) && !WorkshopCache::is_transient(path);
 		} else if (item.type == "theme") {
-			return true;  // Not actually locally present but doesn't really matter anyway
+			return true;
 		}
 		return false;
 	}
@@ -4506,7 +4503,6 @@ void UI::handle_uri(const std::string& uri) {
 		   (s.back() == '"' || s.back() == '\'' || s.back() == ' ' || s.back() == '\n' || s.back() == '\r'))
 		s.pop_back();
 
-	// Parse query parameters if present (?type=...&id=...)
 	size_t qmark = s.find('?');
 	if (qmark != std::string::npos) {
 		std::string query = s.substr(qmark + 1);
@@ -4555,14 +4551,11 @@ void UI::handle_uri(const std::string& uri) {
 	}
 
 	if (!item_id.empty()) {
-		// 1. Force the workshop tab to be selected
 		s_force_workshop_tab_selected = true;
 
-		// 2. Set search filter to exact item ID
 		std::memset(s_workshop_search, 0, sizeof(s_workshop_search));
 		std::strncpy(s_workshop_search, item_id.c_str(), sizeof(s_workshop_search) - 1);
 
-		// 3. Set type filter if provided, or reset to All Types
 		if (item_type == "set") {
 			s_workshop_type_filter = 1;
 		} else if (item_type == "save") {
@@ -4572,16 +4565,14 @@ void UI::handle_uri(const std::string& uri) {
 		} else if (item_type == "theme") {
 			s_workshop_type_filter = 4;
 		} else {
-			s_workshop_type_filter = 0;	 // All Types
+			s_workshop_type_filter = 0;
 		}
 
 		s_workshop_my_items = false;
 		s_workshop_sort_idx = 0;
 
-		// 4. Trigger refresh to fetch matching item by ID
 		refresh_workshop_items();
 
-		// 5. Raise and focus window
 		if (Window::get_window()) {
 			SDL_ShowWindow(Window::get_window());
 			SDL_RaiseWindow(Window::get_window());
@@ -5978,12 +5969,10 @@ struct CuratedColor {
 };
 
 static const CuratedColor CURATED_THEME_COLORS[] = {
-	// Window Title Bar
 	{ImGuiCol_TitleBg, "Window Title Bar", "Title Bar Normal"},
 	{ImGuiCol_TitleBgActive, "Window Title Bar", "Title Bar Active (Focused)"},
 	{ImGuiCol_TitleBgCollapsed, "Window Title Bar", "Title Bar Collapsed"},
 
-	// Windows & Backgrounds
 	{CustomCol_CanvasBackground, "Windows & Backgrounds", "Canvas / Simulation Background"},
 	{ImGuiCol_WindowBg, "Windows & Backgrounds", "Window Background"},
 	{ImGuiCol_ChildBg, "Windows & Backgrounds", "Panel / Child Window Background"},
@@ -5992,7 +5981,6 @@ static const CuratedColor CURATED_THEME_COLORS[] = {
 	{ImGuiCol_BorderShadow, "Windows & Backgrounds", "Border Shadow"},
 	{ImGuiCol_MenuBarBg, "Windows & Backgrounds", "Menu Bar Background"},
 
-	// Checkboxes, Inputs & Sliders
 	{ImGuiCol_FrameBg, "Checkboxes, Inputs & Sliders", "Frame Background (Unchecked Checkbox / Input)"},
 	{ImGuiCol_FrameBgHovered, "Checkboxes, Inputs & Sliders", "Frame Background Hovered"},
 	{ImGuiCol_FrameBgActive, "Checkboxes, Inputs & Sliders", "Frame Background Active"},
@@ -6002,7 +5990,6 @@ static const CuratedColor CURATED_THEME_COLORS[] = {
 	{ImGuiCol_SliderGrabActive, "Checkboxes, Inputs & Sliders", "Slider Grabber Active"},
 	{ImGuiCol_InputTextCursor, "Checkboxes, Inputs & Sliders", "Input Text Caret / Cursor"},
 
-	// Buttons & Accent
 	{ImGuiCol_Button, "Buttons & Accent", "Button Normal"},
 	{ImGuiCol_ButtonHovered, "Buttons & Accent", "Button Hovered"},
 	{ImGuiCol_ButtonActive, "Buttons & Accent", "Button Active / Pressed"},
@@ -6010,7 +5997,6 @@ static const CuratedColor CURATED_THEME_COLORS[] = {
 	{ImGuiCol_HeaderHovered, "Buttons & Accent", "Header Hovered"},
 	{ImGuiCol_HeaderActive, "Buttons & Accent", "Header Active"},
 
-	// Text & Selection
 	{ImGuiCol_Text, "Text & Selection", "Main Text"},
 	{ImGuiCol_TextDisabled, "Text & Selection", "Disabled Text"},
 	{ImGuiCol_TextSelectedBg, "Text & Selection", "Text Selection Background"},
@@ -6018,7 +6004,6 @@ static const CuratedColor CURATED_THEME_COLORS[] = {
 	{CustomCol_SelectionBoxBorder, "Text & Selection", "Selection Box Border"},
 	{CustomCol_SelectionBoxFill, "Text & Selection", "Selection Box Background / Fill"},
 
-	// Tabs
 	{ImGuiCol_Tab, "Tabs", "Tab Inactive"},
 	{ImGuiCol_TabHovered, "Tabs", "Tab Hovered"},
 	{ImGuiCol_TabSelected, "Tabs", "Tab Active / Selected"},
@@ -6027,7 +6012,6 @@ static const CuratedColor CURATED_THEME_COLORS[] = {
 	{ImGuiCol_TabDimmedSelected, "Tabs", "Tab Unfocused Selected"},
 	{ImGuiCol_TabDimmedSelectedOverline, "Tabs", "Tab Unfocused Overline"},
 
-	// Dividers & Scrollbars
 	{ImGuiCol_Separator, "Dividers & Scrollbars", "Separator Line"},
 	{ImGuiCol_SeparatorHovered, "Dividers & Scrollbars", "Separator Line Hovered"},
 	{ImGuiCol_SeparatorActive, "Dividers & Scrollbars", "Separator Line Active"},
@@ -6039,14 +6023,12 @@ static const CuratedColor CURATED_THEME_COLORS[] = {
 	{ImGuiCol_ResizeGripHovered, "Dividers & Scrollbars", "Window Resize Grip Hovered"},
 	{ImGuiCol_ResizeGripActive, "Dividers & Scrollbars", "Window Resize Grip Active"},
 
-	// Tables
 	{ImGuiCol_TableHeaderBg, "Tables", "Table Header Background"},
 	{ImGuiCol_TableBorderStrong, "Tables", "Table Border Strong"},
 	{ImGuiCol_TableBorderLight, "Tables", "Table Border Light"},
 	{ImGuiCol_TableRowBg, "Tables", "Table Row Background"},
 	{ImGuiCol_TableRowBgAlt, "Tables", "Table Row Alt Background"},
 
-	// Modals & Highlights
 	{ImGuiCol_ModalWindowDimBg, "Modals & Highlights", "Modal Background Dim"},
 	{ImGuiCol_NavCursor, "Modals & Highlights", "Navigation Focus Border"},
 	{ImGuiCol_NavWindowingHighlight, "Modals & Highlights", "Windowing (Ctrl+Tab) Highlight"},

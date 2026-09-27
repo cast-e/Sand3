@@ -11,7 +11,6 @@ export const githubRouter = Router();
 const GITHUB_REPO = 'cast-e/Sand3';
 const LOCAL_README_PATH = path.resolve(__dirname, '../../../../README.md');
 
-// In-memory cache structures with TTL
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -33,11 +32,9 @@ function setCached<T>(key: string, data: T): void {
   cache.set(key, { data, timestamp: Date.now() });
 }
 
-// 1. Latest Release (including pre-releases)
 githubRouter.get('/latest-release', async (req, res) => {
   const cacheKey = 'github:latest-release';
-  const cached = getCached(cacheKey, 5 * 60 * 1000); // 5 min TTL
-  if (cached) {
+  const cached = getCached(cacheKey, 5 * 60 * 1000); if (cached) {
     return res.json(cached);
   }
 
@@ -76,7 +73,6 @@ githubRouter.get('/latest-release', async (req, res) => {
     res.json(result);
   } catch (err: any) {
     console.error('Error fetching latest release from GitHub:', err.message);
-    // Fallback response if offline/rate-limited
     res.json({
       tag_name: 'v1.0.0-alpha.7',
       name: 'Mostly fixes but some QoL',
@@ -100,11 +96,9 @@ githubRouter.get('/latest-release', async (req, res) => {
   }
 });
 
-// 2. All Releases & Changelog history
 githubRouter.get('/releases', async (req, res) => {
   const cacheKey = 'github:all-releases';
-  const cached = getCached(cacheKey, 10 * 60 * 1000); // 10 min TTL
-  if (cached) {
+  const cached = getCached(cacheKey, 10 * 60 * 1000); if (cached) {
     return res.json(cached);
   }
 
@@ -141,11 +135,9 @@ githubRouter.get('/releases', async (req, res) => {
   }
 });
 
-// 3. Raw README content with local fallback
 githubRouter.get('/readme', async (req, res) => {
   const cacheKey = 'github:readme';
-  const cached = getCached(cacheKey, 15 * 60 * 1000); // 15 min TTL
-  if (cached) {
+  const cached = getCached(cacheKey, 15 * 60 * 1000); if (cached) {
     return res.json({ content: cached, source: 'cache' });
   }
 
@@ -160,7 +152,6 @@ githubRouter.get('/readme', async (req, res) => {
     console.warn('Could not fetch raw README from GitHub, falling back to local file:', err.message);
   }
 
-  // Fallback to local README.md
   if (fs.existsSync(LOCAL_README_PATH)) {
     const localContent = fs.readFileSync(LOCAL_README_PATH, 'utf-8');
     setCached(cacheKey, localContent);
@@ -170,7 +161,6 @@ githubRouter.get('/readme', async (req, res) => {
   res.status(404).json({ error: 'README not found' });
 });
 
-// 4. Instructions
 githubRouter.get('/instructions', (req, res) => {
   res.json({
     linux: {

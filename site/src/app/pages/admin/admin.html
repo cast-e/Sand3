@@ -1,5 +1,4 @@
 <div class="admin-container">
-  <!-- Toast Notification -->
   @if (toastMsg()) {
   <div class="toast-banner" [class.toast-danger]="toastType() === 'danger'">
     <img [src]="toastType() === 'danger' ? '/icons/error.png' : '/icons/accept.png'" class="silk-icon" alt="status" />
@@ -7,7 +6,6 @@
   </div>
   }
 
-  <!-- Header -->
   <div class="admin-header">
     <div class="header-title">
       <img src="/icons/shield.png" class="silk-icon-lg" alt="Admin" />
@@ -29,7 +27,6 @@
     <p>Verifying administrative credentials...</p>
   </div>
   } @else if (!isAuthorized()) {
-  <!-- Admin Authorization Barrier -->
   <div class="card auth-card">
     <div class="card-header">
       <img src="/icons/lock.png" class="silk-icon" alt="Lock" />
@@ -60,7 +57,6 @@
     </div>
   </div>
   } @else {
-  <!-- Stats Metric Cards -->
   <div class="stats-grid">
     <div class="stat-card" [class.highlight]="(stats()?.total_reports || 0) > 0">
       <div class="stat-icon">
@@ -109,7 +105,6 @@
     </div>
   </div>
 
-  <!-- Dashboard Tabs -->
   <div class="admin-tabs">
     <button class="tab-btn" [class.active]="activeTab() === 'reports'" (click)="activeTab.set('reports')">
       <img src="/icons/flag_red.png" class="silk-icon" alt="Reports" />
@@ -131,7 +126,6 @@
     </button>
   </div>
 
-  <!-- Tab 1: Review Reports -->
   @if (activeTab() === 'reports') {
   <div class="tab-content">
     <div class="section-toolbar">
@@ -226,7 +220,6 @@
   </div>
   }
 
-  <!-- Tab 2: Manage Items -->
   @if (activeTab() === 'items') {
   <div class="tab-content">
     <div class="section-toolbar">
@@ -352,7 +345,6 @@
   </div>
   }
 
-  <!-- Tab 3: Manage Users -->
   @if (activeTab() === 'users') {
   <div class="tab-content">
     <div class="section-toolbar">

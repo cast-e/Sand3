@@ -24,7 +24,6 @@ export class SetDetailComponent implements OnInit {
   activeTab = signal<'saves' | 'stamps'>('saves');
   loading = signal<boolean>(true);
 
-  // Edit Modal State
   editingItem = signal<boolean>(false);
   editTitle = signal<string>('');
   editDescription = signal<string>('');

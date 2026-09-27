@@ -1,5 +1,4 @@
 <div class="home-container">
-  <!-- Hero Section -->
   <section class="hero-section">
     <div class="hero-header">
       <div class="hero-brand">
@@ -29,7 +28,6 @@
       </div>
     </div>
 
-    <!-- Quick CTA to Workshop -->
     <div class="workshop-cta-banner">
       <div class="cta-text">
         <img src="/icons/package_go.png" class="silk-icon" alt="Workshop" />
@@ -43,11 +41,8 @@
     </div>
   </section>
 
-  <!-- Side-by-Side Main Container: Integrated Documentation (Centered/Left) & Compact Releases (Right) -->
   <div class="home-split-layout">
-    <!-- Left / Center Column: Integrated Documentation -->
     <div class="doc-content-column">
-      <!-- About Sand3 -->
       <section class="card mb-4">
         <div class="card-header">
           <h3>
@@ -65,15 +60,15 @@
             <div class="pill-item">
               <img src="/icons/lightning.png" class="silk-icon" alt="GPU" />
               <div>
-                <strong>Dual GPU/CPU Engine</strong>
-                <span>Hardware-accelerated Vulkan compute shaders with a multithreaded CPU fallback.</span>
+                <strong>GPU or CPU simulation</strong>
+                <span>Hardware-accelerated Vulkan compute shaders or multithreaded CPU processing.</span>
               </div>
             </div>
             <div class="pill-item">
               <img src="/icons/palette.png" class="silk-icon" alt="Materials" />
               <div>
                 <strong>Up to 255 Materials</strong>
-                <span>Full RGB colors, inheritance hierarchies, and custom density & physical states.</span>
+                <span>Full RGB colors, inheritance hierarchies, and completely customizable rules.</span>
               </div>
             </div>
             <div class="pill-item">
@@ -108,7 +103,6 @@
         </div>
       </section>
 
-      <!-- Quickstart & Instructions -->
       <section class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h3>
@@ -151,7 +145,6 @@ chmod +x sand3
         </div>
       </section>
 
-      <!-- Simulation Mechanics & Rules Guide -->
       <section class="card mb-4">
         <div class="card-header">
           <h3>
@@ -168,9 +161,9 @@ chmod +x sand3
           </p>
           <div class="rule-explanation-box">
             <div class="rule-box-header">
-              <span class="badge badge-blue">WHEN Matrix (5x5)</span>
+              <span class="badge badge-blue">WHEN Grid (5x5)</span>
               <span>➔</span>
-              <span class="badge badge-green">THEN Matrix (5x5)</span>
+              <span class="badge badge-green">THEN Grid (5x5)</span>
             </div>
             <p class="text-muted small">
               Rules can match multiple possible materials per neighbor cell, specify execution chances (probabilities),
@@ -185,7 +178,6 @@ chmod +x sand3
         </div>
       </section>
 
-      <!-- Building from Source -->
       <section class="card mb-4">
         <div class="card-header">
           <h3>
@@ -213,9 +205,7 @@ cmake --build build</code></pre>
       </section>
     </div>
 
-    <!-- Right Column: Compact Downloads & Releases -->
     <div class="releases-sidebar-column">
-      <!-- Quick Downloads Card -->
       <div class="card sidebar-download-card mb-4">
         <div class="card-header">
           <h3>
@@ -252,7 +242,6 @@ cmake --build build</code></pre>
         </div>
       </div>
 
-      <!-- Compact GitHub Releases Section -->
       <div class="card releases-compact-card">
         <div class="card-header d-flex justify-content-between align-items-center">
           <h3>
@@ -277,7 +266,6 @@ cmake --build build</code></pre>
 
             <h4 class="release-name">{{ rel.name }}</h4>
 
-            <!-- Assets Downloads -->
             @if (rel.assets.length > 0) {
             <div class="compact-assets">
               @for (asset of rel.assets; track asset.name) {
@@ -290,7 +278,6 @@ cmake --build build</code></pre>
             </div>
             }
 
-            <!-- Collapsible / Scrollable Changelog Body -->
             <div class="compact-release-body markdown-body" [innerHTML]="rel.body | markdown"></div>
           </div>
           } @empty {

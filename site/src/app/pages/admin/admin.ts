@@ -48,27 +48,22 @@ export class AdminComponent implements OnInit {
 
   activeTab = signal<'reports' | 'items' | 'users' | 'stats'>('reports');
 
-  // Stats
   stats = signal<AdminStats | null>(null);
   statsLoading = signal<boolean>(false);
 
-  // Reports
   reports = signal<AdminReport[]>([]);
   reportsLoading = signal<boolean>(false);
 
-  // Manage Items
   items = signal<WorkshopItem[]>([]);
   itemsLoading = signal<boolean>(false);
   searchQuery = signal<string>('');
   typeFilter = signal<string>('all');
   statusFilter = signal<'all' | 'reported' | 'hidden'>('all');
 
-  // Manage Users
   users = signal<User[]>([]);
   usersLoading = signal<boolean>(false);
   usersSearchQuery = signal<string>('');
 
-  // Action status notification
   toastMsg = signal<string>('');
   toastType = signal<'success' | 'danger'>('success');
 

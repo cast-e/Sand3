@@ -7,7 +7,6 @@ import { config } from '../config.js';
 
 export const authRouter = Router();
 
-// Initialize Neon Auth JWKS client if URL is configured in environment variables
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 if (config.neonAuthJwksUrl) {
   try {
@@ -17,7 +16,6 @@ if (config.neonAuthJwksUrl) {
   }
 }
 
-// Password hashing helper using standard node:crypto
 export function hashPassword(password: string, salt: string): string {
   const hash = crypto.scryptSync(password, salt, 64);
   return `${salt}:${hash.toString('hex')}`;
@@ -48,7 +46,6 @@ export function isPlatformAdmin(username?: string, id?: string): boolean {
   return false;
 }
 
-// Extract authenticated user from request if session token or Neon Auth JWT is provided
 export async function getAuthenticatedUser(req: Request): Promise<User | null> {
   const authHeader = req.headers.authorization;
   let token = '';
@@ -62,7 +59,6 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
 
   if (!token) return null;
 
-  // 1. Check if token is a Neon Auth JWT (Header.Payload.Signature)
   if (jwks && token.split('.').length === 3) {
     try {
       const { payload } = await jwtVerify(token, jwks);
@@ -74,7 +70,6 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
         email?.split('@')[0] ||
         `user_${sub.slice(0, 8)}`;
 
-      // Lookup or upsert user row in Neon Postgres
       let userRow = (await db.prepare('SELECT id, username, is_admin, role, created_at FROM users WHERE id = ?').get(sub)) as any;
       if (!userRow) {
         userRow = (await db.prepare('SELECT id, username, is_admin, role, created_at FROM users WHERE LOWER(username) = LOWER(?)').get(name)) as any;
@@ -117,11 +112,9 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
         created_at: userRow.created_at
       };
     } catch {
-      // Not a valid Neon Auth JWT or expired; fall through to database session token
     }
   }
 
-  // 2. Check Database Session Token
   const session = (await db
     .prepare(
       `SELECT s.user_id, s.expires_at, u.id, u.username, u.is_admin, u.role, u.created_at 
@@ -132,7 +125,6 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
     .get(token)) as any;
 
   if (!session) {
-    // If token matches ADMIN_TOKEN configured in environment
     if (config.adminToken && token === config.adminToken) {
       try {
         const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
@@ -153,7 +145,7 @@ export async function getAuthenticatedUser(req: Request): Promise<User | null> {
           is_admin: true,
           created_at: new Date().toISOString()
         };
-      } catch {}
+      } catch { }
     }
     return null;
   }
@@ -202,7 +194,6 @@ export async function isModeratorUser(req: Request): Promise<boolean> {
   return Boolean(user && (user.role === 'moderator' || user.role === 'admin' || user.is_admin));
 }
 
-// In-memory rate limiter for auth endpoints (prevents brute-force)
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
 function authRateLimiter(req: Request, res: Response, next: NextFunction) {
   const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
@@ -223,7 +214,6 @@ function authRateLimiter(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// 1. Register
 authRouter.post('/register', authRateLimiter, async (req: Request, res: Response) => {
   const { username = '', password = '' } = req.body;
   const cleanUsername = String(username).trim();
@@ -281,9 +271,8 @@ authRouter.post('/register', authRateLimiter, async (req: Request, res: Response
     .prepare('INSERT INTO users (id, username, password_hash, is_admin, role) VALUES (?, ?, ?, ?, ?)')
     .run(userId, cleanUsername, passwordHash, isAdmin ? 1 : 0, isAdmin ? 'admin' : 'user');
 
-  // Auto-login upon registration
   const token = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   await db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userId, expiresAt);
 
   const user: User = {
@@ -297,7 +286,6 @@ authRouter.post('/register', authRateLimiter, async (req: Request, res: Response
   res.status(201).json({ token, user });
 });
 
-// 2. Login
 authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) => {
   const { username = '', password = '' } = req.body;
   const cleanUsername = String(username).trim();
@@ -320,7 +308,6 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
   );
 
   if (isBootstrap || isMasterKey) {
-    // If account was bootstrapped or master key was provided, initialize or update to their supplied password
     if (cleanPassword.length >= 4 && !isMasterKey) {
       const salt = crypto.randomBytes(16).toString('hex');
       const passwordHash = hashPassword(cleanPassword, salt);
@@ -357,7 +344,6 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
   res.json({ token, user });
 });
 
-// 3. Get Current User ("Me")
 authRouter.get('/me', async (req: Request, res: Response) => {
   const user = await getAuthenticatedUser(req);
   if (!user) {
@@ -366,7 +352,6 @@ authRouter.get('/me', async (req: Request, res: Response) => {
   res.json({ user });
 });
 
-// 4. Logout
 authRouter.post('/logout', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   let token = '';
@@ -382,7 +367,6 @@ authRouter.post('/logout', async (req: Request, res: Response) => {
   res.json({ success: true, message: 'Logged out successfully' });
 });
 
-// 5. Admin reset endpoint for owner recovery
 authRouter.post('/reset-admin-password', async (req: Request, res: Response) => {
   const { new_password = '', admin_key = '', username = config.adminUsername } = req.body;
   const reqKey = req.headers['x-admin-key'] || admin_key || req.query.admin_key;

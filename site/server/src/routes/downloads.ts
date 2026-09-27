@@ -7,7 +7,7 @@ import { db } from '../db.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || (process.env.VERCEL ? '/tmp/sand3-uploads' : path.resolve(__dirname, '../../uploads'));
+const UPLOADS_DIR = process.env['UPLOADS_DIR'] || (process.env['VERCEL'] ? '/tmp/sand3-uploads' : path.resolve(__dirname, '../../uploads'));
 
 export const downloadsRouter = Router();
 
@@ -24,10 +24,8 @@ downloadsRouter.get('/:id/download', async (req, res) => {
     return res.status(404).json({ error: 'Physical file not found on server' });
   }
 
-  // Increment download count
   await db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);
 
-  // Determine appropriate download filename
   const ext = path.extname(item.file_path) || (item.type === 'save' ? '.save' : item.type === 'stamp' ? '.stamp' : '.zip');
   const safeTitle = item.title.replace(/[^a-zA-Z0-9_\-\.]/g, '_');
   const downloadName = `${safeTitle}${ext}`;

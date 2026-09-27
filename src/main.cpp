@@ -2,15 +2,16 @@
 #include <fmt/base.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <filesystem>
+
 #include <cstdlib>
+#include <filesystem>
 
 #include "config_manager.hpp"
 #include "grid.hpp"
+#include "ipc.hpp"
 #include "set_manager.hpp"
 #include "ui.hpp"
 #include "window.hpp"
-#include "ipc.hpp"
 
 static void ensure_working_directory(const char* argv0) {
 	if (!std::filesystem::exists("sets")) {
@@ -42,12 +43,10 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	// If another instance of Sand3 is already running, forward the URI and exit immediately!
 	if (IPC::send_to_existing_instance(uri_arg)) {
 		return 0;
 	}
 
-	// We are the primary instance. Start the IPC listener server and cleanup on exit.
 	IPC::start_server();
 	std::atexit(IPC::cleanup);
 
@@ -58,15 +57,12 @@ int main(int argc, char* argv[]) {
 
 	SetManager::set_current_set(SetManager::get_sets()[0]);
 
-	// If a URI was passed on cold launch, handle it!
 	if (!uri_arg.empty()) {
 		UI::handle_uri(uri_arg);
 	}
 
 	while (true) {
-		IPC::poll([](const std::string& uri) {
-			UI::handle_uri(uri);
-		});
+		IPC::poll([](const std::string& uri) { UI::handle_uri(uri); });
 
 		SDL_Event event;
 		while (SDL_PollEvent(&event)) {

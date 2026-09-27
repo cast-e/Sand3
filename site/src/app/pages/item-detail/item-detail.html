@@ -5,7 +5,6 @@
     <p>Loading item details...</p>
   </div>
   } @else if (item(); as it) {
-  <!-- Breadcrumb -->
   <div class="breadcrumb">
     <a routerLink="/workshop">
       <img src="/icons/arrow_left.png" class="silk-icon" alt="Back" />
@@ -17,7 +16,6 @@
     <span class="active-crumb">{{ it.title }}</span>
   </div>
 
-  <!-- Parent Set Association Banner (if applicable) -->
   @if (it.parent_set_id) {
   <div class="parent-set-banner">
     <img src="/icons/package.png" class="silk-icon" alt="Set" />
@@ -33,7 +31,6 @@
   </div>
   }
 
-  <!-- Overview Card -->
   <div class="card overview-card">
     <div class="card-header">
       <div class="title-group">
@@ -99,7 +96,6 @@
 
         <p class="description-text">{{ it.description || 'No description provided.' }}</p>
 
-        <!-- Metadata Spec Grid -->
         <div class="meta-spec-grid">
           @if (parseMeta(it.meta_json); as m) {
           @if (m.width && m.height) {
@@ -146,7 +142,6 @@
           </div>
         </div>
 
-        <!-- Changelog / Version History Section -->
         @if (parseMeta(it.meta_json); as m) {
         @if (m.changelog && m.changelog.length) {
         <div class="changelog-section">
@@ -179,7 +174,6 @@
   </div>
   }
 
-  <!-- Edit Modal -->
   @if (editingItem()) {
   <div class="modal-overlay" (click)="closeEditModal()">
     <div class="modal-card" (click)="$event.stopPropagation()">
@@ -223,7 +217,6 @@
   </div>
   }
 
-  <!-- Report Modal -->
   @if (reportingItem()) {
   <div class="modal-overlay" (click)="closeReportModal()">
     <div class="modal-card" (click)="$event.stopPropagation()">
@@ -278,7 +271,6 @@
   </div>
   }
 
-  <!-- Usage Guide Modal Dialog (shown when custom protocol fails and fallback download starts) -->
   @if (showUsageModal() && item(); as it) {
   <div class="modal-backdrop" (click)="closeUsageModal()">
     <div class="modal-card" (click)="$event.stopPropagation()">
@@ -298,10 +290,12 @@
         <ol style="padding-left: 20px; line-height: 1.8; margin-bottom: 20px; color: var(--text);">
           <li>Open <strong>Sand3</strong>.</li>
           <li>Go to the <strong>Workshop</strong> tab to browse and activate with 1-click.</li>
-          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.</li>
+          <li>Alternatively, your file has been downloaded. Drag it into the Sand3 saves folder inside the correct set.
+          </li>
         </ol>
 
-        <div style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+        <div
+          style="background: rgba(255, 255, 255, 0.03); padding: 12px 14px; border-radius: 6px; border: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
           <span style="font-size: 13px; color: var(--text-muted);">Need the file again?</span>
           <a [href]="getDownloadUrl(it.id)" class="btn btn-sm btn-primary" download>
             <img src="/icons/arrow_down.png" class="silk-icon" alt="Download" /> Download file

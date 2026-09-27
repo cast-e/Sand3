@@ -32,7 +32,6 @@ function computeZipSetHash(zipBuffer: Buffer): string {
       const rawData = zipBuffer.subarray(dataStart, dataStart + compSize);
 
       const baseName = fname.split('/').pop() || '';
-      // Strictly ONLY .mat files. Exclude set_config.ini, saves, stamps.
       if (baseName.endsWith('.mat') && baseName !== 'set_config.ini' && !fname.includes('/saves/') && !fname.includes('/stamps/')) {
         let content: Buffer | null = null;
         if (method === 0) {
@@ -71,7 +70,7 @@ function computeZipSetHash(zipBuffer: Buffer): string {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || (process.env.VERCEL ? '/tmp/sand3-uploads' : path.resolve(__dirname, '../../uploads'));
+const UPLOADS_DIR = process.env['UPLOADS_DIR'] || (process.env['VERCEL'] ? '/tmp/sand3-uploads' : path.resolve(__dirname, '../../uploads'));
 const THUMBNAILS_DIR = path.resolve(UPLOADS_DIR, 'thumbnails');
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -97,7 +96,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 25 * 1024 * 1024 } // 25MB max
+  limits: { fileSize: 25 * 1024 * 1024 }
 });
 
 export const itemsRouter = Router();
@@ -107,7 +106,6 @@ const uploadFields = upload.fields([
   { name: 'thumbnail', maxCount: 1 }
 ]);
 
-// 1. List Workshop Items with filtering, search, sorting, and user filter
 itemsRouter.get('/', async (req: Request, res: Response) => {
   const {
     type = 'all',
@@ -173,11 +171,9 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Get total count
   const countResult = (await db.prepare(`SELECT COUNT(*) as total FROM items ${whereClause}`).get(...params)) as any;
   const total = countResult ? Number(countResult.total) : 0;
 
-  // Get items with parent set title and child saves/stamps count
   const query = `
     SELECT i.*,
       (SELECT title FROM items p WHERE p.id = i.parent_set_id) as parent_set_title,
@@ -191,7 +187,6 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
 
   const rows = (await db.prepare(query).all(...params, limitNum, offset)) as any[];
 
-  // If client_uuid is supplied, annotate is_liked / is_favorited
   let likedSet = new Set<string>();
   let favoritedSet = new Set<string>();
   if (client_uuid) {
@@ -220,7 +215,6 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
   });
 });
 
-// 2. Get Single Item Details
 itemsRouter.get('/:id', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const client_uuid = (req.query.client_uuid as string) || '';
@@ -257,7 +251,6 @@ itemsRouter.get('/:id', async (req: Request, res: Response) => {
   });
 });
 
-// 3. Get Saves created for a specific Set
 itemsRouter.get('/sets/:id/saves', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const query = `
@@ -270,7 +263,6 @@ itemsRouter.get('/sets/:id/saves', async (req: Request, res: Response) => {
   res.json(rows);
 });
 
-// 4. Get Stamps created for a specific Set
 itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const query = `
@@ -283,7 +275,6 @@ itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response) => {
   res.json(rows);
 });
 
-// 5. Get Item Thumbnail Image
 itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response) => {
   const id = String(req.params.id);
   const item = (await db.prepare('SELECT thumbnail_path FROM items WHERE id = ?').get(id)) as any;
@@ -299,7 +290,6 @@ itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response) => {
   res.sendFile(thumbFile);
 });
 
-// 6. Create / Publish Item
 itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
   try {
     const authUser = await getAuthenticatedUser(req);
@@ -319,7 +309,6 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Title is required' });
     }
 
-    // Clean meta_json: Sets DO NOT have canvas dimensions!
     try {
       const parsedMeta = JSON.parse(meta_json);
       if (type === 'set') {
@@ -331,7 +320,6 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
       meta_json = '{}';
     }
 
-    // Hash verification when attaching to an online set
     if (parent_set_id && (type === 'save' || type === 'stamp')) {
       const parentSet = (await db.prepare("SELECT id, title, set_hash FROM items WHERE id = ? AND type = 'set'").get(parent_set_id)) as any;
       if (!parentSet) {
@@ -352,12 +340,10 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
-    // 1. Process Main Payload File
     if (files && files['file'] && files['file'][0]) {
       filePath = files['file'][0].filename;
       fileSize = files['file'][0].size;
     } else if (body.file_data) {
-      // Base64 upload support (convenient for in-game HTTP POST or REST clients)
       const buffer = Buffer.from(body.file_data, 'base64');
       const ext = body.file_ext || (type === 'save' ? '.save' : type === 'stamp' ? '.stamp' : type === 'theme' ? '.theme' : '.zip');
       const filename = `${id}${ext}`;
@@ -369,12 +355,10 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'File upload or file_data is required' });
     }
 
-    // 2. Process Thumbnail File
     let thumbnailPath = '';
     if (files && files['thumbnail'] && files['thumbnail'][0]) {
       thumbnailPath = files['thumbnail'][0].filename;
     } else if (body.thumbnail_data) {
-      // Base64 thumbnail image (PNG/JPEG)
       const cleanData = body.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
       const thumbBuffer = Buffer.from(cleanData, 'base64');
       const thumbFilename = `${id}.png`;
@@ -395,7 +379,6 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
       }
     }
 
-    // Insert item
     await db
       .prepare(`
         INSERT INTO items (id, user_id, type, title, description, author, parent_set_id, version, set_hash, file_path, file_size, thumbnail_path, meta_json)
@@ -411,7 +394,6 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response) => {
   }
 });
 
-// 7. Update / Edit Item Metadata (with Set Versioning)
 itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -425,7 +407,6 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Item not found' });
     }
 
-    // Check ownership: user_id must match OR author name must match if user_id wasn't set
     const isOwner =
       (item.user_id && item.user_id === authUser.id) ||
       (!item.user_id && item.author.toLowerCase() === authUser.username.toLowerCase());
@@ -453,7 +434,6 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
     let fileSize = item.file_size;
     let version = item.version || 1;
 
-    // Check if new payload file is uploaded
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     let fileUpdated = false;
 
@@ -495,7 +475,6 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
 
     let meta_json = JSON.stringify(metaObj);
 
-    // Clean up old payload file if replaced
     if (fileUpdated && item.file_path && item.file_path !== filePath) {
       try {
         const oldFile = path.resolve(UPLOADS_DIR, item.file_path);
@@ -505,7 +484,6 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
       }
     }
 
-    // If set file was updated, compute set_hash
     if (fileUpdated && item.type === 'set') {
       const fullZipPath = path.join(UPLOADS_DIR, filePath);
       if (fs.existsSync(fullZipPath)) {
@@ -516,7 +494,6 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
       }
     }
 
-    // Check if new thumbnail is provided
     let thumbnailPath = item.thumbnail_path;
     let thumbUpdated = false;
     if (files && files['thumbnail'] && files['thumbnail'][0]) {
@@ -540,7 +517,6 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
       }
     }
 
-    // Update item
     await db
       .prepare(`
         UPDATE items 
@@ -557,7 +533,6 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response) => {
   }
 });
 
-// 8. Delete / Remove Item
 itemsRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -578,7 +553,6 @@ itemsRouter.delete('/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'You do not own this item' });
     }
 
-    // Remove physical files
     try {
       const mainFile = path.resolve(UPLOADS_DIR, item.file_path);
       if (fs.existsSync(mainFile)) fs.unlinkSync(mainFile);
@@ -590,7 +564,6 @@ itemsRouter.delete('/:id', async (req: Request, res: Response) => {
       console.warn('Could not remove file on delete:', e);
     }
 
-    // Delete item record (cascade deletes interactions and reports)
     await db.prepare('DELETE FROM items WHERE id = ?').run(id);
 
     res.json({ success: true, message: 'Item deleted successfully', id });

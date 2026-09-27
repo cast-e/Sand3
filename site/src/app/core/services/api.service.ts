@@ -102,7 +102,6 @@ export class ApiService {
     return headers;
   }
 
-  // GitHub Proxy Endpoints
   getLatestRelease(): Observable<GitHubRelease> {
     return this.http.get<GitHubRelease>(`${this.baseUrl}/github/latest-release`);
   }
@@ -119,7 +118,6 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/github/instructions`);
   }
 
-  // Workshop Items Endpoints
   getItems(
     type: string = 'all',
     sort: string = 'popular',
@@ -205,7 +203,6 @@ export class ApiService {
     return `${this.baseUrl}/workshop/items/${id}/thumbnail`;
   }
 
-  // Admin Dashboard API
   private getAdminHeaders(): HttpHeaders {
     let headers = this.getAuthHeaders();
     const adminKey = localStorage.getItem('sand3_admin_key');

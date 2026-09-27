@@ -5,26 +5,21 @@ if (!config.databaseUrl) {
   console.warn('[DB] Warning: DATABASE_URL environment variable is not set. Set it in Vercel or your .env file.');
 }
 
-// Neon serverless SQL connection over HTTP/WebSockets
-export const sql = neon(config.databaseUrl || 'postgresql://localhost/dummy');
+const DUMMY_URL = 'postgresql://dummy:dummy@localhost/dummy';
+export const sql = neon(config.databaseUrl || DUMMY_URL);
 
 export function translateSql(query: string): string {
   let paramIdx = 1;
-  // Convert ? to $1, $2, ...
   let converted = query.replace(/\?/g, () => `$${paramIdx++}`);
 
-  // Date and time functions
   converted = converted.replace(/datetime\('now'\)/gi, 'CURRENT_TIMESTAMP');
   converted = converted.replace(/datetime\(([^)]+)\)/gi, '$1');
 
-  // SQLite COLLATE NOCASE removal
   converted = converted.replace(/COLLATE\s+NOCASE/gi, '');
 
-  // Cast COUNT(...) and SUM(...) to integers to avoid PostgreSQL bigint string conversions
   converted = converted.replace(/COUNT\(([^)]+)\)(?!::int)/gi, 'COUNT($1)::int');
   converted = converted.replace(/COALESCE\(SUM\(([^)]+)\),\s*0\)/gi, 'COALESCE(SUM($1)::int, 0)');
 
-  // INSERT OR REPLACE / INSERT OR IGNORE translation
   if (/INSERT\s+OR\s+REPLACE\s+INTO\s+sessions/i.test(converted)) {
     converted = converted.replace(
       /INSERT\s+OR\s+REPLACE\s+INTO\s+sessions\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i,
@@ -47,22 +42,31 @@ export interface PreparedStatement {
   run(...params: any[]): Promise<{ changes: number }>;
 }
 
+function checkDatabaseConfigured() {
+  if (!config.databaseUrl) {
+    throw new Error('DATABASE_URL is not configured. Please ensure DATABASE_URL or POSTGRES_URL is set in Vercel Environment Variables.');
+  }
+}
+
 export const db = {
   prepare(queryText: string): PreparedStatement {
     return {
       async get(...params: any[]): Promise<any | undefined> {
+        checkDatabaseConfigured();
         const translated = translateSql(queryText);
         const flatParams = params.flat();
         const rows = (await sql.query(translated, flatParams)) as any[];
         return rows && rows.length > 0 ? rows[0] : undefined;
       },
       async all(...params: any[]): Promise<any[]> {
+        checkDatabaseConfigured();
         const translated = translateSql(queryText);
         const flatParams = params.flat();
         const rows = (await sql.query(translated, flatParams)) as any[];
         return rows || [];
       },
       async run(...params: any[]): Promise<{ changes: number }> {
+        checkDatabaseConfigured();
         const translated = translateSql(queryText);
         const flatParams = params.flat();
         await sql.query(translated, flatParams);
@@ -71,11 +75,13 @@ export const db = {
     };
   },
   async query(queryText: string, params: any[] = []): Promise<any[]> {
+    checkDatabaseConfigured();
     const translated = translateSql(queryText);
     const flatParams = params.flat();
     return (await sql.query(translated, flatParams)) as any[];
   },
   async exec(statement: string): Promise<void> {
+    checkDatabaseConfigured();
     const stmts = statement
       .split(';')
       .map((s) => s.trim())
@@ -92,7 +98,6 @@ export async function initDb(): Promise<void> {
   }
 
   try {
-    // 1. Users table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -104,7 +109,6 @@ export async function initDb(): Promise<void> {
       );
     `);
 
-    // 2. Sessions table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
@@ -115,7 +119,6 @@ export async function initDb(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     `);
 
-    // 3. Items table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS items (
         id TEXT PRIMARY KEY,
@@ -147,7 +150,6 @@ export async function initDb(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_items_likes ON items(likes_count DESC);
     `);
 
-    // 4. Interactions table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS interactions (
         id SERIAL PRIMARY KEY,
@@ -160,7 +162,6 @@ export async function initDb(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_interactions_lookup ON interactions(item_id, client_uuid);
     `);
 
-    // 5. Reports table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS reports (
         id SERIAL PRIMARY KEY,
@@ -172,7 +173,6 @@ export async function initDb(): Promise<void> {
       );
     `);
 
-    // 6. Bootstrap Administrator account if configured
     if (config.adminUsername) {
       const existing = (await db
         .prepare('SELECT id, is_admin, role FROM users WHERE LOWER(username) = LOWER(?)')
@@ -192,7 +192,6 @@ export async function initDb(): Promise<void> {
         await db.prepare("UPDATE users SET is_admin = 1, role = 'admin' WHERE id = ?").run(existing.id);
       }
 
-      // If ADMIN_TOKEN is set in environment, register or refresh active session for admin
       if (config.adminToken) {
         const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
         await db
@@ -211,5 +210,6 @@ export async function initDb(): Promise<void> {
   }
 }
 
-// Automatically trigger initialization
-initDb().catch((err) => console.error('[DB] Failed initializing DB:', err));
+if (!process.env['VERCEL'] && config.databaseUrl) {
+  initDb().catch((err) => console.error('[DB] Failed initializing DB:', err));
+}

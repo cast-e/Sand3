@@ -7,12 +7,11 @@ import { isAdminUser, isModeratorUser, getAuthenticatedUser } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const UPLOADS_DIR = process.env.UPLOADS_DIR || (process.env.VERCEL ? '/tmp/sand3-uploads' : path.resolve(__dirname, '../../uploads'));
+const UPLOADS_DIR = process.env['UPLOADS_DIR'] || (process.env['VERCEL'] ? '/tmp/sand3-uploads' : path.resolve(__dirname, '../../uploads'));
 const THUMBNAILS_DIR = path.resolve(UPLOADS_DIR, 'thumbnails');
 
 export const adminRouter = Router();
 
-// Middleware to guard admin-only endpoints
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!(await isAdminUser(req))) {
     return res.status(403).json({
@@ -22,7 +21,6 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   next();
 }
 
-// Middleware to guard moderation endpoints (accessible by both Admins and Moderators)
 export async function requireModerator(req: Request, res: Response, next: NextFunction) {
   if (!(await isModeratorUser(req))) {
     return res.status(403).json({
@@ -32,7 +30,6 @@ export async function requireModerator(req: Request, res: Response, next: NextFu
   next();
 }
 
-// 1. Verify Admin / Moderator Status
 adminRouter.get('/check', async (req: Request, res: Response) => {
   const is_admin = await isAdminUser(req);
   const is_moderator = await isModeratorUser(req);
@@ -45,7 +42,6 @@ adminRouter.get('/check', async (req: Request, res: Response) => {
   });
 });
 
-// 2. Admin Dashboard Stats
 adminRouter.get('/stats', requireModerator, async (_req: Request, res: Response) => {
   try {
     const totalItemsRow = await db.prepare('SELECT COUNT(*) as c FROM items').get();
@@ -68,7 +64,6 @@ adminRouter.get('/stats', requireModerator, async (_req: Request, res: Response)
   }
 });
 
-// 3. List All Reports (with item details)
 adminRouter.get('/reports', requireModerator, async (req: Request, res: Response) => {
   try {
     const query = `
@@ -87,7 +82,6 @@ adminRouter.get('/reports', requireModerator, async (req: Request, res: Response
   }
 });
 
-// 4. Dismiss a Single Report
 adminRouter.post('/reports/:id/dismiss', requireModerator, async (req: Request, res: Response) => {
   try {
     const reportId = Number(req.params.id);
@@ -98,7 +92,6 @@ adminRouter.post('/reports/:id/dismiss', requireModerator, async (req: Request, 
 
     await db.prepare('DELETE FROM reports WHERE id = ?').run(reportId);
 
-    // Update item reports_count to actual count of remaining reports
     const countRow = (await db.prepare('SELECT COUNT(*) as c FROM reports WHERE item_id = ?').get(report.item_id)) as any;
     const remaining = countRow ? Number(countRow.c) : 0;
     await db.prepare('UPDATE items SET reports_count = ? WHERE id = ?').run(remaining, report.item_id);
@@ -109,7 +102,6 @@ adminRouter.post('/reports/:id/dismiss', requireModerator, async (req: Request, 
   }
 });
 
-// 5. Clear All Reports for an Item (and unhide)
 adminRouter.post('/items/:id/clear-reports', requireModerator, async (req: Request, res: Response) => {
   try {
     const itemId = String(req.params.id);
@@ -121,7 +113,6 @@ adminRouter.post('/items/:id/clear-reports', requireModerator, async (req: Reque
   }
 });
 
-// 6. Toggle Hide / Unhide Item
 adminRouter.post('/items/:id/toggle-hide', requireModerator, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -144,7 +135,6 @@ adminRouter.post('/items/:id/toggle-hide', requireModerator, async (req: Request
   }
 });
 
-// 7. Force Delete Any Item (Moderator or Admin action)
 adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -153,7 +143,6 @@ adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Res
       return res.status(404).json({ error: 'Item not found' });
     }
 
-    // Clean up physical files
     try {
       if (item.file_path) {
         const mainFile = path.resolve(UPLOADS_DIR, item.file_path);
@@ -167,7 +156,6 @@ adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Res
       console.warn('Moderator/Admin delete file cleanup error:', e);
     }
 
-    // Cascade delete database record
     await db.prepare('DELETE FROM items WHERE id = ?').run(id);
 
     res.json({ success: true, message: `Item '${item.title}' was deleted permanently by moderation.`, id });
@@ -176,12 +164,11 @@ adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Res
   }
 });
 
-// 8. List All Items for Management (including hidden & reported)
 adminRouter.get('/items', requireModerator, async (req: Request, res: Response) => {
   try {
     const q = (req.query.q as string || '').trim().toLowerCase();
     const type = req.query.type as string;
-    const filter = (req.query.filter as string || 'all').toLowerCase(); // 'all', 'reported', 'hidden'
+    const filter = (req.query.filter as string || 'all').toLowerCase();
 
     let conditions: string[] = [];
     let params: any[] = [];
@@ -222,5 +209,4 @@ adminRouter.get('/items', requireModerator, async (req: Request, res: Response) 
 
 import { usersRouter } from './users.js';
 
-// Mount dedicated Users Router for /users subroutes (for backward compatibility)
 adminRouter.use('/users', usersRouter);

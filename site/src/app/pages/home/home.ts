@@ -22,7 +22,6 @@ export class HomeComponent implements OnInit {
   loading = signal<boolean>(true);
 
   ngOnInit() {
-    // Detect OS
     if (typeof navigator !== 'undefined' && navigator.userAgent) {
       if (navigator.userAgent.includes('Win')) {
         this.activeTab.set('windows');
@@ -31,7 +30,6 @@ export class HomeComponent implements OnInit {
       }
     }
 
-    // Load data
     this.api.getLatestRelease().subscribe({
       next: (rel) => this.latestRelease.set(rel),
       error: (e) => console.error('Failed to load latest release', e)

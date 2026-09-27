@@ -22,19 +22,16 @@ export class WorkshopComponent implements OnInit {
   total = signal<number>(0);
   loading = signal<boolean>(true);
 
-  // Filters
   currentType = signal<string>('all');
   currentSort = signal<string>('popular');
   searchQuery = signal<string>('');
   currentPage = signal<number>(1);
 
-  // Report Modal State
   reportingItem = signal<WorkshopItem | null>(null);
   reportReason = signal<'broken' | 'offensive' | 'spam' | 'other'>('broken');
   reportDetails = signal<string>('');
   reportMessage = signal<string>('');
 
-  // Edit Modal State
   editingItem = signal<WorkshopItem | null>(null);
   editTitle = signal<string>('');
   editDescription = signal<string>('');
@@ -277,8 +274,7 @@ export class WorkshopComponent implements OnInit {
   }
 
   getDimensions(item: WorkshopItem): string | null {
-    if (item.type === 'set') return null; // Sets do not have sizes!
-    const meta = this.parseMeta(item.meta_json);
+    if (item.type === 'set') return null; const meta = this.parseMeta(item.meta_json);
     if (meta.width && meta.height) {
       return `${meta.width}×${meta.height}`;
     }

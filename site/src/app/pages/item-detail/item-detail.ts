@@ -22,14 +22,12 @@ export class ItemDetailComponent implements OnInit {
   loading = signal<boolean>(true);
   errorMsg = signal<string>('');
 
-  // Edit Modal State
   editingItem = signal<boolean>(false);
   editTitle = signal<string>('');
   editDescription = signal<string>('');
   editLoading = signal<boolean>(false);
   editError = signal<string>('');
 
-  // Report Modal State
   reportingItem = signal<boolean>(false);
   reportReason = signal<'broken' | 'offensive' | 'spam' | 'other'>('broken');
   reportDetails = signal<string>('');
@@ -95,7 +93,6 @@ export class ItemDetailComponent implements OnInit {
     });
   }
 
-  // Usage Guide Popup State
   showUsageModal = signal<boolean>(false);
 
   getDownloadUrl(id: string): string {

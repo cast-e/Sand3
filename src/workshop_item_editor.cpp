@@ -20,7 +20,6 @@
 #include "zip_util.hpp"
 
 namespace {
-	// Edit modal state
 	bool s_show_edit_modal = false;
 	WorkshopItemClient s_edit_item;
 	char s_edit_title[128] = "";
@@ -29,7 +28,6 @@ namespace {
 	bool s_edit_saving = false;
 	std::function<void()> s_edit_on_success = nullptr;
 
-	// Update modal state
 	bool s_show_update_modal = false;
 	WorkshopItemClient s_update_item;
 	char s_update_title[128] = "";
@@ -39,7 +37,7 @@ namespace {
 	bool s_update_update_thumb = true;
 	int s_update_set_idx = 0;
 	std::vector<std::string> s_update_available_sets;
-	int s_update_save_mode = 0;	 // 0 = canvas, 1 = local file
+	int s_update_save_mode = 0;
 	int s_update_save_idx = 0;
 	std::vector<std::string> s_update_available_saves;
 	int s_update_stamp_idx = 0;
@@ -48,7 +46,6 @@ namespace {
 	bool s_update_saving = false;
 	std::function<void()> s_update_on_success = nullptr;
 
-	// Delete modal state
 	bool s_show_delete_modal = false;
 	WorkshopItemClient s_delete_item;
 	std::string s_delete_status = "";
@@ -100,9 +97,9 @@ namespace {
 		}
 	}
 }  // namespace
-
 void WorkshopItemEditor::open_edit_modal(const WorkshopItemClient& item, std::function<void()> on_success) {
-	if (item.id.empty()) return;
+	if (item.id.empty())
+		return;
 	WorkshopClient::check_item_exists(item.id, [item, on_success](bool exists, int http_status) {
 		if (!exists && http_status == 404) {
 			if (item.type == "set") {
@@ -132,7 +129,8 @@ void WorkshopItemEditor::open_edit_modal(const WorkshopItemClient& item, std::fu
 }
 
 void WorkshopItemEditor::open_update_modal(const WorkshopItemClient& item, std::function<void()> on_success) {
-	if (item.id.empty()) return;
+	if (item.id.empty())
+		return;
 	WorkshopClient::check_item_exists(item.id, [item, on_success](bool exists, int http_status) {
 		if (!exists && http_status == 404) {
 			if (item.type == "set") {
@@ -266,7 +264,6 @@ void WorkshopItemEditor::render_update_modal() {
 		ImGui::TextDisabled("Upload an updated payload and bump version with changelog notes.");
 		ImGui::Spacing();
 
-		// Version selector
 		ImGui::Text("New Version:");
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(90);
@@ -294,7 +291,6 @@ void WorkshopItemEditor::render_update_modal() {
 		ImGui::Spacing();
 		ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "Source Payload:");
 
-		// Item type specific source selectors
 		if (s_update_item.type == "set") {
 			if (s_update_available_sets.empty()) {
 				ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "No local sets found.");
@@ -447,7 +443,6 @@ void WorkshopItemEditor::render_update_modal() {
 			} else if (item_type == "save") {
 				file_ext = ".save";
 				if (s_update_save_mode == 0) {
-					// From Canvas
 					std::string cur_s = SetManager::get_current_set();
 					SaveManager::save_to_file("__ws_temp_update", cur_s);
 					std::string fpath = SaveManager::get_saves_directory(cur_s) + "__ws_temp_update.save";
@@ -463,7 +458,6 @@ void WorkshopItemEditor::render_update_modal() {
 					meta["width"] = Grid::get_width();
 					meta["height"] = Grid::get_height();
 				} else {
-					// From File
 					if (s_update_save_idx >= 0 &&
 						s_update_save_idx < static_cast<int>(s_update_available_saves.size())) {
 						std::string fname = s_update_available_saves[s_update_save_idx];

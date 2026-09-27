@@ -50,7 +50,6 @@ bool IPC::send_to_existing_instance(const std::string& uri) {
 	}
 
 	close(fd);
-	// Stale socket from previous run/crash
 	unlink(sock_path.c_str());
 	return false;
 #else

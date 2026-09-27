@@ -4,7 +4,6 @@ import { isAdminUser, isModeratorUser, getAuthenticatedUser, isPlatformAdmin } f
 
 export const usersRouter = Router();
 
-// Middleware to ensure administrator access (users management, deleting users, role assignment)
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!(await isAdminUser(req))) {
     return res.status(403).json({
@@ -14,7 +13,6 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Middleware to ensure moderator or admin access (reading users)
 async function requireModerator(req: Request, res: Response, next: NextFunction) {
   if (!(await isModeratorUser(req))) {
     return res.status(403).json({
@@ -24,7 +22,6 @@ async function requireModerator(req: Request, res: Response, next: NextFunction)
   next();
 }
 
-// 1. List all users (accessible by Admin & Moderator)
 usersRouter.get('/', requireModerator, async (req: Request, res: Response) => {
   try {
     const q = ((req.query.q as string) || '').trim().toLowerCase();
@@ -60,7 +57,6 @@ usersRouter.get('/', requireModerator, async (req: Request, res: Response) => {
   }
 });
 
-// 2. Get single user details by ID or username
 usersRouter.get('/:id', async (req: Request, res: Response) => {
   try {
     const target = String(req.params.id);
@@ -85,7 +81,6 @@ usersRouter.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Set User Role ('admin' | 'moderator' | 'user') - strictly Administrator only!
 usersRouter.post('/:id/role', requireAdmin, async (req: Request, res: Response) => {
   try {
     const targetId = String(req.params.id);
@@ -101,14 +96,12 @@ usersRouter.post('/:id/role', requireAdmin, async (req: Request, res: Response) 
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Protection 1: Prevent primary administrator account from being demoted
     if (isPlatformAdmin(user.username, targetId)) {
       if (role !== 'admin') {
         return res.status(400).json({ error: 'The primary platform administrator cannot be demoted.' });
       }
     }
 
-    // Protection 2: Prevent caller from locking themselves out of admin
     if (caller && caller.id === targetId && role !== 'admin') {
       return res.status(400).json({ error: 'For security, you cannot revoke your own administrator privileges.' });
     }
@@ -130,7 +123,6 @@ usersRouter.post('/:id/role', requireAdmin, async (req: Request, res: Response) 
   }
 });
 
-// 4. Toggle admin privileges for a user (backward compatibility)
 usersRouter.post('/:id/toggle-admin', requireAdmin, async (req: Request, res: Response) => {
   try {
     const targetId = String(req.params.id);
@@ -141,7 +133,6 @@ usersRouter.post('/:id/toggle-admin', requireAdmin, async (req: Request, res: Re
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Protection: prevent caller from locking themselves out
     if (caller && caller.id === targetId && user.is_admin) {
       return res.status(400).json({ error: 'For security, you cannot revoke your own administrator privileges.' });
     }
@@ -165,7 +156,6 @@ usersRouter.post('/:id/toggle-admin', requireAdmin, async (req: Request, res: Re
   }
 });
 
-// 5. Delete a user from the platform (requires Admin or Self - NOT Moderators!)
 usersRouter.delete('/:id', async (req: Request, res: Response) => {
   try {
     const targetId = String(req.params.id);
@@ -176,7 +166,6 @@ usersRouter.delete('/:id', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Authentication required to delete a user account.' });
     }
 
-    // Moderators CANNOT remove users — strictly Admins or the user deleting their own account
     const isSelf = caller && caller.id === targetId;
     if (!isAdmin && !isSelf) {
       return res.status(403).json({ error: 'Moderators cannot remove users. Only Administrators have permission to delete accounts.' });
@@ -187,23 +176,18 @@ usersRouter.delete('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Protection 1: Prevent primary administrator account from being deleted
     if (isPlatformAdmin(user.username, targetId)) {
       return res.status(400).json({ error: 'The primary platform administrator account cannot be deleted.' });
     }
 
-    // Protection 2: Prevent active admin from accidentally deleting themselves
     if (caller && caller.id === targetId && user.is_admin) {
       return res.status(400).json({ error: 'For security, you cannot delete your own active administrator account.' });
     }
 
-    // Step A: Terminate all active sessions for this user
     await db.prepare('DELETE FROM sessions WHERE user_id = ?').run(targetId);
 
-    // Step B: Detach user ownership from published items so items aren\'t orphaned or broken
     await db.prepare('UPDATE items SET user_id = NULL WHERE user_id = ?').run(targetId);
 
-    // Step C: Delete the user record
     await db.prepare('DELETE FROM users WHERE id = ?').run(targetId);
 
     res.json({

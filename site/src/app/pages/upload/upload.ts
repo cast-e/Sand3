@@ -34,7 +34,6 @@ export class UploadComponent implements OnInit {
   successMessage = signal<string>('');
 
   ngOnInit() {
-    // If logged in, prioritize user username
     const user = this.auth.currentUser();
     if (user) {
       this.author.set(user.username);
@@ -43,7 +42,6 @@ export class UploadComponent implements OnInit {
       if (savedAuthor) this.author.set(savedAuthor);
     }
 
-    // Pre-populate parent_set_id and type if passed via query params
     this.route.queryParams.subscribe((params) => {
       if (params['parent_set_id']) {
         this.parentSetId.set(params['parent_set_id']);
@@ -56,7 +54,6 @@ export class UploadComponent implements OnInit {
       }
     });
 
-    // Load available online sets for dropdown linking
     this.api.getItems('set', 'popular', '', undefined, 1).subscribe({
       next: (res) => this.availableSets.set(res.items),
       error: () => { }
@@ -112,7 +109,6 @@ export class UploadComponent implements OnInit {
       return;
     }
 
-    // Save author name locally
     localStorage.setItem('sand3_author_name', this.author().trim());
 
     this.publishing.set(true);

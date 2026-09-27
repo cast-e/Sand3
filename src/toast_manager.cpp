@@ -1,8 +1,10 @@
 #include "toast_manager.hpp"
-#include "icon_manager.hpp"
+
+#include <imgui.h>
 
 #include <algorithm>
-#include <imgui.h>
+
+#include "icon_manager.hpp"
 
 std::vector<ToastNotification> ToastManager::s_toasts;
 std::mutex ToastManager::s_mutex;
@@ -18,27 +20,18 @@ void ToastManager::show(const std::string& message, ToastType type, float durati
 	t.elapsed = 0.0f;
 	s_toasts.push_back(t);
 
-	// Limit active toasts to avoid clutter
 	if (s_toasts.size() > 6) {
 		s_toasts.erase(s_toasts.begin());
 	}
 }
 
-void ToastManager::success(const std::string& message, float duration) {
-	show(message, ToastType::Success, duration);
-}
+void ToastManager::success(const std::string& message, float duration) { show(message, ToastType::Success, duration); }
 
-void ToastManager::info(const std::string& message, float duration) {
-	show(message, ToastType::Info, duration);
-}
+void ToastManager::info(const std::string& message, float duration) { show(message, ToastType::Info, duration); }
 
-void ToastManager::warning(const std::string& message, float duration) {
-	show(message, ToastType::Warning, duration);
-}
+void ToastManager::warning(const std::string& message, float duration) { show(message, ToastType::Warning, duration); }
 
-void ToastManager::error(const std::string& message, float duration) {
-	show(message, ToastType::Error, duration);
-}
+void ToastManager::error(const std::string& message, float duration) { show(message, ToastType::Error, duration); }
 
 void ToastManager::clear() {
 	std::lock_guard<std::mutex> lock(s_mutex);
@@ -62,7 +55,6 @@ void ToastManager::render() {
 	float target_y = vp->WorkPos.y + vp->WorkSize.y - 20.0f;
 	float right_x = vp->WorkPos.x + vp->WorkSize.x - 20.0f;
 
-	// Iterate backwards so newest toasts stack nicely from bottom up
 	for (int i = static_cast<int>(s_toasts.size()) - 1; i >= 0; --i) {
 		auto& t = s_toasts[i];
 
@@ -110,7 +102,6 @@ void ToastManager::render() {
 
 		if (ImGui::Begin(win_id.c_str(), nullptr, flags)) {
 			if (ImGui::IsWindowHovered()) {
-				// Pause dismissal while hovered
 				t.elapsed = std::max(0.0f, t.elapsed - dt * 0.85f);
 			}
 
@@ -130,7 +121,7 @@ void ToastManager::render() {
 			std::string close_lbl = "x##toast_close_" + std::to_string(t.id);
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, alpha));
 			if (ImGui::SmallButton(close_lbl.c_str())) {
-				t.elapsed = t.duration;  // Mark expired
+				t.elapsed = t.duration;
 			}
 			ImGui::PopStyleColor();
 
@@ -145,7 +136,6 @@ void ToastManager::render() {
 		t.elapsed += dt;
 	}
 
-	// Remove expired toasts
 	s_toasts.erase(std::remove_if(s_toasts.begin(), s_toasts.end(),
 								  [](const ToastNotification& t) { return t.elapsed >= t.duration; }),
 				   s_toasts.end());
