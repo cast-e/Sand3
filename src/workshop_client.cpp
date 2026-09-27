@@ -12,7 +12,7 @@
 #include <curl/curl.h>
 #endif
 
-std::string WorkshopClient::base_url = "http://localhost:3000/api";
+std::string WorkshopClient::base_url = "https://sand3.vercel.app/api";
 std::string WorkshopClient::client_uuid = "";
 std::string WorkshopClient::auth_token = "";
 std::string WorkshopClient::logged_in_username = "";

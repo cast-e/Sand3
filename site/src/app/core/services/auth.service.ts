@@ -18,11 +18,11 @@ export interface AuthResponse {
 function getAuthBaseUrl(): string {
   if (typeof window !== 'undefined') {
     if (window.location.port === '4200') {
-      return 'http://localhost:3000/api/workshop/auth';
+      return 'https://sand3.vercel.app/api/workshop/auth';
     }
     return '/api/workshop/auth';
   }
-  return 'http://localhost:3000/api/workshop/auth';
+  return 'https://sand3.vercel.app/api/workshop/auth';
 }
 
 @Injectable({
