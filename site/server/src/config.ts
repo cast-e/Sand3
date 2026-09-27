@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config();
 
-const databaseUrl =
+let databaseUrl =
   process.env['DATABASE_URL'] ||
   process.env['POSTGRES_URL'] ||
   process.env['POSTGRES_PRISMA_URL'] ||
@@ -16,10 +16,31 @@ const databaseUrl =
   process.env['POSTGRES_URL_NON_POOLING'] ||
   '';
 
+// If no connection string is provided, construct one from discrete POSTGRES_* vars
+if (!databaseUrl && process.env['POSTGRES_HOST'] && process.env['POSTGRES_USER'] && process.env['POSTGRES_PASSWORD']) {
+  const dbName = (process.env['PGDATABASE'] || process.env['POSTGRES_DATABASE'] || 'sand3').trim();
+  databaseUrl = `postgresql://${encodeURIComponent(process.env['POSTGRES_USER'])}:${encodeURIComponent(process.env['POSTGRES_PASSWORD'])}@${process.env['POSTGRES_HOST']}/${dbName}?sslmode=require`;
+}
+
+// If PGDATABASE or POSTGRES_DATABASE is explicitly provided, override the URL's database name
+const specifiedDb = (process.env['PGDATABASE'] || process.env['POSTGRES_DATABASE'] || '').trim();
+if (databaseUrl && specifiedDb) {
+  try {
+    const parsed = new URL(databaseUrl);
+    if (parsed.pathname !== `/${specifiedDb}`) {
+      parsed.pathname = `/${specifiedDb}`;
+      databaseUrl = parsed.toString();
+    }
+  } catch {}
+}
+
 const neonAuthBaseUrl = (
   process.env['NEON_AUTH_BASE_URL'] ||
   process.env['VITE_NEON_AUTH_URL'] ||
   process.env['NEON_AUTH_URL'] ||
+  process.env['_AUTH_BASE_URL'] ||
+  process.env['VITE__AUTH_URL'] ||
+  process.env['AUTH_BASE_URL'] ||
   ''
 ).trim();
 

@@ -5,9 +5,31 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
-import { db } from '../db.js';
+import { db, ensureItemBlobsTable } from '../db.js';
 import { WorkshopItem, ItemType } from '../types.js';
 import { getAuthenticatedUser } from './auth.js';
+
+function generateFallbackThumbnailSvg(title: string, type: string): string {
+  const safeTitle = (title || 'Sand3').replace(/[<>&"']/g, '');
+  const typeColor = type === 'set' ? '#58a6ff' : type === 'save' ? '#2ea043' : type === 'stamp' ? '#bc8cff' : '#d29922';
+  const typeLabel = (type || 'ITEM').toUpperCase();
+  const initial = safeTitle.trim().charAt(0).toUpperCase() || 'S';
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#161b22"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" fill="url(#bg)" rx="8"/>
+  <rect x="6" y="6" width="116" height="116" fill="none" stroke="${typeColor}" stroke-width="1.5" stroke-opacity="0.3" rx="6"/>
+  <circle cx="64" cy="54" r="26" fill="${typeColor}" fill-opacity="0.15"/>
+  <text x="64" y="63" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="26" font-weight="bold" fill="${typeColor}" text-anchor="middle" dominant-baseline="central">${initial}</text>
+  <rect x="24" y="94" width="80" height="18" fill="${typeColor}" fill-opacity="0.2" rx="4"/>
+  <text x="64" y="104" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif" font-size="10" font-weight="bold" fill="${typeColor}" text-anchor="middle" dominant-baseline="central">${typeLabel}</text>
+</svg>`;
+}
 
 /**
  * Computes deterministic SHA-256 hash using strictly .mat material files.
@@ -278,19 +300,49 @@ itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response): Promise
 
 itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params['id']);
-  const item = (await db.prepare('SELECT thumbnail_path FROM items WHERE id = ?').get(id)) as any;
-  if (!item || !item.thumbnail_path) {
-    res.status(404).json({ error: 'No thumbnail available' });
+  const item = (await db.prepare('SELECT id, title, type, thumbnail_path FROM items WHERE id = ?').get(id)) as any;
+  if (!item) {
+    res.status(404).json({ error: 'Item not found' });
     return;
   }
 
-  const thumbFile = path.resolve(THUMBNAILS_DIR, item.thumbnail_path);
-  if (!thumbFile.startsWith(THUMBNAILS_DIR) || !fs.existsSync(thumbFile)) {
-    res.status(404).json({ error: 'Thumbnail file missing' });
-    return;
+  // 1. Check local file on disk (/tmp or uploads)
+  if (item.thumbnail_path) {
+    const thumbFile = path.resolve(THUMBNAILS_DIR, item.thumbnail_path);
+    if (thumbFile.startsWith(THUMBNAILS_DIR) && fs.existsSync(thumbFile)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      res.sendFile(thumbFile);
+      return;
+    }
   }
 
-  res.sendFile(thumbFile);
+  // 2. Check persistent NeonDB item_blobs
+  try {
+    await ensureItemBlobsTable();
+    const blob = (await db.prepare('SELECT thumbnail_data FROM item_blobs WHERE item_id = ?').get(id)) as any;
+    if (blob && blob.thumbnail_data) {
+      const cleanData = blob.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
+      const thumbBuffer = Buffer.from(cleanData, 'base64');
+      const thumbFilename = item.thumbnail_path || `${id}.png`;
+      try {
+        fs.writeFileSync(path.join(THUMBNAILS_DIR, thumbFilename), thumbBuffer);
+      } catch {}
+
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      res.send(thumbBuffer);
+      return;
+    }
+  } catch (blobErr) {
+    console.warn('[Thumbnail] Failed reading thumbnail from DB:', blobErr);
+  }
+
+  // 3. Fallback SVG card for items whose ephemeral containers lost their upload
+  // Ensures the frontend never displays broken image icons
+  const svg = generateFallbackThumbnailSvg(item.title || 'Sand3', item.type || 'item');
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  res.send(svg);
 });
 
 itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise<void> => {
@@ -346,12 +398,17 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
     let fileSize = 0;
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    let fileDataBase64 = '';
 
     if (files && files['file'] && files['file'][0]) {
       filePath = files['file'][0].filename;
       fileSize = files['file'][0].size;
+      try {
+        fileDataBase64 = fs.readFileSync(path.join(UPLOADS_DIR, filePath)).toString('base64');
+      } catch {}
     } else if (body.file_data) {
-      const buffer = Buffer.from(body.file_data, 'base64');
+      fileDataBase64 = body.file_data.replace(/^data:\w+\/\w+;base64,/, '');
+      const buffer = Buffer.from(fileDataBase64, 'base64');
       const ext = body.file_ext || (type === 'save' ? '.save' : type === 'stamp' ? '.stamp' : type === 'theme' ? '.theme' : '.zip');
       const filename = `${id}${ext}`;
       const dest = path.join(UPLOADS_DIR, filename);
@@ -364,11 +421,15 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
     }
 
     let thumbnailPath = '';
+    let thumbnailDataBase64 = '';
     if (files && files['thumbnail'] && files['thumbnail'][0]) {
       thumbnailPath = files['thumbnail'][0].filename;
+      try {
+        thumbnailDataBase64 = fs.readFileSync(path.join(THUMBNAILS_DIR, thumbnailPath)).toString('base64');
+      } catch {}
     } else if (body.thumbnail_data) {
-      const cleanData = body.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
-      const thumbBuffer = Buffer.from(cleanData, 'base64');
+      thumbnailDataBase64 = body.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
+      const thumbBuffer = Buffer.from(thumbnailDataBase64, 'base64');
       const thumbFilename = `${id}.png`;
       fs.writeFileSync(path.join(THUMBNAILS_DIR, thumbFilename), thumbBuffer);
       thumbnailPath = thumbFilename;
@@ -393,6 +454,19 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
       `)
       .run(id, userId, type, title, description, author, parent_set_id, finalSetHash, filePath, fileSize, thumbnailPath, meta_json);
+
+    await ensureItemBlobsTable();
+    if (fileDataBase64 || thumbnailDataBase64) {
+      await db
+        .prepare(`
+          INSERT INTO item_blobs (item_id, thumbnail_data, file_data)
+          VALUES (?, ?, ?)
+          ON CONFLICT (item_id) DO UPDATE SET
+            thumbnail_data = COALESCE(EXCLUDED.thumbnail_data, item_blobs.thumbnail_data),
+            file_data = COALESCE(EXCLUDED.file_data, item_blobs.file_data)
+        `)
+        .run(id, thumbnailDataBase64 || null, fileDataBase64 || null);
+    }
 
     const created = await db.prepare('SELECT * FROM items WHERE id = ?').get(id);
     res.status(201).json(created);
@@ -447,13 +521,18 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     let fileUpdated = false;
+    let fileDataBase64 = '';
 
     if (files && files['file'] && files['file'][0]) {
       filePath = files['file'][0].filename;
       fileSize = files['file'][0].size;
       fileUpdated = true;
+      try {
+        fileDataBase64 = fs.readFileSync(path.join(UPLOADS_DIR, filePath)).toString('base64');
+      } catch {}
     } else if (body.file_data) {
-      const buffer = Buffer.from(body.file_data, 'base64');
+      fileDataBase64 = body.file_data.replace(/^data:\w+\/\w+;base64,/, '');
+      const buffer = Buffer.from(fileDataBase64, 'base64');
       const ext = body.file_ext || path.extname(item.file_path) || '.bin';
       const filename = `${crypto.randomUUID()}${ext}`;
       fs.writeFileSync(path.join(UPLOADS_DIR, filename), buffer);
@@ -507,12 +586,16 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
 
     let thumbnailPath = item.thumbnail_path;
     let thumbUpdated = false;
+    let thumbnailDataBase64 = '';
     if (files && files['thumbnail'] && files['thumbnail'][0]) {
       thumbnailPath = files['thumbnail'][0].filename;
       thumbUpdated = true;
+      try {
+        thumbnailDataBase64 = fs.readFileSync(path.join(THUMBNAILS_DIR, thumbnailPath)).toString('base64');
+      } catch {}
     } else if (body.thumbnail_data) {
-      const cleanData = body.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
-      const thumbBuffer = Buffer.from(cleanData, 'base64');
+      thumbnailDataBase64 = body.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
+      const thumbBuffer = Buffer.from(thumbnailDataBase64, 'base64');
       const thumbFilename = `${id}_v${version}.png`;
       fs.writeFileSync(path.join(THUMBNAILS_DIR, thumbFilename), thumbBuffer);
       thumbnailPath = thumbFilename;
@@ -535,6 +618,19 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
         WHERE id = ?
       `)
       .run(title, description, version, set_hash, filePath, fileSize, thumbnailPath, meta_json, id);
+
+    if (fileDataBase64 || thumbnailDataBase64) {
+      await ensureItemBlobsTable();
+      await db
+        .prepare(`
+          INSERT INTO item_blobs (item_id, thumbnail_data, file_data)
+          VALUES (?, ?, ?)
+          ON CONFLICT (item_id) DO UPDATE SET
+            thumbnail_data = COALESCE(EXCLUDED.thumbnail_data, item_blobs.thumbnail_data),
+            file_data = COALESCE(EXCLUDED.file_data, item_blobs.file_data)
+        `)
+        .run(id, thumbnailDataBase64 || null, fileDataBase64 || null);
+    }
 
     const updated = await db.prepare('SELECT * FROM items WHERE id = ?').get(id);
     res.json(updated);

@@ -720,18 +720,18 @@ void UI::render() {
 				ConfigManager::save();
 			}
 
-			ImDrawList* fg_dl = ImGui::GetForegroundDrawList();
+			ImDrawList* dl = ImGui::GetWindowDrawList();
 			if (bar_hovered || bar_held) {
 				ImU32 glow_col =
 					bar_held ? ImGui::GetColorU32(ImGuiCol_ButtonActive) : ImGui::GetColorU32(ImGuiCol_SeparatorActive);
-				fg_dl->AddLine(ImVec2(bar_x, sidebar_y), ImVec2(bar_x, sidebar_y + target_h), glow_col,
-							   bar_held ? 3.0f : 2.0f);
+				dl->AddLine(ImVec2(bar_x, sidebar_y), ImVec2(bar_x, sidebar_y + target_h), glow_col,
+							bar_held ? 3.0f : 2.0f);
 				float mid_y = sidebar_y + target_h * 0.5f;
-				fg_dl->AddRectFilled(ImVec2(bar_x - 3.0f, mid_y - 20.0f), ImVec2(bar_x + 3.0f, mid_y + 20.0f), glow_col,
-									 3.0f);
+				dl->AddRectFilled(ImVec2(bar_x - 3.0f, mid_y - 20.0f), ImVec2(bar_x + 3.0f, mid_y + 20.0f), glow_col,
+								  3.0f);
 			} else {
-				fg_dl->AddLine(ImVec2(bar_x, sidebar_y), ImVec2(bar_x, sidebar_y + target_h),
-							   ImGui::GetColorU32(ImGuiCol_Separator), 1.0f);
+				dl->AddLine(ImVec2(bar_x, sidebar_y), ImVec2(bar_x, sidebar_y + target_h),
+							ImGui::GetColorU32(ImGuiCol_Separator), 1.0f);
 			}
 		}
 		ImGui::End();
@@ -3269,8 +3269,7 @@ void UI::render_manage_sets() {
 		ImGui::Text("Available Sets:");
 		ImGui::BeginChild("SetsListScroll", ImVec2(0, 150), true);
 		float avail_w = ImGui::GetContentRegionAvail().x;
-		const float row_h = 22.0f;
-		const float btn_sz = 22.0f;
+		const float btn_sz = ImGui::GetTextLineHeightWithSpacing();
 		const float btn_gap = 4.0f;
 
 		bool is_logged_in = WorkshopClient::is_logged_in();
@@ -3303,10 +3302,8 @@ void UI::render_manage_sets() {
 			float total_btn_w = (num_buttons > 0) ? (num_buttons * btn_sz + num_buttons * btn_gap) : 0.0f;
 			float selectable_w = std::max(20.0f, avail_w - total_btn_w);
 
-			float start_y = ImGui::GetCursorPosY();
-
 			if (ImGui::Selectable((display_name + "##selectable_set_" + s).c_str(), s == current_set, 0,
-								  ImVec2(selectable_w, row_h))) {
+								  ImVec2(selectable_w, 0.0f))) {
 				if (s != current_set) {
 					if (unsaved_changes) {
 						pending_set_switch = s;
@@ -3322,10 +3319,13 @@ void UI::render_manage_sets() {
 								  s_meta.description.empty() ? "No description" : s_meta.description.c_str());
 			}
 
+			const ImVec2 sel_min = ImGui::GetItemRectMin();
+			const float sel_h = ImGui::GetItemRectSize().y;
+
 			if (show_share) {
 				ImGui::SameLine(0, btn_gap);
-				ImGui::SetCursorPosY(start_y);
-				if (UI::button_with_icon("##share_set", IconManager::get(IconID::Transmit), ImVec2(btn_sz, row_h))) {
+				ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
+				if (UI::button_with_icon("##share_set", IconManager::get(IconID::Transmit), ImVec2(sel_h, sel_h))) {
 					open_share_for_set(s);
 				}
 				if (ImGui::IsItemHovered()) {
@@ -3335,16 +3335,15 @@ void UI::render_manage_sets() {
 
 			if (show_update) {
 				ImGui::SameLine(0, btn_gap);
-				ImGui::SetCursorPosY(start_y);
-				if (UI::button_with_icon("##update_set", IconManager::get(IconID::Update), ImVec2(btn_sz, row_h))) {
+				ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
+				if (UI::button_with_icon("##update_set", IconManager::get(IconID::Update), ImVec2(sel_h, sel_h))) {
 					if (!s_meta.workshop_id.empty()) {
 						std::string wid = s_meta.workshop_id;
 						std::string wset = s;
 						WorkshopClient::check_item_exists(wid, [wset, wid, s_meta](bool exists, int http_status) {
 							if (!exists && http_status == 404) {
 								SetManager::clear_workshop_info(wset);
-								ToastManager::warning(
-									fmt::format("Set '{}' was deleted from the workshop. Converted to local.", wset));
+								ToastManager::warning(fmt::format("Set '{}' was deleted from the workshop.", wset));
 							} else {
 								WorkshopItemClient it;
 								it.id = wid;
@@ -3367,8 +3366,8 @@ void UI::render_manage_sets() {
 
 			if (show_download) {
 				ImGui::SameLine(0, btn_gap);
-				ImGui::SetCursorPosY(start_y);
-				if (UI::button_with_icon("##download_set", IconManager::get(IconID::Save), ImVec2(btn_sz, row_h))) {
+				ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
+				if (UI::button_with_icon("##download_set", IconManager::get(IconID::Save), ImVec2(sel_h, sel_h))) {
 					std::string wid = s_meta.workshop_id;
 					std::string wset = s;
 					WorkshopClient::check_item_exists(wid, [wset, wid, s_meta](bool exists, int http_status) {
@@ -3544,8 +3543,7 @@ void UI::render_save_load() {
 
 				ImGui::BeginChild("SavesListScroll", ImVec2(0, 180), true);
 				float avail_w = ImGui::GetContentRegionAvail().x;
-				const float row_h = 22.0f;
-				const float btn_sz = 22.0f;
+				const float btn_sz = ImGui::GetTextLineHeightWithSpacing();
 				const float btn_gap = 4.0f;
 
 				bool is_logged_in = WorkshopClient::is_logged_in();
@@ -3581,9 +3579,7 @@ void UI::render_save_load() {
 					float total_btn_w = (num_buttons > 0) ? (num_buttons * btn_sz + num_buttons * btn_gap) : 0.0f;
 					float selectable_w = std::max(20.0f, avail_w - total_btn_w);
 
-					float start_y = ImGui::GetCursorPosY();
-
-					if (ImGui::Selectable(label.c_str(), is_selected, 0, ImVec2(selectable_w, row_h))) {
+					if (ImGui::Selectable(label.c_str(), is_selected, 0, ImVec2(selectable_w, 0.0f))) {
 						selected_save_id = static_cast<int>(i);
 					}
 					if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
@@ -3605,12 +3601,18 @@ void UI::render_save_load() {
 							}
 						}
 					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Double click to load.");
+					}
+
+					const ImVec2 sel_min = ImGui::GetItemRectMin();
+					const float sel_h = ImGui::GetItemRectSize().y;
 
 					if (show_share) {
 						ImGui::SameLine(0, btn_gap);
-						ImGui::SetCursorPosY(start_y);
+						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##share_save", IconManager::get(IconID::Transmit),
-												 ImVec2(btn_sz, row_h))) {
+												 ImVec2(sel_h, sel_h))) {
 							open_share_for_save(sfile.filename, sfile.name, current_set, sfile.width, sfile.height);
 						}
 						if (ImGui::IsItemHovered()) {
@@ -3620,9 +3622,9 @@ void UI::render_save_load() {
 
 					if (show_update) {
 						ImGui::SameLine(0, btn_gap);
-						ImGui::SetCursorPosY(start_y);
+						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##update_save", IconManager::get(IconID::Update),
-												 ImVec2(btn_sz, row_h))) {
+												 ImVec2(sel_h, sel_h))) {
 							if (!sfile.workshop_id.empty()) {
 								std::string wid = sfile.workshop_id;
 								std::string wfn = sfile.filename;
@@ -3657,9 +3659,9 @@ void UI::render_save_load() {
 
 					if (show_download) {
 						ImGui::SameLine(0, btn_gap);
-						ImGui::SetCursorPosY(start_y);
+						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##download_save", IconManager::get(IconID::Save),
-												 ImVec2(btn_sz, row_h))) {
+												 ImVec2(sel_h, sel_h))) {
 							std::string wid = sfile.workshop_id;
 							std::string wfn = sfile.filename;
 							std::string wset = current_set;
@@ -3689,9 +3691,6 @@ void UI::render_save_load() {
 					ImGui::PopID();
 				}
 				ImGui::EndChild();
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Double click to load. Handles different canvas dimensions.");
-				}
 
 				ImGui::Spacing();
 				if (selected_save_id >= 0 && selected_save_id < static_cast<int>(save_files.size())) {
@@ -3783,8 +3782,7 @@ void UI::render_save_load() {
 				auto stamp_files = SaveManager::get_stamp_files(current_set);
 				ImGui::BeginChild("StampsListScroll", ImVec2(0, 180), true);
 				float avail_w = ImGui::GetContentRegionAvail().x;
-				const float row_h = 22.0f;
-				const float btn_sz = 22.0f;
+				const float btn_sz = ImGui::GetTextLineHeightWithSpacing();
 				const float btn_gap = 4.0f;
 
 				bool is_logged_in = WorkshopClient::is_logged_in();
@@ -3818,9 +3816,7 @@ void UI::render_save_load() {
 					float total_btn_w = (num_buttons > 0) ? (num_buttons * btn_sz + num_buttons * btn_gap) : 0.0f;
 					float selectable_w = std::max(20.0f, avail_w - total_btn_w);
 
-					float start_y = ImGui::GetCursorPosY();
-
-					if (ImGui::Selectable(label.c_str(), is_selected, 0, ImVec2(selectable_w, row_h))) {
+					if (ImGui::Selectable(label.c_str(), is_selected, 0, ImVec2(selectable_w, 0.0f))) {
 						selected_stamp_id = static_cast<int>(i);
 					}
 					if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
@@ -3832,12 +3828,18 @@ void UI::render_save_load() {
 								}
 							});
 					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Double click to load.");
+					}
+
+					const ImVec2 sel_min = ImGui::GetItemRectMin();
+					const float sel_h = ImGui::GetItemRectSize().y;
 
 					if (show_share) {
 						ImGui::SameLine(0, btn_gap);
-						ImGui::SetCursorPosY(start_y);
+						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##share_stamp", IconManager::get(IconID::Transmit),
-												 ImVec2(btn_sz, row_h))) {
+												 ImVec2(sel_h, sel_h))) {
 							open_share_for_stamp(stfile.filename, stfile.name, current_set, stfile.width,
 												 stfile.height);
 						}
@@ -3848,9 +3850,9 @@ void UI::render_save_load() {
 
 					if (show_update) {
 						ImGui::SameLine(0, btn_gap);
-						ImGui::SetCursorPosY(start_y);
+						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##update_stamp", IconManager::get(IconID::Update),
-												 ImVec2(btn_sz, row_h))) {
+												 ImVec2(sel_h, sel_h))) {
 							if (!stfile.workshop_id.empty()) {
 								std::string wid = stfile.workshop_id;
 								std::string wfn = stfile.filename;
@@ -3886,9 +3888,9 @@ void UI::render_save_load() {
 
 					if (show_download) {
 						ImGui::SameLine(0, btn_gap);
-						ImGui::SetCursorPosY(start_y);
+						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##download_stamp", IconManager::get(IconID::Save),
-												 ImVec2(btn_sz, row_h))) {
+												 ImVec2(sel_h, sel_h))) {
 							std::string wid = stfile.workshop_id;
 							std::string wfn = stfile.filename;
 							std::string wset = current_set;
@@ -3918,9 +3920,6 @@ void UI::render_save_load() {
 					ImGui::PopID();
 				}
 				ImGui::EndChild();
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Double click to stamp/paste onto canvas.");
-				}
 
 				ImGui::Spacing();
 				if (selected_stamp_id >= 0 && selected_stamp_id < static_cast<int>(stamp_files.size())) {

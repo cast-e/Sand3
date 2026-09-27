@@ -17,6 +17,31 @@ import { config } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Patch Express Router Layer to catch async errors in route handlers and forward to next()
+// preventing unhandled promise rejections from causing 504 Gateway Timeouts
+const dummyRouter = express.Router();
+dummyRouter.get('/', () => {});
+const Layer = (dummyRouter.stack[0] as any)?.constructor;
+if (Layer && Layer.prototype && !Layer.prototype.__sand3_async_patched) {
+  const origHandle = Layer.prototype.handle_request;
+  Layer.prototype.handle_request = function (this: any, req: any, res: any, next: any) {
+    const fn = this.handle;
+    if (fn && fn.length > 3) {
+      return origHandle.apply(this, arguments as any);
+    }
+    try {
+      const result = fn.apply(this, arguments as any);
+      if (result && typeof result.then === 'function') {
+        result.catch(next);
+      }
+      return result;
+    } catch (err) {
+      return next(err);
+    }
+  };
+  Layer.prototype.__sand3_async_patched = true;
+}
+
 const app = express();
 const PORT = process.env['PORT'] || 3000;
 
@@ -72,6 +97,7 @@ apiRouter.get('/workshop/health', async (_req, res) => {
       ...dbResult,
       has_database_url: Boolean(config.databaseUrl),
       database_host: config.databaseUrl ? (config.databaseUrl.split('@')[1]?.split('/')[0] || 'masked') : 'MISSING',
+      database_name: config.databaseUrl ? (config.databaseUrl.split('@')[1]?.split('/')[1]?.split('?')[0] || 'unknown') : 'MISSING',
       has_neon_auth_base_url: Boolean(config.neonAuthBaseUrl),
       has_admin_token: Boolean(config.adminToken),
       has_admin_key: Boolean(config.adminKey)
@@ -110,6 +136,17 @@ if (fs.existsSync(DIST_DIR)) {
     res.sendFile(path.join(DIST_DIR, 'index.html'));
   });
 }
+
+// Global error handling middleware - returns clean 500 error instead of hanging connection until 504
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[API Error]:', err);
+  if (!res.headersSent) {
+    const statusCode = typeof err?.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+    res.status(statusCode).json({
+      error: err?.message || 'Internal Server Error'
+    });
+  }
+});
 
 export { app };
 export default app;

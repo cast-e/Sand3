@@ -11,7 +11,12 @@ function cleanUrl(url: string): string {
 }
 
 const DUMMY_URL = 'postgresql://dummy:dummy@localhost/dummy';
-export const sql = neon(cleanUrl(config.databaseUrl) || DUMMY_URL);
+let activeDatabaseUrl = cleanUrl(config.databaseUrl);
+export let sql = neon(activeDatabaseUrl || DUMMY_URL);
+
+export function getActiveDatabaseUrl(): string {
+  return activeDatabaseUrl;
+}
 
 export function translateSql(query: string): string {
   let paramIdx = 1;
@@ -48,51 +53,100 @@ export interface PreparedStatement {
 }
 
 function checkDatabaseConfigured() {
-  if (!config.databaseUrl) {
+  if (!activeDatabaseUrl && !config.databaseUrl) {
     throw new Error('DATABASE_URL is not configured. Please ensure DATABASE_URL or POSTGRES_URL is set in Vercel Environment Variables.');
   }
+}
+
+export async function runSqlQuery(translated: string, flatParams: any[] = []): Promise<any[]> {
+  checkDatabaseConfigured();
+
+  const queryPromise = sql.query(translated, flatParams) as Promise<any[]>;
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('Database query timed out after 10000ms. Check Neon compute status and IP allowlist.')), 10000)
+  );
+
+  try {
+    return (await Promise.race([queryPromise, timeoutPromise])) as any[];
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+
+    // Auto-heal if Vercel defaults connection string to 'neondb' while project uses 'sand3'
+    if (errMsg.includes('database "neondb" does not exist') && activeDatabaseUrl) {
+      try {
+        const parsed = new URL(activeDatabaseUrl);
+        if (parsed.pathname === '/neondb' || parsed.pathname === '/neondb/') {
+          console.warn('[DB Auto-Heal] Database "neondb" does not exist. Switching target to "sand3"...');
+          parsed.pathname = '/sand3';
+          activeDatabaseUrl = parsed.toString();
+          config.databaseUrl = activeDatabaseUrl;
+          sql = neon(activeDatabaseUrl);
+          return (await sql.query(translated, flatParams)) as any[];
+        }
+      } catch (switchErr) {
+        console.error('[DB Auto-Heal] Failed switching database URL:', switchErr);
+      }
+    }
+
+    throw err;
+  }
+}
+
+let ensureBlobsPromise: Promise<void> | null = null;
+export async function ensureItemBlobsTable(): Promise<void> {
+  if (!ensureBlobsPromise) {
+    ensureBlobsPromise = db
+      .exec(
+        `CREATE TABLE IF NOT EXISTS item_blobs (
+          item_id TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+          thumbnail_data TEXT,
+          file_data TEXT,
+          created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );`
+      )
+      .catch((err) => {
+        ensureBlobsPromise = null;
+        console.warn('[DB] Could not ensure item_blobs table:', err);
+      });
+  }
+  return ensureBlobsPromise;
 }
 
 export const db = {
   prepare(queryText: string): PreparedStatement {
     return {
       async get(...params: any[]): Promise<any | undefined> {
-        checkDatabaseConfigured();
         const translated = translateSql(queryText);
         const flatParams = params.flat();
-        const rows = (await sql.query(translated, flatParams)) as any[];
+        const rows = await runSqlQuery(translated, flatParams);
         return rows && rows.length > 0 ? rows[0] : undefined;
       },
       async all(...params: any[]): Promise<any[]> {
-        checkDatabaseConfigured();
         const translated = translateSql(queryText);
         const flatParams = params.flat();
-        const rows = (await sql.query(translated, flatParams)) as any[];
+        const rows = await runSqlQuery(translated, flatParams);
         return rows || [];
       },
       async run(...params: any[]): Promise<{ changes: number }> {
-        checkDatabaseConfigured();
         const translated = translateSql(queryText);
         const flatParams = params.flat();
-        await sql.query(translated, flatParams);
+        await runSqlQuery(translated, flatParams);
         return { changes: 1 };
       }
     };
   },
   async query(queryText: string, params: any[] = []): Promise<any[]> {
-    checkDatabaseConfigured();
     const translated = translateSql(queryText);
     const flatParams = params.flat();
-    return (await sql.query(translated, flatParams)) as any[];
+    return await runSqlQuery(translated, flatParams);
   },
   async exec(statement: string): Promise<void> {
-    checkDatabaseConfigured();
     const stmts = statement
       .split(';')
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     for (const s of stmts) {
-      await sql.query(s);
+      await runSqlQuery(s);
     }
   }
 };
@@ -174,6 +228,15 @@ export async function initDb(): Promise<void> {
         client_uuid TEXT NOT NULL,
         reason TEXT NOT NULL CHECK(reason IN ('broken', 'offensive', 'spam', 'other')),
         details TEXT DEFAULT '',
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS item_blobs (
+        item_id TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+        thumbnail_data TEXT,
+        file_data TEXT,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
