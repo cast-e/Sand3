@@ -5,7 +5,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
-    "build": "npm --prefix server run build && ng build",
+    "postinstall": "npm --prefix server install",
+    "build": "npm --prefix server install && npm --prefix server run build && ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },
@@ -18,13 +19,16 @@
     "@angular/forms": "^22.2.0",
     "@angular/platform-browser": "^22.2.0",
     "@angular/router": "^22.2.0",
+    "@neondatabase/serverless": "^1.1.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "jose": "^6.2.12",
     "marked": "^18.0.14",
     "multer": "^1.4.5-lts.1",
     "rxjs": "~7.8.0",
-    "tslib": "^2.3.0"
+    "tslib": "^2.3.0",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@angular/build": "^22.2.0",
@@ -35,6 +39,7 @@
     "@types/marked": "^5.0.2",
     "@types/multer": "^1.4.12",
     "@types/node": "^22.13.1",
+    "@types/ws": "^8.18.1",
     "jsdom": "^30.0.0",
     "prettier": "^3.8.1",
     "typescript": "~6.0.2",
