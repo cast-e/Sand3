@@ -30,7 +30,37 @@ downloadsRouter.get('/:id/download', async (req, res) => {
   res.setHeader('X-Item-Type', item.type);
   res.setHeader('X-Parent-Set-Id', item.parent_set_id || '');
 
-  // 1. Check local file on disk
+  const reqVer = req.query['version'] ? parseInt(String(req.query['version']), 10) : null;
+  if (reqVer && reqVer !== item.version) {
+    const verRow = (await db.prepare('SELECT * FROM item_versions WHERE item_id = ? AND version = ?').get(id, reqVer)) as any;
+    if (verRow) {
+      const verExt = path.extname(verRow.file_path) || ext;
+      const verDownloadName = `${safeTitle}_v${reqVer}${verExt}`;
+      res.setHeader('Content-Disposition', `attachment; filename="${verDownloadName}"`);
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('X-Item-Id', item.id);
+      res.setHeader('X-Item-Type', item.type);
+      res.setHeader('X-Item-Version', String(reqVer));
+      res.setHeader('X-Parent-Set-Id', item.parent_set_id || '');
+
+      const verPath = path.resolve(UPLOADS_DIR, verRow.file_path);
+      if (verPath.startsWith(UPLOADS_DIR) && fs.existsSync(verPath)) {
+        await db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);
+        fs.createReadStream(verPath).pipe(res);
+        return;
+      }
+      if (verRow.file_data) {
+        const cleanData = verRow.file_data.replace(/^data:\w+\/\w+;base64,/, '');
+        const fileBuffer = Buffer.from(cleanData, 'base64');
+        try { fs.writeFileSync(verPath, fileBuffer); } catch { }
+        await db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);
+        res.send(fileBuffer);
+        return;
+      }
+    }
+  }
+
+
   const resolvedPath = path.resolve(UPLOADS_DIR, item.file_path);
   if (resolvedPath.startsWith(UPLOADS_DIR) && fs.existsSync(resolvedPath)) {
     await db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);
@@ -39,7 +69,7 @@ downloadsRouter.get('/:id/download', async (req, res) => {
     return;
   }
 
-  // 2. Not on disk: Fetch from NeonDB item_blobs
+
   try {
     await ensureItemBlobsTable();
     const blob = (await db.prepare('SELECT file_data FROM item_blobs WHERE item_id = ?').get(id)) as any;
@@ -47,10 +77,10 @@ downloadsRouter.get('/:id/download', async (req, res) => {
       const cleanData = blob.file_data.replace(/^data:\w+\/\w+;base64,/, '');
       const fileBuffer = Buffer.from(cleanData, 'base64');
 
-      // Cache locally to /tmp for subsequent requests
+
       try {
         fs.writeFileSync(resolvedPath, fileBuffer);
-      } catch {}
+      } catch { }
 
       await db.prepare('UPDATE items SET downloads_count = downloads_count + 1 WHERE id = ?').run(id);
       res.send(fileBuffer);

@@ -12,6 +12,7 @@
 #include "set_manager.hpp"
 #include "ui.hpp"
 #include "window.hpp"
+#include "workshop_cache.hpp"
 
 static void ensure_working_directory(const char* argv0) {
 	if (!std::filesystem::exists("sets")) {
@@ -49,6 +50,7 @@ int main(int argc, char* argv[]) {
 
 	IPC::start_server();
 	std::atexit(IPC::cleanup);
+	std::atexit(WorkshopCache::cleanup);
 
 	Window::init(1600, 900);
 	Grid::init();

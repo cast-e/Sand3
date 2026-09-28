@@ -17,6 +17,9 @@ struct SetMetadata {
 	uint32_t version = 1;
 	std::string workshop_id;
 	std::string workshop_hash;
+	std::string forked_from_id;
+	std::string forked_from_author;
+	uint32_t forked_from_version = 0;
 	bool is_online = false;
 	std::unordered_map<std::string, std::string> shortcuts;
 };
@@ -35,6 +38,7 @@ public:
 	static void set_current_set(const std::string& name);
 	static void create_new_empty_set(const std::string& name);
 	static void copy_set(const std::string& source_name, const std::string& new_name);
+	static void fork_set(const std::string& source_name, const std::string& new_name);
 	static bool rename_set(const std::string& old_name, const std::string& new_name);
 	static void delete_set(const std::string& name);
 

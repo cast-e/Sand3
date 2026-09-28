@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -38,6 +38,14 @@ export class WorkshopComponent implements OnInit {
   editThumbnailData = signal<string>('');
   editLoading = signal<boolean>(false);
   editError = signal<string>('');
+
+  constructor() {
+    effect(() => {
+      // Whenever currentUser changes (e.g. login or logout), reload items to reflect correct like/favorite states
+      const _user = this.auth.currentUser();
+      this.loadItems();
+    });
+  }
 
   ngOnInit() {
     this.route.queryParams.subscribe((params) => {
@@ -106,10 +114,28 @@ export class WorkshopComponent implements OnInit {
 
   toggleLike(item: WorkshopItem, event: Event) {
     event.stopPropagation();
+    if (!this.auth.currentUser()) {
+      alert('Please sign in to like workshop items.');
+      return;
+    }
+    const prevLiked = !!item.is_liked;
+    const prevCount = item.likes_count || 0;
+    const optimisticLiked = !prevLiked;
+    const optimisticCount = Math.max(0, prevCount + (optimisticLiked ? 1 : -1));
+
+    this.items.update((list) =>
+      list.map((i) => (i.id === item.id ? { ...i, is_liked: optimisticLiked, likes_count: optimisticCount } : i))
+    );
+
     this.api.toggleLike(item.id).subscribe({
       next: (res) => {
         this.items.update((list) =>
           list.map((i) => (i.id === item.id ? { ...i, is_liked: res.is_liked, likes_count: res.likes_count } : i))
+        );
+      },
+      error: () => {
+        this.items.update((list) =>
+          list.map((i) => (i.id === item.id ? { ...i, is_liked: prevLiked, likes_count: prevCount } : i))
         );
       }
     });
@@ -117,12 +143,30 @@ export class WorkshopComponent implements OnInit {
 
   toggleFavorite(item: WorkshopItem, event: Event) {
     event.stopPropagation();
+    if (!this.auth.currentUser()) {
+      alert('Please sign in to favorite workshop items.');
+      return;
+    }
+    const prevFav = !!item.is_favorited;
+    const prevCount = item.favorites_count || 0;
+    const optimisticFav = !prevFav;
+    const optimisticCount = Math.max(0, prevCount + (optimisticFav ? 1 : -1));
+
+    this.items.update((list) =>
+      list.map((i) => (i.id === item.id ? { ...i, is_favorited: optimisticFav, favorites_count: optimisticCount } : i))
+    );
+
     this.api.toggleFavorite(item.id).subscribe({
       next: (res) => {
         this.items.update((list) =>
           list.map((i) =>
             i.id === item.id ? { ...i, is_favorited: res.is_favorited, favorites_count: res.favorites_count } : i
           )
+        );
+      },
+      error: () => {
+        this.items.update((list) =>
+          list.map((i) => (i.id === item.id ? { ...i, is_favorited: prevFav, favorites_count: prevCount } : i))
         );
       }
     });
@@ -186,12 +230,21 @@ export class WorkshopComponent implements OnInit {
       return;
     }
 
+    const previousList = this.items();
+    const previousTotal = this.total();
+
+
+    this.items.update((list) => list.filter((i) => i.id !== item.id));
+    this.total.update((t) => Math.max(0, t - 1));
+
     this.api.deleteItem(item.id).subscribe({
       next: () => {
-        this.items.update((list) => list.filter((i) => i.id !== item.id));
-        this.total.update((t) => Math.max(0, t - 1));
+
       },
       error: (err) => {
+
+        this.items.set(previousList);
+        this.total.set(previousTotal);
         alert(err.error?.error || 'Failed to delete item.');
       }
     });
@@ -199,6 +252,10 @@ export class WorkshopComponent implements OnInit {
 
   openReportModal(item: WorkshopItem, event: Event) {
     event.stopPropagation();
+    if (!this.auth.currentUser()) {
+      alert('Please sign in to report items.');
+      return;
+    }
     this.reportingItem.set(item);
     this.reportReason.set('broken');
     this.reportDetails.set('');

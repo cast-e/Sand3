@@ -1,5 +1,6 @@
 #include "workshop_client.hpp"
 
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <random>
@@ -109,6 +110,11 @@ namespace {
 		it.is_liked = json_bool(item_json, "is_liked");
 		it.is_favorited = json_bool(item_json, "is_favorited");
 		it.created_at = json_str(item_json, "created_at");
+		it.forked_from_id = json_str(item_json, "forked_from_id");
+		it.forked_from_version = json_int(item_json, "forked_from_version", 0);
+		it.forked_from_title = json_str(item_json, "forked_from_title");
+		it.forked_from_author = json_str(item_json, "forked_from_author");
+		it.forks_count = json_int(item_json, "forks_count", 0);
 		if (item_json.contains("meta_json")) {
 			if (item_json["meta_json"].is_string()) {
 				try {
@@ -442,6 +448,9 @@ bool WorkshopClient::http_download_file(const std::string& url, const std::strin
 	if (!curl)
 		return false;
 
+	std::error_code ec;
+	std::filesystem::create_directories(std::filesystem::path(dest_path).parent_path(), ec);
+
 	FILE* fp = fopen(dest_path.c_str(), "wb");
 	if (!fp) {
 		curl_easy_cleanup(curl);
@@ -752,11 +761,56 @@ void WorkshopClient::fetch_set_stamps(
 	}).detach();
 }
 
+void WorkshopClient::fetch_item_versions(
+	const std::string& item_id,
+	std::function<void(bool success, const std::vector<WorkshopItemVersion>& versions)> callback) {
+	Window::increment_busy();
+	std::thread([item_id, callback]() {
+		std::string url = base_url + "/workshop/items/" + item_id + "/versions";
+		int status = 0;
+		std::string resp = http_get(url, status);
+		bool ok = (status >= 200 && status < 300);
+		std::vector<WorkshopItemVersion> versions;
+
+		if (ok) {
+			try {
+				auto j = nlohmann::json::parse(resp);
+				if (j.is_array()) {
+					for (const auto& vj : j) {
+						WorkshopItemVersion v;
+						v.version = json_int(vj, "version", 1);
+						v.changelog = json_str(vj, "changelog");
+						v.file_size = json_int(vj, "file_size", 0);
+						v.set_hash = json_str(vj, "set_hash");
+						v.created_at = json_str(vj, "created_at");
+						versions.push_back(v);
+					}
+				}
+			} catch (...) {
+				ok = false;
+			}
+		}
+
+		enqueue_task_completion([callback, ok, versions]() { callback(ok, versions); });
+	}).detach();
+}
+
 void WorkshopClient::download_item(const std::string& id, const std::string& target_path,
 								   std::function<void(bool success, const std::string& path)> callback) {
 	Window::increment_busy();
 	std::thread([id, target_path, callback]() {
 		std::string url = base_url + "/workshop/items/" + id + "/download";
+		bool ok = http_download_file(url, target_path);
+
+		enqueue_task_completion([callback, ok, target_path]() { callback(ok, target_path); });
+	}).detach();
+}
+
+void WorkshopClient::download_item_version(const std::string& id, int version, const std::string& target_path,
+										  std::function<void(bool success, const std::string& path)> callback) {
+	Window::increment_busy();
+	std::thread([id, version, target_path, callback]() {
+		std::string url = base_url + "/workshop/items/" + id + "/download?version=" + std::to_string(version);
 		bool ok = http_download_file(url, target_path);
 
 		enqueue_task_completion([callback, ok, target_path]() { callback(ok, target_path); });
@@ -853,10 +907,11 @@ void WorkshopClient::publish_item(
 	const std::string& type, const std::string& title, const std::string& description, const std::string& author,
 	const std::string& parent_set_id, const std::vector<uint8_t>& file_bytes, const std::string& file_ext,
 	const std::string& meta_json, const std::string& set_hash, const std::string& thumbnail_data,
-	std::function<void(bool success, const std::string& created_id, const std::string& error)> callback) {
+	std::function<void(bool success, const std::string& created_id, const std::string& error)> callback,
+	const std::string& forked_from_id, int forked_from_version) {
 	Window::increment_busy();
 	std::thread([type, title, description, author, parent_set_id, file_bytes, file_ext, meta_json, set_hash,
-				 thumbnail_data, callback]() {
+				 thumbnail_data, callback, forked_from_id, forked_from_version]() {
 		std::string url = base_url + "/workshop/items";
 		nlohmann::json body;
 		body["type"] = type;
@@ -865,6 +920,12 @@ void WorkshopClient::publish_item(
 		body["author"] = author;
 		if (!parent_set_id.empty()) {
 			body["parent_set_id"] = parent_set_id;
+		}
+		if (!forked_from_id.empty()) {
+			body["forked_from_id"] = forked_from_id;
+		}
+		if (forked_from_version > 0) {
+			body["forked_from_version"] = forked_from_version;
 		}
 		if (!set_hash.empty()) {
 			body["set_hash"] = set_hash;

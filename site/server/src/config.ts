@@ -16,13 +16,13 @@ let databaseUrl =
   process.env['POSTGRES_URL_NON_POOLING'] ||
   '';
 
-// If no connection string is provided, construct one from discrete POSTGRES_* vars
+
 if (!databaseUrl && process.env['POSTGRES_HOST'] && process.env['POSTGRES_USER'] && process.env['POSTGRES_PASSWORD']) {
   const dbName = (process.env['PGDATABASE'] || process.env['POSTGRES_DATABASE'] || 'sand3').trim();
   databaseUrl = `postgresql://${encodeURIComponent(process.env['POSTGRES_USER'])}:${encodeURIComponent(process.env['POSTGRES_PASSWORD'])}@${process.env['POSTGRES_HOST']}/${dbName}?sslmode=require`;
 }
 
-// If PGDATABASE or POSTGRES_DATABASE is explicitly provided, override the URL's database name
+
 const specifiedDb = (process.env['PGDATABASE'] || process.env['POSTGRES_DATABASE'] || '').trim();
 if (databaseUrl && specifiedDb) {
   try {
@@ -31,7 +31,7 @@ if (databaseUrl && specifiedDb) {
       parsed.pathname = `/${specifiedDb}`;
       databaseUrl = parsed.toString();
     }
-  } catch {}
+  } catch { }
 }
 
 const neonAuthBaseUrl = (

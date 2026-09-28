@@ -71,7 +71,7 @@ export async function runSqlQuery(translated: string, flatParams: any[] = []): P
   } catch (err: any) {
     const errMsg = err?.message || String(err);
 
-    // Auto-heal if Vercel defaults connection string to 'neondb' while project uses 'sand3'
+
     if (errMsg.includes('database "neondb" does not exist') && activeDatabaseUrl) {
       try {
         const parsed = new URL(activeDatabaseUrl);
@@ -193,6 +193,8 @@ export async function initDb(): Promise<void> {
         file_size INTEGER NOT NULL,
         thumbnail_path TEXT DEFAULT '',
         meta_json TEXT DEFAULT '{}',
+        forked_from_id TEXT REFERENCES items(id) ON DELETE SET NULL,
+        forked_from_version INTEGER,
         likes_count INTEGER DEFAULT 0,
         favorites_count INTEGER DEFAULT 0,
         downloads_count INTEGER DEFAULT 0,
@@ -201,35 +203,61 @@ export async function initDb(): Promise<void> {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE items ADD COLUMN IF NOT EXISTS forked_from_id TEXT REFERENCES items(id) ON DELETE SET NULL;
+      ALTER TABLE items ADD COLUMN IF NOT EXISTS forked_from_version INTEGER;
       CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
       CREATE INDEX IF NOT EXISTS idx_items_parent_set_id ON items(parent_set_id);
+      CREATE INDEX IF NOT EXISTS idx_items_forked_from_id ON items(forked_from_id);
       CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id);
       CREATE INDEX IF NOT EXISTS idx_items_set_hash ON items(set_hash);
       CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
       CREATE INDEX IF NOT EXISTS idx_items_likes ON items(likes_count DESC);
+
+      CREATE TABLE IF NOT EXISTS item_versions (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        set_hash TEXT DEFAULT '',
+        changelog TEXT DEFAULT '',
+        meta_json TEXT DEFAULT '{}',
+        file_data TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(item_id, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_item_versions_lookup ON item_versions(item_id, version DESC);
     `);
 
     await db.exec(`
       CREATE TABLE IF NOT EXISTS interactions (
         id SERIAL PRIMARY KEY,
         item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-        client_uuid TEXT NOT NULL,
+        user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+        client_uuid TEXT,
         interaction_type TEXT NOT NULL CHECK(interaction_type IN ('like', 'favorite')),
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(item_id, client_uuid, interaction_type)
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
-      CREATE INDEX IF NOT EXISTS idx_interactions_lookup ON interactions(item_id, client_uuid);
+      ALTER TABLE interactions ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES users(id) ON DELETE CASCADE;
+      ALTER TABLE interactions ALTER COLUMN client_uuid DROP NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_interactions_user_uniq ON interactions(item_id, user_id, interaction_type) WHERE user_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_interactions_user ON interactions(user_id, interaction_type);
+      CREATE INDEX IF NOT EXISTS idx_interactions_lookup ON interactions(item_id, user_id);
     `);
 
     await db.exec(`
       CREATE TABLE IF NOT EXISTS reports (
         id SERIAL PRIMARY KEY,
         item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-        client_uuid TEXT NOT NULL,
+        user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        client_uuid TEXT,
         reason TEXT NOT NULL CHECK(reason IN ('broken', 'offensive', 'spam', 'other')),
         details TEXT DEFAULT '',
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+      ALTER TABLE reports ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE reports ALTER COLUMN client_uuid DROP NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_reports_user ON reports(user_id);
     `);
 
     await db.exec(`

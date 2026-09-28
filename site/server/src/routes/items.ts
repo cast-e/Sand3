@@ -199,6 +199,9 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
   const query = `
     SELECT i.*,
       (SELECT title FROM items p WHERE p.id = i.parent_set_id) as parent_set_title,
+      (SELECT title FROM items f WHERE f.id = i.forked_from_id) as forked_from_title,
+      (SELECT author FROM items f WHERE f.id = i.forked_from_id) as forked_from_author,
+      (SELECT COUNT(*) FROM items fk WHERE fk.forked_from_id = i.id) as forks_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'save') as child_saves_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'stamp') as child_stamps_count
     FROM items i
@@ -211,8 +214,9 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
 
   let likedSet = new Set<string>();
   let favoritedSet = new Set<string>();
-  if (client_uuid) {
-    const interactions = (await db.prepare(`SELECT item_id, interaction_type FROM interactions WHERE client_uuid = ?`).all(client_uuid)) as any[];
+  const user = await getAuthenticatedUser(req);
+  if (user) {
+    const interactions = (await db.prepare(`SELECT item_id, interaction_type FROM interactions WHERE user_id = ?`).all(user.id)) as any[];
     for (const inter of interactions) {
       if (inter.interaction_type === 'like') likedSet.add(inter.item_id);
       if (inter.interaction_type === 'favorite') favoritedSet.add(inter.item_id);
@@ -239,11 +243,13 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
 
 itemsRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params['id']);
-  const client_uuid = (req.query['client_uuid'] as string) || '';
 
   const query = `
     SELECT i.*,
       (SELECT title FROM items p WHERE p.id = i.parent_set_id) as parent_set_title,
+      (SELECT title FROM items f WHERE f.id = i.forked_from_id) as forked_from_title,
+      (SELECT author FROM items f WHERE f.id = i.forked_from_id) as forked_from_author,
+      (SELECT COUNT(*) FROM items fk WHERE fk.forked_from_id = i.id) as forks_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'save') as child_saves_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'stamp') as child_stamps_count
     FROM items i
@@ -258,8 +264,9 @@ itemsRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
 
   let is_liked = false;
   let is_favorited = false;
-  if (client_uuid) {
-    const interactions = (await db.prepare(`SELECT interaction_type FROM interactions WHERE item_id = ? AND client_uuid = ?`).all(id, client_uuid)) as any[];
+  const user = await getAuthenticatedUser(req);
+  if (user) {
+    const interactions = (await db.prepare(`SELECT interaction_type FROM interactions WHERE item_id = ? AND user_id = ?`).all(id, user.id)) as any[];
     for (const inter of interactions) {
       if (inter.interaction_type === 'like') is_liked = true;
       if (inter.interaction_type === 'favorite') is_favorited = true;
@@ -306,7 +313,7 @@ itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response): Promise<v
     return;
   }
 
-  // 1. Check local file on disk (/tmp or uploads)
+
   if (item.thumbnail_path) {
     const thumbFile = path.resolve(THUMBNAILS_DIR, item.thumbnail_path);
     if (thumbFile.startsWith(THUMBNAILS_DIR) && fs.existsSync(thumbFile)) {
@@ -316,7 +323,7 @@ itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response): Promise<v
     }
   }
 
-  // 2. Check persistent NeonDB item_blobs
+
   try {
     await ensureItemBlobsTable();
     const blob = (await db.prepare('SELECT thumbnail_data FROM item_blobs WHERE item_id = ?').get(id)) as any;
@@ -326,7 +333,7 @@ itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response): Promise<v
       const thumbFilename = item.thumbnail_path || `${id}.png`;
       try {
         fs.writeFileSync(path.join(THUMBNAILS_DIR, thumbFilename), thumbBuffer);
-      } catch {}
+      } catch { }
 
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
@@ -337,8 +344,8 @@ itemsRouter.get('/:id/thumbnail', async (req: Request, res: Response): Promise<v
     console.warn('[Thumbnail] Failed reading thumbnail from DB:', blobErr);
   }
 
-  // 3. Fallback SVG card for items whose ephemeral containers lost their upload
-  // Ensures the frontend never displays broken image icons
+
+
   const svg = generateFallbackThumbnailSvg(item.title || 'Sand3', item.type || 'item');
   res.setHeader('Content-Type', 'image/svg+xml');
   res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
@@ -377,7 +384,11 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
       meta_json = '{}';
     }
 
-    if (parent_set_id && (type === 'save' || type === 'stamp')) {
+    if (type === 'save' || type === 'stamp') {
+      if (!parent_set_id) {
+        res.status(400).json({ error: 'Publishing a save or stamp requires an associated published set. Please share the set to Workshop first.' });
+        return;
+      }
       const parentSet = (await db.prepare("SELECT id, title, set_hash FROM items WHERE id = ? AND type = 'set'").get(parent_set_id)) as any;
       if (!parentSet) {
         res.status(404).json({ error: `Associated set with ID '${parent_set_id}' was not found` });
@@ -405,7 +416,7 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
       fileSize = files['file'][0].size;
       try {
         fileDataBase64 = fs.readFileSync(path.join(UPLOADS_DIR, filePath)).toString('base64');
-      } catch {}
+      } catch { }
     } else if (body.file_data) {
       fileDataBase64 = body.file_data.replace(/^data:\w+\/\w+;base64,/, '');
       const buffer = Buffer.from(fileDataBase64, 'base64');
@@ -426,7 +437,7 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
       thumbnailPath = files['thumbnail'][0].filename;
       try {
         thumbnailDataBase64 = fs.readFileSync(path.join(THUMBNAILS_DIR, thumbnailPath)).toString('base64');
-      } catch {}
+      } catch { }
     } else if (body.thumbnail_data) {
       thumbnailDataBase64 = body.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
       const thumbBuffer = Buffer.from(thumbnailDataBase64, 'base64');
@@ -436,6 +447,8 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
     }
 
     const userId = authUser ? authUser.id : null;
+    const forked_from_id = body.forked_from_id ? String(body.forked_from_id).trim() : null;
+    const forked_from_version = body.forked_from_version ? parseInt(String(body.forked_from_version), 10) : null;
 
     let finalSetHash = set_hash;
     if (type === 'set') {
@@ -450,10 +463,25 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
 
     await db
       .prepare(`
-        INSERT INTO items (id, user_id, type, title, description, author, parent_set_id, version, set_hash, file_path, file_size, thumbnail_path, meta_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+        INSERT INTO items (id, user_id, type, title, description, author, parent_set_id, forked_from_id, forked_from_version, version, set_hash, file_path, file_size, thumbnail_path, meta_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
       `)
-      .run(id, userId, type, title, description, author, parent_set_id, finalSetHash, filePath, fileSize, thumbnailPath, meta_json);
+      .run(id, userId, type, title, description, author, parent_set_id, forked_from_id, forked_from_version, finalSetHash, filePath, fileSize, thumbnailPath, meta_json);
+
+    try {
+      await db.prepare(`
+        INSERT INTO item_versions (item_id, version, file_path, file_size, set_hash, changelog, meta_json, file_data)
+        VALUES (?, 1, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (item_id, version) DO UPDATE SET
+          file_path = EXCLUDED.file_path,
+          file_size = EXCLUDED.file_size,
+          set_hash = EXCLUDED.set_hash,
+          meta_json = EXCLUDED.meta_json,
+          file_data = COALESCE(EXCLUDED.file_data, item_versions.file_data)
+      `).run(id, filePath, fileSize, finalSetHash, '', meta_json, fileDataBase64 || null);
+    } catch (vErr) {
+      console.warn('[Version] Failed recording initial version:', vErr);
+    }
 
     await ensureItemBlobsTable();
     if (fileDataBase64 || thumbnailDataBase64) {
@@ -529,7 +557,7 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
       fileUpdated = true;
       try {
         fileDataBase64 = fs.readFileSync(path.join(UPLOADS_DIR, filePath)).toString('base64');
-      } catch {}
+      } catch { }
     } else if (body.file_data) {
       fileDataBase64 = body.file_data.replace(/^data:\w+\/\w+;base64,/, '');
       const buffer = Buffer.from(fileDataBase64, 'base64');
@@ -592,7 +620,7 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
       thumbUpdated = true;
       try {
         thumbnailDataBase64 = fs.readFileSync(path.join(THUMBNAILS_DIR, thumbnailPath)).toString('base64');
-      } catch {}
+      } catch { }
     } else if (body.thumbnail_data) {
       thumbnailDataBase64 = body.thumbnail_data.replace(/^data:image\/\w+;base64,/, '');
       const thumbBuffer = Buffer.from(thumbnailDataBase64, 'base64');
@@ -632,12 +660,51 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
         .run(id, thumbnailDataBase64 || null, fileDataBase64 || null);
     }
 
+    try {
+      await db.prepare(`
+        INSERT INTO item_versions (item_id, version, file_path, file_size, set_hash, changelog, meta_json, file_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (item_id, version) DO UPDATE SET
+          file_path = EXCLUDED.file_path,
+          file_size = EXCLUDED.file_size,
+          set_hash = EXCLUDED.set_hash,
+          changelog = EXCLUDED.changelog,
+          meta_json = EXCLUDED.meta_json,
+          file_data = COALESCE(EXCLUDED.file_data, item_versions.file_data)
+      `).run(id, version, filePath, fileSize, set_hash, body.changelog || '', meta_json, fileDataBase64 || null);
+    } catch (vErr) {
+      console.warn('[Version] Failed recording updated version:', vErr);
+    }
+
     const updated = await db.prepare('SELECT * FROM items WHERE id = ?').get(id);
     res.json(updated);
   } catch (err: any) {
     console.error('Error updating workshop item:', err);
     res.status(500).json({ error: 'Failed to update item: ' + err.message });
   }
+});
+
+itemsRouter.get('/:id/versions', async (req: Request, res: Response): Promise<void> => {
+  const id = String(req.params['id']);
+  const item = (await db.prepare('SELECT id, version, file_size, set_hash, created_at, meta_json FROM items WHERE id = ? AND is_hidden = 0').get(id)) as any;
+  if (!item) {
+    res.status(404).json({ error: 'Item not found' });
+    return;
+  }
+  let versions = (await db.prepare(
+    'SELECT id, item_id, version, file_size, set_hash, changelog, created_at FROM item_versions WHERE item_id = ? ORDER BY version DESC'
+  ).all(id)) as any[];
+
+  if (!versions || versions.length === 0) {
+    versions = [{
+      version: item.version || 1,
+      file_size: item.file_size,
+      set_hash: item.set_hash,
+      changelog: '',
+      created_at: item.created_at
+    }];
+  }
+  res.json(versions);
 });
 
 itemsRouter.delete('/:id', async (req: Request, res: Response): Promise<void> => {

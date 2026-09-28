@@ -19,6 +19,11 @@ struct WorkshopItemClient {
 	std::string set_hash;
 	std::string thumbnail_path;
 	std::string user_id;
+	std::string forked_from_id;
+	std::string forked_from_title;
+	std::string forked_from_author;
+	int forked_from_version = 0;
+	int forks_count = 0;
 	int child_saves_count = 0;
 	int child_stamps_count = 0;
 	int file_size = 0;
@@ -29,6 +34,14 @@ struct WorkshopItemClient {
 	bool is_favorited = false;
 	std::string created_at;
 	nlohmann::json meta;
+};
+
+struct WorkshopItemVersion {
+	int version = 1;
+	int file_size = 0;
+	std::string set_hash;
+	std::string changelog;
+	std::string created_at;
 };
 
 class WorkshopClient {
@@ -76,8 +89,15 @@ public:
 	fetch_set_stamps(const std::string& set_id,
 					 std::function<void(bool success, const std::vector<WorkshopItemClient>& stamps)> callback);
 
+	static void
+	fetch_item_versions(const std::string& item_id,
+						std::function<void(bool success, const std::vector<WorkshopItemVersion>& versions)> callback);
+
 	static void download_item(const std::string& id, const std::string& target_path,
 							  std::function<void(bool success, const std::string& path)> callback);
+
+	static void download_item_version(const std::string& id, int version, const std::string& target_path,
+									  std::function<void(bool success, const std::string& path)> callback);
 
 	static void download_thumbnail(const std::string& id, const std::string& target_path,
 								   std::function<void(bool success, const std::string& path)> callback);
@@ -96,7 +116,8 @@ public:
 				 const std::string& author, const std::string& parent_set_id, const std::vector<uint8_t>& file_bytes,
 				 const std::string& file_ext, const std::string& meta_json, const std::string& set_hash,
 				 const std::string& thumbnail_data,
-				 std::function<void(bool success, const std::string& created_id, const std::string& error)> callback);
+				 std::function<void(bool success, const std::string& created_id, const std::string& error)> callback,
+				 const std::string& forked_from_id = "", int forked_from_version = 0);
 
 	static void update_item(const std::string& id, const std::string& title, const std::string& description,
 							int version, const std::string& changelog, const std::vector<uint8_t>& file_bytes,

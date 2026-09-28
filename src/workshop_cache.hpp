@@ -19,6 +19,7 @@ public:
 	static bool promote_to_local(const std::string& item_id, const std::string& type, const std::string& target_name,
 								 const std::string& current_set = "", const std::string& workshop_hash = "");
 	static void purge_transient_cache();
+	static void cleanup();
 
 private:
 	static std::unordered_set<std::string> transient_paths;

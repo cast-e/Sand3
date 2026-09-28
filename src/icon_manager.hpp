@@ -36,6 +36,7 @@ enum class IconID {
 	Accept,
 	Information,
 	Warning,
+	Branch,
 	Count
 };
 

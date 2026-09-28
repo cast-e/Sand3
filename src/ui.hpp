@@ -96,8 +96,12 @@ public:
 	static void drop_moving_selection();
 
 	static bool button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& size = ImVec2(0, 0));
+	static bool selectable_with_color(const char* label, const ImVec4& color, bool selected,
+									  ImGuiSelectableFlags flags = 0, const ImVec2& size = ImVec2(0, 0),
+									  bool show_checkbox = false);
 
 	static void refresh_workshop_items();
+	static void remove_workshop_item(const std::string& item_id);
 	static void validate_online_items(bool force = false);
 	static void handle_uri(const std::string& uri);
 	static std::string generate_thumbnail_base64(int type_idx, const std::string& target_set,

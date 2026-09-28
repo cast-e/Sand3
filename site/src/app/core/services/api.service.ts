@@ -28,6 +28,11 @@ export interface WorkshopItem {
   author: string;
   parent_set_id: string | null;
   parent_set_title?: string;
+  forked_from_id?: string | null;
+  forked_from_title?: string;
+  forked_from_author?: string;
+  forked_from_version?: number | null;
+  forks_count?: number;
   version: number;
   set_hash?: string;
   file_path: string;
@@ -134,47 +139,66 @@ export class ApiService {
     if (q) params = params.set('q', q);
     if (parent_set_id) params = params.set('parent_set_id', parent_set_id);
 
-    return this.http.get<ItemsResponse>(`${this.baseUrl}/workshop/items`, { params });
+    return this.http.get<ItemsResponse>(`${this.baseUrl}/workshop/items`, {
+      params,
+      headers: this.getAuthHeaders()
+    });
   }
 
   getItem(id: string): Observable<WorkshopItem> {
     const params = new HttpParams().set('client_uuid', this.getClientUuid());
-    return this.http.get<WorkshopItem>(`${this.baseUrl}/workshop/items/${id}`, { params });
+    return this.http.get<WorkshopItem>(`${this.baseUrl}/workshop/items/${id}`, {
+      params,
+      headers: this.getAuthHeaders()
+    });
   }
 
   getSetSaves(setId: string): Observable<WorkshopItem[]> {
-    return this.http.get<WorkshopItem[]>(`${this.baseUrl}/workshop/items/sets/${setId}/saves`);
+    return this.http.get<WorkshopItem[]>(`${this.baseUrl}/workshop/items/sets/${setId}/saves`, {
+      headers: this.getAuthHeaders()
+    });
   }
 
   getSetStamps(setId: string): Observable<WorkshopItem[]> {
-    return this.http.get<WorkshopItem[]>(`${this.baseUrl}/workshop/items/sets/${setId}/stamps`);
+    return this.http.get<WorkshopItem[]>(`${this.baseUrl}/workshop/items/sets/${setId}/stamps`, {
+      headers: this.getAuthHeaders()
+    });
   }
 
   toggleLike(id: string): Observable<{ is_liked: boolean; likes_count: number }> {
     return this.http.post<{ is_liked: boolean; likes_count: number }>(
       `${this.baseUrl}/workshop/items/${id}/like`,
-      { client_uuid: this.getClientUuid() }
+      { client_uuid: this.getClientUuid() },
+      { headers: this.getAuthHeaders() }
     );
   }
 
   toggleFavorite(id: string): Observable<{ is_favorited: boolean; favorites_count: number }> {
     return this.http.post<{ is_favorited: boolean; favorites_count: number }>(
       `${this.baseUrl}/workshop/items/${id}/favorite`,
-      { client_uuid: this.getClientUuid() }
+      { client_uuid: this.getClientUuid() },
+      { headers: this.getAuthHeaders() }
     );
   }
 
   submitReport(id: string, reason: string, details: string): Observable<any> {
-    return this.http.post<any>(`${this.baseUrl}/workshop/items/${id}/report`, {
-      client_uuid: this.getClientUuid(),
-      reason,
-      details
-    });
+    return this.http.post<any>(
+      `${this.baseUrl}/workshop/items/${id}/report`,
+      {
+        client_uuid: this.getClientUuid(),
+        reason,
+        details
+      },
+      { headers: this.getAuthHeaders() }
+    );
   }
 
   getUserFavorites(): Observable<WorkshopItem[]> {
     const params = new HttpParams().set('client_uuid', this.getClientUuid());
-    return this.http.get<WorkshopItem[]>(`${this.baseUrl}/workshop/items/user/favorites`, { params });
+    return this.http.get<WorkshopItem[]>(`${this.baseUrl}/workshop/items/user/favorites`, {
+      params,
+      headers: this.getAuthHeaders()
+    });
   }
 
   publishItem(payload: any): Observable<WorkshopItem> {

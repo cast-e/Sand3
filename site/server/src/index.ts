@@ -17,10 +17,10 @@ import { config } from './config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Patch Express Router Layer to catch async errors in route handlers and forward to next()
-// preventing unhandled promise rejections from causing 504 Gateway Timeouts
+
+
 const dummyRouter = express.Router();
-dummyRouter.get('/', () => {});
+dummyRouter.get('/', () => { });
 const Layer = (dummyRouter.stack[0] as any)?.constructor;
 if (Layer && Layer.prototype && !Layer.prototype.__sand3_async_patched) {
   const origHandle = Layer.prototype.handle_request;
@@ -137,7 +137,7 @@ if (fs.existsSync(DIST_DIR)) {
   });
 }
 
-// Global error handling middleware - returns clean 500 error instead of hanging connection until 504
+
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('[API Error]:', err);
   if (!res.headersSent) {

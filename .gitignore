@@ -12,3 +12,4 @@ sets
 .vercel
 
 todo.txt
+.env*

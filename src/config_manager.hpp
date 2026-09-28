@@ -48,6 +48,7 @@ struct Config {
 	UIConfig ui;
 
 	struct WorkshopConfig {
+		std::string url = "";
 		std::string token = "";
 		std::string username = "";
 	} workshop;

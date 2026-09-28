@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -21,6 +21,7 @@ export class ItemDetailComponent implements OnInit {
   item = signal<WorkshopItem | null>(null);
   loading = signal<boolean>(true);
   errorMsg = signal<string>('');
+  currentId = signal<string>('');
 
   editingItem = signal<boolean>(false);
   editTitle = signal<string>('');
@@ -35,10 +36,21 @@ export class ItemDetailComponent implements OnInit {
   reportSuccess = signal<string>('');
   reportError = signal<string>('');
 
+  constructor() {
+    effect(() => {
+      const _user = this.auth.currentUser();
+      const id = this.currentId();
+      if (id) {
+        this.loadItem(id);
+      }
+    });
+  }
+
   ngOnInit() {
     this.route.params.subscribe((params) => {
       const id = params['id'];
       if (id) {
+        this.currentId.set(id);
         this.loadItem(id);
       }
     });
@@ -80,16 +92,48 @@ export class ItemDetailComponent implements OnInit {
   toggleLike() {
     const it = this.item();
     if (!it) return;
-    this.api.toggleLike(it.id).subscribe((res) => {
-      this.item.update((val) => (val ? { ...val, is_liked: res.is_liked, likes_count: res.likes_count } : null));
+    if (!this.auth.currentUser()) {
+      alert('Please sign in to like workshop items.');
+      return;
+    }
+    const prevLiked = !!it.is_liked;
+    const prevCount = it.likes_count || 0;
+    const optimisticLiked = !prevLiked;
+    const optimisticCount = Math.max(0, prevCount + (optimisticLiked ? 1 : -1));
+
+    this.item.update((val) => (val ? { ...val, is_liked: optimisticLiked, likes_count: optimisticCount } : null));
+
+    this.api.toggleLike(it.id).subscribe({
+      next: (res) => {
+        this.item.update((val) => (val ? { ...val, is_liked: res.is_liked, likes_count: res.likes_count } : null));
+      },
+      error: () => {
+        this.item.update((val) => (val ? { ...val, is_liked: prevLiked, likes_count: prevCount } : null));
+      }
     });
   }
 
   toggleFavorite() {
     const it = this.item();
     if (!it) return;
-    this.api.toggleFavorite(it.id).subscribe((res) => {
-      this.item.update((val) => (val ? { ...val, is_favorited: res.is_favorited, favorites_count: res.favorites_count } : null));
+    if (!this.auth.currentUser()) {
+      alert('Please sign in to favorite workshop items.');
+      return;
+    }
+    const prevFav = !!it.is_favorited;
+    const prevCount = it.favorites_count || 0;
+    const optimisticFav = !prevFav;
+    const optimisticCount = Math.max(0, prevCount + (optimisticFav ? 1 : -1));
+
+    this.item.update((val) => (val ? { ...val, is_favorited: optimisticFav, favorites_count: optimisticCount } : null));
+
+    this.api.toggleFavorite(it.id).subscribe({
+      next: (res) => {
+        this.item.update((val) => (val ? { ...val, is_favorited: res.is_favorited, favorites_count: res.favorites_count } : null));
+      },
+      error: () => {
+        this.item.update((val) => (val ? { ...val, is_favorited: prevFav, favorites_count: prevCount } : null));
+      }
     });
   }
 
@@ -198,6 +242,10 @@ export class ItemDetailComponent implements OnInit {
   }
 
   openReportModal() {
+    if (!this.auth.currentUser()) {
+      alert('Please sign in to report items.');
+      return;
+    }
     this.reportReason.set('broken');
     this.reportDetails.set('');
     this.reportSuccess.set('');

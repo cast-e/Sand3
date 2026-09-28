@@ -85,7 +85,7 @@ namespace {
 			s_update_save_idx = 0;
 		} else if (item_type == "stamp") {
 			s_update_available_stamps.clear();
-			std::string stamps_dir = std::string(SETS_DIRECTORY) + SetManager::get_current_set() + "/stamps/";
+			std::string stamps_dir = SaveManager::get_saves_directory(SetManager::get_current_set());
 			if (std::filesystem::exists(stamps_dir)) {
 				for (const auto& entry : std::filesystem::directory_iterator(stamps_dir)) {
 					if (entry.is_regular_file() && entry.path().extension() == ".stamp") {
@@ -478,8 +478,7 @@ void WorkshopItemEditor::render_update_modal() {
 				if (s_update_stamp_idx >= 0 &&
 					s_update_stamp_idx < static_cast<int>(s_update_available_stamps.size())) {
 					std::string fname = s_update_available_stamps[s_update_stamp_idx];
-					std::string fpath =
-						std::string(SETS_DIRECTORY) + SetManager::get_current_set() + "/stamps/" + fname;
+					std::string fpath = SaveManager::get_saves_directory(SetManager::get_current_set()) + fname;
 					std::ifstream in(fpath, std::ios::binary);
 					if (in.is_open()) {
 						payload_bytes.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -594,36 +593,38 @@ void WorkshopItemEditor::render_delete_modal() {
 			std::string item_id = s_delete_item.id;
 			std::string item_title = s_delete_item.title;
 
+			s_show_delete_modal = false;
+			UI::remove_workshop_item(item_id);
+
+			for (const auto& s : SetManager::get_sets()) {
+				SetMetadata sm = SetManager::load_set_metadata(s);
+				if (sm.workshop_id == item_id) {
+					SetManager::clear_workshop_info(s);
+				}
+			}
+			std::string cur_set = SetManager::get_current_set();
+			for (const auto& sf : SaveManager::get_save_files(cur_set)) {
+				if (sf.workshop_id == item_id) {
+					SaveManager::clear_save_workshop_info(sf.filename, cur_set);
+				}
+			}
+			for (const auto& st : SaveManager::get_stamp_files(cur_set)) {
+				if (st.workshop_id == item_id) {
+					SaveManager::clear_stamp_workshop_info(st.filename, cur_set);
+				}
+			}
+			WorkshopCache::remove_transient_by_id(item_id);
+
 			WorkshopClient::delete_item(item_id, [item_id, item_title](bool success, const std::string& err) {
 				s_delete_saving = false;
 				if (success) {
 					ToastManager::success("Deleted '" + item_title + "' from Workshop.");
-					s_show_delete_modal = false;
-
-					for (const auto& s : SetManager::get_sets()) {
-						SetMetadata sm = SetManager::load_set_metadata(s);
-						if (sm.workshop_id == item_id) {
-							SetManager::clear_workshop_info(s);
-						}
-					}
-					std::string cur_set = SetManager::get_current_set();
-					for (const auto& sf : SaveManager::get_save_files(cur_set)) {
-						if (sf.workshop_id == item_id) {
-							SaveManager::clear_save_workshop_info(sf.filename, cur_set);
-						}
-					}
-					for (const auto& st : SaveManager::get_stamp_files(cur_set)) {
-						if (st.workshop_id == item_id) {
-							SaveManager::clear_stamp_workshop_info(st.filename, cur_set);
-						}
-					}
-					WorkshopCache::remove_transient_by_id(item_id);
-
 					if (s_delete_on_success) {
 						s_delete_on_success();
 					}
 				} else {
-					s_delete_status = "Failed: " + err;
+					ToastManager::error("Failed to delete '" + item_title + "': " + err);
+					UI::refresh_workshop_items();
 				}
 			});
 		}

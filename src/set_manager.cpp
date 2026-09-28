@@ -89,6 +89,14 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 					meta.is_online = true;
 				} else if (key == "workshop_hash") {
 					meta.workshop_hash = val;
+				} else if (key == "forked_from_id") {
+					meta.forked_from_id = val;
+				} else if (key == "forked_from_author") {
+					meta.forked_from_author = val;
+				} else if (key == "forked_from_version") {
+					try {
+						meta.forked_from_version = static_cast<uint32_t>(std::stoul(val));
+					} catch (...) {}
 				}
 			} else {
 				try {
@@ -126,7 +134,7 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 							  metadata.height > 0 || metadata.target_fps > 0 || metadata.processing_mode >= 0 ||
 							  !metadata.prevent_downclock || metadata.version > 1;
 	bool has_shortcuts = !metadata.shortcuts.empty();
-	bool has_workshop = !metadata.workshop_id.empty() || !metadata.workshop_hash.empty();
+	bool has_workshop = !metadata.workshop_id.empty() || !metadata.workshop_hash.empty() || !metadata.forked_from_id.empty();
 
 	if (!has_meta_overrides && !has_shortcuts && !has_workshop) {
 		if (fs::exists(cfg_path)) {
@@ -186,7 +194,38 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 		if (!metadata.workshop_hash.empty()) {
 			file << "workshop_hash = " << metadata.workshop_hash << "\n";
 		}
+		if (!metadata.forked_from_id.empty()) {
+			file << "forked_from_id = " << metadata.forked_from_id << "\n";
+		}
+		if (!metadata.forked_from_author.empty()) {
+			file << "forked_from_author = " << metadata.forked_from_author << "\n";
+		}
+		if (metadata.forked_from_version > 0) {
+			file << "forked_from_version = " << metadata.forked_from_version << "\n";
+		}
 	}
+}
+
+void SetManager::fork_set(const std::string& source_name, const std::string& new_name) {
+	copy_set(source_name, new_name);
+	SetMetadata src_meta = load_set_metadata(source_name);
+	SetMetadata new_meta = load_set_metadata(new_name);
+
+	if (!src_meta.workshop_id.empty()) {
+		new_meta.forked_from_id = src_meta.workshop_id;
+		new_meta.forked_from_author = src_meta.author.empty() ? "Community" : src_meta.author;
+		new_meta.forked_from_version = src_meta.version;
+	} else if (!src_meta.forked_from_id.empty()) {
+		new_meta.forked_from_id = src_meta.forked_from_id;
+		new_meta.forked_from_author = src_meta.forked_from_author;
+		new_meta.forked_from_version = src_meta.forked_from_version;
+	}
+	new_meta.name = new_name;
+	new_meta.workshop_id = "";
+	new_meta.workshop_hash = "";
+	new_meta.is_online = false;
+	new_meta.version = 1;
+	save_set_metadata(new_name, new_meta);
 }
 
 std::string SetManager::get_current_set() { return current_set_name; }

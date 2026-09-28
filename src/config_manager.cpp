@@ -180,7 +180,9 @@ void ConfigManager::load() {
 			} else if (section == "Colors") {
 				color_overrides[key] = val;
 			} else if (section == "Workshop") {
-				if (key == "token") {
+				if (key == "url") {
+					config.workshop.url = val;
+				} else if (key == "token") {
 					config.workshop.token = val;
 				} else if (key == "username") {
 					config.workshop.username = val;
@@ -189,6 +191,10 @@ void ConfigManager::load() {
 		}
 
 		in.close();
+	}
+
+	if (!config.workshop.url.empty()) {
+		WorkshopClient::set_base_url(config.workshop.url);
 	}
 
 	if (!config.workshop.token.empty()) {
@@ -362,8 +368,10 @@ void ConfigManager::save() {
 		out << "\n";
 	}
 
-	if (!config.workshop.token.empty() || !config.workshop.username.empty()) {
+	if (!config.workshop.url.empty() || !config.workshop.token.empty() || !config.workshop.username.empty()) {
 		out << "[Workshop]\n";
+		if (!config.workshop.url.empty())
+			out << "url = " << config.workshop.url << "\n";
 		if (!config.workshop.token.empty())
 			out << "token = " << config.workshop.token << "\n";
 		if (!config.workshop.username.empty())

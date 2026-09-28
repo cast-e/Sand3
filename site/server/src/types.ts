@@ -34,6 +34,11 @@ export interface WorkshopItem {
   is_liked?: boolean;
   is_favorited?: boolean;
   parent_set_title?: string;
+  forked_from_id?: string | null;
+  forked_from_version?: number | null;
+  forked_from_title?: string;
+  forked_from_author?: string;
+  forks_count?: number;
   child_saves_count?: number;
   child_stamps_count?: number;
 }
