@@ -130,6 +130,7 @@ Key combinations can include zero or more modifiers separated by `+`, followed b
 | `delete` | `Delete` | Tools & Selection | Delete cells inside selected box |
 | `rotate_cw` | `Q` | Tools & Selection | Rotate active selection 90° clockwise |
 | `rotate_ccw` | `E` | Tools & Selection | Rotate active selection 90° counter-clockwise |
+| `toggle_transparent` | `Alt+T` | Tools & Selection | Toggle selection transparency mode |
 | `brush_shape` | `T` | Brush | Cycle brush shape (Square / Circle) |
 
 #### Canvas & Mouse Shortcuts

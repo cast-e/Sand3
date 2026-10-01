@@ -29,6 +29,7 @@ export interface WorkshopItem {
   downloads_count: number;
   reports_count: number;
   is_hidden: number;
+  is_private?: number;
   created_at: string;
   updated_at: string;
   is_liked?: boolean;
@@ -38,6 +39,7 @@ export interface WorkshopItem {
   forked_from_version?: number | null;
   forked_from_title?: string;
   forked_from_author?: string;
+  forked_from_type?: 'set' | 'save' | 'stamp' | 'theme';
   forks_count?: number;
   child_saves_count?: number;
   child_stamps_count?: number;

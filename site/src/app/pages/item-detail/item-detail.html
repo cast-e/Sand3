@@ -31,6 +31,24 @@
   </div>
   }
 
+  @if (it.forked_from_id) {
+  <div class="forked-from-banner">
+    <img src="/icons/arrow_divide.png" class="silk-icon" alt="Forked" />
+    <div class="banner-text">
+      Forked from:
+      <a [routerLink]="it.forked_from_type === 'set' ? ['/workshop/sets', it.forked_from_id] : ['/workshop/items', it.forked_from_id]" class="set-link">
+        <strong>{{ it.forked_from_title || it.forked_from_id }}</strong>
+      </a>
+      @if (it.forked_from_version) {
+      <span class="badge badge-version" style="margin-left: 0.5rem;">v{{ it.forked_from_version }}</span>
+      }
+      @if (it.forked_from_author) {
+      <span class="forked-author-label">&bull; by <strong>{{ it.forked_from_author }}</strong></span>
+      }
+    </div>
+  </div>
+  }
+
   <div class="card overview-card">
     <div class="card-header">
       <div class="title-group">
@@ -48,6 +66,11 @@
         </span>
         @if (it.version && it.version > 1) {
         <span class="badge badge-version">v{{ it.version }}</span>
+        }
+        @if (it.is_private) {
+        <span class="badge badge-warning" title="Private item (only visible to you)">
+          <img src="/icons/lock.png" class="silk-icon" alt="Private" /> Private
+        </span>
         }
         <h1>{{ it.title }}</h1>
       </div>
@@ -69,6 +92,10 @@
           <img src="/icons/flag_red.png" class="silk-icon" alt="Report" />
         </button>
         @if (canManage()) {
+        <button class="btn" (click)="togglePrivate()" [title]="it.is_private ? 'Make public for everyone' : 'Make private (only visible to you)'">
+          <img [src]="it.is_private ? '/icons/world.png' : '/icons/lock.png'" class="silk-icon" [alt]="it.is_private ? 'Public' : 'Private'" />
+          {{ it.is_private ? 'Make Public' : 'Make Private' }}
+        </button>
         <button class="btn" (click)="openEditModal()" title="Edit title and description">
           <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
           Edit
@@ -200,6 +227,14 @@
           <label for="editDescription">Description</label>
           <textarea id="editDescription" [ngModel]="editDescription()" (ngModelChange)="editDescription.set($event)"
             rows="4" class="input-control"></textarea>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="editIsPrivate" [ngModel]="editIsPrivate()" (ngModelChange)="editIsPrivate.set($event)" />
+          <label for="editIsPrivate" style="margin-bottom: 0; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <img src="/icons/lock.png" class="silk-icon" alt="Private" />
+            Make this item private (only visible to you)
+          </label>
         </div>
       </div>
 

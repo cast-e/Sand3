@@ -29,6 +29,7 @@ export class SetDetailComponent implements OnInit {
   editTitle = signal<string>('');
   editDescription = signal<string>('');
   editThumbnailData = signal<string>('');
+  editIsPrivate = signal<boolean>(false);
   editLoading = signal<boolean>(false);
   editError = signal<string>('');
 
@@ -85,11 +86,32 @@ export class SetDetailComponent implements OnInit {
     return false;
   }
 
+  isAdmin(): boolean {
+    return this.auth.isAdmin();
+  }
+
+  canManage(): boolean {
+    return this.isOwner() || this.isAdmin();
+  }
+
+  togglePrivate() {
+    const it = this.item();
+    if (!it) return;
+    this.api.togglePrivateItem(it.id).subscribe({
+      next: (res) => {
+        this.item.update((val) => (val ? { ...val, is_private: res.is_private } : null));
+      },
+      error: (err) => {
+        alert(err.error?.error || 'Failed to toggle privacy status.');
+      }
+    });
+  }
+
   toggleLike() {
     const it = this.item();
     if (!it) return;
     if (!this.auth.currentUser()) {
-      alert('Please sign in to like workshop items.');
+      alert('Please log in to like workshop items.');
       return;
     }
     const prevLiked = !!it.is_liked;
@@ -113,7 +135,7 @@ export class SetDetailComponent implements OnInit {
     const it = this.item();
     if (!it) return;
     if (!this.auth.currentUser()) {
-      alert('Please sign in to favorite workshop items.');
+      alert('Please log in to favorite workshop items.');
       return;
     }
     const prevFav = !!it.is_favorited;
@@ -138,6 +160,7 @@ export class SetDetailComponent implements OnInit {
     if (!it) return;
     this.editTitle.set(it.title);
     this.editDescription.set(it.description);
+    this.editIsPrivate.set(!!it.is_private);
     this.editThumbnailData.set('');
     this.editError.set('');
     this.editingItem.set(true);
@@ -167,7 +190,8 @@ export class SetDetailComponent implements OnInit {
 
     const payload: any = {
       title: this.editTitle().trim(),
-      description: this.editDescription().trim()
+      description: this.editDescription().trim(),
+      is_private: this.editIsPrivate() ? 1 : 0
     };
     if (this.editThumbnailData()) {
       payload.thumbnail_data = this.editThumbnailData();

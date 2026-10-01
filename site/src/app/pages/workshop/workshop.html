@@ -78,6 +78,11 @@
           @if (item.version && item.version > 1) {
           <span class="badge badge-version">v{{ item.version }}</span>
           }
+          @if (item.is_private) {
+          <span class="badge badge-warning" title="Private item (only visible to you)">
+            <img src="/icons/lock.png" class="silk-icon-sm" alt="Private" /> Private
+          </span>
+          }
           <a [routerLink]="item.type === 'set' ? ['/workshop/sets', item.id] : ['/workshop/items', item.id]"
             class="item-title-link" [title]="item.title">
             {{ item.title }}
@@ -145,6 +150,10 @@
         </button>
 
         @if (isOwner(item)) {
+        <button class="btn btn-sm" (click)="togglePrivate(item, $event)"
+          [title]="item.is_private ? 'Make public' : 'Make private'">
+          <img [src]="item.is_private ? '/icons/world.png' : '/icons/lock.png'" class="silk-icon" [alt]="item.is_private ? 'Public' : 'Private'" />
+        </button>
         <button class="btn btn-sm btn-owner-edit" (click)="openEditModal(item, $event)" title="Edit item">
           <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
         </button>
@@ -190,6 +199,14 @@
           <label>Description:</label>
           <textarea class="textarea" rows="4" [ngModel]="editDescription()"
             (ngModelChange)="editDescription.set($event)"></textarea>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="editWorkshopItemPrivate" [ngModel]="editIsPrivate()" (ngModelChange)="editIsPrivate.set($event)" />
+          <label for="editWorkshopItemPrivate" style="margin-bottom: 0; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <img src="/icons/lock.png" class="silk-icon" alt="Private" />
+            Make this item private (only visible to you)
+          </label>
         </div>
 
         <div class="form-group">

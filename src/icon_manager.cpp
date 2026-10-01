@@ -52,6 +52,7 @@ namespace {
 		{IconID::Information, "information.png", icon_information_png, icon_information_png_len},
 		{IconID::Warning, "error.png", icon_error_png, icon_error_png_len},
 		{IconID::Branch, "arrow_branch.png", icon_branch_png, icon_branch_png_len},
+		{IconID::Lock, "lock.png", icon_lock_png, icon_lock_png_len},
 	};
 
 	std::array<SDL_Texture*, static_cast<size_t>(IconID::Count)> textures{};

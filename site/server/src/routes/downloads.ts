@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, ensureItemBlobsTable } from '../db.js';
+import { getAuthenticatedUser } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,19 @@ downloadsRouter.get('/:id/download', async (req, res) => {
   if (!item) {
     res.status(404).json({ error: 'Item not found' });
     return;
+  }
+
+  if (item.is_private) {
+    const authUser = await getAuthenticatedUser(req);
+    const isOwnerOrAdmin =
+      authUser &&
+      (authUser.is_admin ||
+        (item.user_id && item.user_id === authUser.id) ||
+        (!item.user_id && item.author.toLowerCase() === authUser.username.toLowerCase()));
+    if (!isOwnerOrAdmin) {
+      res.status(403).json({ error: 'This item is private' });
+      return;
+    }
   }
 
   const ext = path.extname(item.file_path) || (item.type === 'save' ? '.save' : item.type === 'stamp' ? '.stamp' : '.zip');

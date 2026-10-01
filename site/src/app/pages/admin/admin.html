@@ -242,6 +242,7 @@
           <option value="all">All Status</option>
           <option value="reported">Reported Only</option>
           <option value="hidden">Hidden Only</option>
+          <option value="private">Private Only</option>
         </select>
 
         <button class="btn btn-sm" (click)="loadItems()">
@@ -314,11 +315,16 @@
               }
             </td>
             <td>
-              @if (it.is_hidden) {
-              <span class="badge badge-danger">Hidden</span>
-              } @else {
-              <span class="badge badge-success">Visible</span>
-              }
+              <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                @if (it.is_hidden) {
+                <span class="badge badge-danger">Hidden</span>
+                }
+                @if (it.is_private) {
+                <span class="badge badge-warning">Private</span>
+                } @else if (!it.is_hidden) {
+                <span class="badge badge-success">Public</span>
+                }
+              </div>
             </td>
             <td>
               <div class="row-actions">
@@ -326,6 +332,10 @@
                   class="btn btn-sm" target="_blank" title="View details">
                   <img src="/icons/eye.png" class="silk-icon" alt="View" />
                 </a>
+                <button class="btn btn-sm" (click)="togglePrivateItem(it)"
+                  [title]="it.is_private ? 'Make public' : 'Make private'">
+                  <img [src]="it.is_private ? '/icons/world.png' : '/icons/lock.png'" class="silk-icon" [alt]="it.is_private ? 'Public' : 'Private'" />
+                </button>
                 <button class="btn btn-sm" (click)="toggleHideItem(it)"
                   [title]="it.is_hidden ? 'Make visible to public' : 'Hide from public'">
                   <img [src]="it.is_hidden ? '/icons/accept.png' : '/icons/cross.png'" class="silk-icon" alt="Hide" />

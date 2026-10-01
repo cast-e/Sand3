@@ -139,6 +139,29 @@ adminRouter.post('/items/:id/toggle-hide', requireModerator, async (req: Request
   }
 });
 
+adminRouter.post('/items/:id/toggle-private', requireModerator, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = String(req.params['id']);
+    const item = (await db.prepare('SELECT id, is_private, title FROM items WHERE id = ?').get(id)) as any;
+    if (!item) {
+      res.status(404).json({ error: 'Item not found' });
+      return;
+    }
+
+    const newPrivate = item.is_private ? 0 : 1;
+    await db.prepare('UPDATE items SET is_private = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newPrivate, id);
+
+    res.json({
+      success: true,
+      id,
+      is_private: newPrivate,
+      message: newPrivate ? `Item '${item.title}' is now private.` : `Item '${item.title}' is now public.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 adminRouter.delete('/items/:id', requireModerator, async (req: Request, res: Response): Promise<void> => {
   try {
     const id = String(req.params['id']);
@@ -192,13 +215,15 @@ adminRouter.get('/items', requireModerator, async (req: Request, res: Response):
       conditions.push('reports_count > 0');
     } else if (filter === 'hidden') {
       conditions.push('is_hidden = 1');
+    } else if (filter === 'private') {
+      conditions.push('is_private = 1');
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const query = `
       SELECT id, user_id, type, title, description, author, parent_set_id, version, set_hash,
              file_path, file_size, thumbnail_path, likes_count, favorites_count, downloads_count,
-             reports_count, is_hidden, created_at, updated_at
+             reports_count, is_hidden, is_private, created_at, updated_at
       FROM items
       ${whereClause}
       ORDER BY reports_count DESC, created_at DESC

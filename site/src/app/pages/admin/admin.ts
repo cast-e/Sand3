@@ -58,7 +58,7 @@ export class AdminComponent implements OnInit {
   itemsLoading = signal<boolean>(false);
   searchQuery = signal<string>('');
   typeFilter = signal<string>('all');
-  statusFilter = signal<'all' | 'reported' | 'hidden'>('all');
+  statusFilter = signal<'all' | 'reported' | 'hidden' | 'private'>('all');
 
   users = signal<User[]>([]);
   usersLoading = signal<boolean>(false);
@@ -274,6 +274,21 @@ export class AdminComponent implements OnInit {
       },
       error: (e) => {
         this.showToast('Failed to toggle visibility: ' + (e.error?.error || e.message), 'danger');
+      }
+    });
+  }
+
+  togglePrivateItem(item: WorkshopItem) {
+    this.api.adminTogglePrivateItem(item.id).subscribe({
+      next: (res) => {
+        const newPrivate = res.is_private;
+        this.items.update((list) =>
+          list.map((it) => (it.id === item.id ? { ...it, is_private: newPrivate } : it))
+        );
+        this.showToast(res.message || 'Privacy updated.');
+      },
+      error: (e) => {
+        this.showToast('Failed to toggle privacy: ' + (e.error?.error || e.message), 'danger');
       }
     });
   }

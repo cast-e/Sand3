@@ -200,15 +200,18 @@ export async function initDb(): Promise<void> {
         downloads_count INTEGER DEFAULT 0,
         reports_count INTEGER DEFAULT 0,
         is_hidden INTEGER DEFAULT 0,
+        is_private INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
       ALTER TABLE items ADD COLUMN IF NOT EXISTS forked_from_id TEXT REFERENCES items(id) ON DELETE SET NULL;
       ALTER TABLE items ADD COLUMN IF NOT EXISTS forked_from_version INTEGER;
+      ALTER TABLE items ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
       CREATE INDEX IF NOT EXISTS idx_items_type ON items(type);
       CREATE INDEX IF NOT EXISTS idx_items_parent_set_id ON items(parent_set_id);
       CREATE INDEX IF NOT EXISTS idx_items_forked_from_id ON items(forked_from_id);
       CREATE INDEX IF NOT EXISTS idx_items_user_id ON items(user_id);
+      CREATE INDEX IF NOT EXISTS idx_items_is_private ON items(is_private);
       CREATE INDEX IF NOT EXISTS idx_items_set_hash ON items(set_hash);
       CREATE INDEX IF NOT EXISTS idx_items_created_at ON items(created_at);
       CREATE INDEX IF NOT EXISTS idx_items_likes ON items(likes_count DESC);

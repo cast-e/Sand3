@@ -77,7 +77,6 @@ set(RESOURCES
 )
 
 find_package(Threads REQUIRED)
-find_package(CURL)
 
 if (WIN32)
     set(RESOURCES ${RESOURCES} "resources/sand3.rc")
@@ -85,10 +84,10 @@ endif()
 
 add_executable(sand3 ${SOURCES} ${RESOURCES})
 
-target_link_libraries(sand3 PRIVATE fmt::fmt SDL3::SDL3-static Threads::Threads imgui nlohmann_json::nlohmann_json volk::volk)
-if (CURL_FOUND)
-    target_link_libraries(sand3 PRIVATE CURL::libcurl)
-    target_compile_definitions(sand3 PRIVATE HAVE_CURL)
+target_link_libraries(sand3 PRIVATE fmt::fmt SDL3::SDL3-static Threads::Threads imgui nlohmann_json::nlohmann_json volk::volk CURL::libcurl)
+target_compile_definitions(sand3 PRIVATE HAVE_CURL)
+if (WIN32)
+    target_link_libraries(sand3 PRIVATE ws2_32 crypt32 secur32 bcrypt)
 endif()
 target_include_directories(sand3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} "${PROJECT_SOURCE_DIR}/third_party/volk")
 

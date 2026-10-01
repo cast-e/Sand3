@@ -32,6 +32,7 @@ export interface WorkshopItem {
   forked_from_title?: string;
   forked_from_author?: string;
   forked_from_version?: number | null;
+  forked_from_type?: 'set' | 'save' | 'stamp' | 'theme';
   forks_count?: number;
   version: number;
   set_hash?: string;
@@ -50,6 +51,7 @@ export interface WorkshopItem {
   child_saves_count?: number;
   child_stamps_count?: number;
   is_hidden?: number;
+  is_private?: number;
 }
 
 export interface ItemsResponse {
@@ -128,7 +130,9 @@ export class ApiService {
     sort: string = 'popular',
     q: string = '',
     parent_set_id?: string,
-    page: number = 1
+    page: number = 1,
+    author?: string,
+    favorites?: boolean
   ): Observable<ItemsResponse> {
     let params = new HttpParams()
       .set('type', type)
@@ -138,6 +142,8 @@ export class ApiService {
 
     if (q) params = params.set('q', q);
     if (parent_set_id) params = params.set('parent_set_id', parent_set_id);
+    if (author) params = params.set('author', author);
+    if (favorites) params = params.set('favorites', 'true');
 
     return this.http.get<ItemsResponse>(`${this.baseUrl}/workshop/items`, {
       params,
@@ -219,6 +225,14 @@ export class ApiService {
     });
   }
 
+  togglePrivateItem(id: string): Observable<{ success: boolean; id: string; is_private: number; message: string }> {
+    return this.http.post<{ success: boolean; id: string; is_private: number; message: string }>(
+      `${this.baseUrl}/workshop/items/${id}/toggle-private`,
+      {},
+      { headers: this.getAuthHeaders() }
+    );
+  }
+
   getDownloadUrl(id: string): string {
     return `${this.baseUrl}/workshop/items/${id}/download`;
   }
@@ -275,6 +289,12 @@ export class ApiService {
 
   toggleHideItem(itemId: string): Observable<{ success: boolean; is_hidden: number; message: string }> {
     return this.http.post<any>(`${this.baseUrl}/workshop/admin/items/${itemId}/toggle-hide`, {}, {
+      headers: this.getAdminHeaders()
+    });
+  }
+
+  adminTogglePrivateItem(itemId: string): Observable<{ success: boolean; is_private: number; message: string }> {
+    return this.http.post<any>(`${this.baseUrl}/workshop/admin/items/${itemId}/toggle-private`, {}, {
       headers: this.getAdminHeaders()
     });
   }

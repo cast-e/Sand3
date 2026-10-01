@@ -36,6 +36,7 @@ export class WorkshopComponent implements OnInit {
   editTitle = signal<string>('');
   editDescription = signal<string>('');
   editThumbnailData = signal<string>('');
+  editIsPrivate = signal<boolean>(false);
   editLoading = signal<boolean>(false);
   editError = signal<string>('');
 
@@ -115,7 +116,7 @@ export class WorkshopComponent implements OnInit {
   toggleLike(item: WorkshopItem, event: Event) {
     event.stopPropagation();
     if (!this.auth.currentUser()) {
-      alert('Please sign in to like workshop items.');
+      alert('Please log in to like workshop items.');
       return;
     }
     const prevLiked = !!item.is_liked;
@@ -144,7 +145,7 @@ export class WorkshopComponent implements OnInit {
   toggleFavorite(item: WorkshopItem, event: Event) {
     event.stopPropagation();
     if (!this.auth.currentUser()) {
-      alert('Please sign in to favorite workshop items.');
+      alert('Please log in to favorite workshop items.');
       return;
     }
     const prevFav = !!item.is_favorited;
@@ -172,11 +173,26 @@ export class WorkshopComponent implements OnInit {
     });
   }
 
+  togglePrivate(item: WorkshopItem, event: Event) {
+    event.stopPropagation();
+    this.api.togglePrivateItem(item.id).subscribe({
+      next: (res) => {
+        this.items.update((list) =>
+          list.map((i) => (i.id === item.id ? { ...i, is_private: res.is_private } : i))
+        );
+      },
+      error: (err) => {
+        alert(err.error?.error || 'Failed to toggle privacy status.');
+      }
+    });
+  }
+
   openEditModal(item: WorkshopItem, event: Event) {
     event.stopPropagation();
     this.editingItem.set(item);
     this.editTitle.set(item.title);
     this.editDescription.set(item.description);
+    this.editIsPrivate.set(!!item.is_private);
     this.editThumbnailData.set('');
     this.editError.set('');
   }
@@ -205,7 +221,8 @@ export class WorkshopComponent implements OnInit {
 
     const payload: any = {
       title: this.editTitle().trim(),
-      description: this.editDescription().trim()
+      description: this.editDescription().trim(),
+      is_private: this.editIsPrivate() ? 1 : 0
     };
     if (this.editThumbnailData()) {
       payload.thumbnail_data = this.editThumbnailData();
@@ -253,7 +270,7 @@ export class WorkshopComponent implements OnInit {
   openReportModal(item: WorkshopItem, event: Event) {
     event.stopPropagation();
     if (!this.auth.currentUser()) {
-      alert('Please sign in to report items.');
+      alert('Please log in to report items.');
       return;
     }
     this.reportingItem.set(item);

@@ -21,6 +21,9 @@ struct SaveFileInfo {
 	std::string workshop_id;
 	std::string author;
 	uint32_t version = 1;
+	std::string forked_from_id;
+	std::string forked_from_author;
+	uint32_t forked_from_version = 0;
 };
 
 struct StampFileInfo {
@@ -34,6 +37,9 @@ struct StampFileInfo {
 	std::string workshop_id;
 	std::string author;
 	uint32_t version = 1;
+	std::string forked_from_id;
+	std::string forked_from_author;
+	uint32_t forked_from_version = 0;
 };
 
 class SaveManager {
@@ -66,6 +72,11 @@ public:
 	static bool delete_save_file(const std::string& filename, const std::string& current_set);
 	static bool duplicate_save_file(const std::string& filename, const std::string& new_name,
 									const std::string& current_set);
+	static bool migrate_save_file(const std::string& filename, const std::string& source_set,
+								  const std::string& target_set);
+	static bool fork_save_to_set(const std::string& src_filepath, const std::string& target_set,
+								 const std::string& new_name, const std::string& forked_from_id,
+								 const std::string& forked_from_author, uint32_t forked_from_version);
 
 	static bool save_stamp_to_file(const std::string& name, const std::string& current_set,
 								   const std::vector<uint8_t>& cells, uint32_t width, uint32_t height);
@@ -83,6 +94,11 @@ public:
 								   StampFileInfo& info);
 	static std::vector<StampFileInfo> get_stamp_files(const std::string& current_set);
 	static bool delete_stamp_file(const std::string& filename, const std::string& current_set);
+	static bool migrate_stamp_file(const std::string& filename, const std::string& source_set,
+								   const std::string& target_set);
+	static bool fork_stamp_to_set(const std::string& src_filepath, const std::string& target_set,
+								  const std::string& new_name, const std::string& forked_from_id,
+								  const std::string& forked_from_author, uint32_t forked_from_version);
 
 	static void bwt_encode(const uint8_t* in_data, size_t N, std::vector<uint8_t>& out_L, uint16_t& out_primary_id);
 	static void bwt_decode(const uint8_t* L, size_t N, uint16_t primary_id, uint8_t* out_data);

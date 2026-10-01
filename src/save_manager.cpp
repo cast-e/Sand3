@@ -521,6 +521,14 @@ bool SaveManager::inspect_save_file(const std::string& path_or_name, const std::
 				try {
 					info.version = static_cast<uint32_t>(std::stoul(v));
 				} catch (...) {}
+			} else if (k == "forked_from_id") {
+				info.forked_from_id = v;
+			} else if (k == "forked_from_author") {
+				info.forked_from_author = v;
+			} else if (k == "forked_from_version") {
+				try {
+					info.forked_from_version = static_cast<uint32_t>(std::stoul(v));
+				} catch (...) {}
 			}
 		}
 	}
@@ -638,6 +646,101 @@ bool SaveManager::duplicate_save_file(const std::string& filename, const std::st
 	} catch (...) {
 		return false;
 	}
+}
+
+bool SaveManager::migrate_save_file(const std::string& filename, const std::string& source_set,
+									const std::string& target_set) {
+	std::string src_path = get_saves_directory(source_set) + filename;
+	std::ifstream in(src_path, std::ios::binary);
+	if (!in.is_open())
+		return false;
+
+	std::string old_set_line;
+	std::getline(in, old_set_line);
+
+	std::vector<char> remaining_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	in.close();
+
+	std::string dst_dir = get_saves_directory(target_set);
+	std::string dst_path = dst_dir + filename;
+	std::ofstream out(dst_path, std::ios::binary);
+	if (!out.is_open())
+		return false;
+
+	out << target_set << "\n";
+	if (!remaining_data.empty()) {
+		out.write(remaining_data.data(), remaining_data.size());
+	}
+	out.close();
+
+	SaveFileInfo src_info;
+	inspect_save_file(filename, source_set, src_info);
+
+	std::string dst_ini = dst_path + ".ini";
+	std::ofstream out_ini(dst_ini);
+	if (out_ini.is_open()) {
+		out_ini << "[Workshop]\n";
+		out_ini << "workshop_id = \n";
+		out_ini << "workshop_hash = \n";
+		out_ini << "author = " << src_info.author << "\n";
+		out_ini << "version = 1\n";
+		if (!src_info.workshop_id.empty()) {
+			out_ini << "forked_from_id = " << src_info.workshop_id << "\n";
+			out_ini << "forked_from_author = " << src_info.author << "\n";
+			out_ini << "forked_from_version = " << src_info.version << "\n";
+		} else if (!src_info.forked_from_id.empty()) {
+			out_ini << "forked_from_id = " << src_info.forked_from_id << "\n";
+			out_ini << "forked_from_author = " << src_info.forked_from_author << "\n";
+			out_ini << "forked_from_version = " << src_info.forked_from_version << "\n";
+		}
+	}
+	return true;
+}
+
+bool SaveManager::fork_save_to_set(const std::string& src_filepath, const std::string& target_set,
+								   const std::string& new_name, const std::string& forked_from_id,
+								   const std::string& forked_from_author, uint32_t forked_from_version) {
+	std::ifstream in(src_filepath, std::ios::binary);
+	if (!in.is_open())
+		return false;
+
+	std::string old_set_line;
+	std::getline(in, old_set_line);
+
+	std::vector<char> remaining_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	in.close();
+
+	std::string dst_dir = get_saves_directory(target_set);
+	std::string dst_name = new_name;
+	if (dst_name.length() < 5 || dst_name.substr(dst_name.length() - 5) != ".save") {
+		dst_name += ".save";
+	}
+	std::string dst_path = dst_dir + dst_name;
+	std::ofstream out(dst_path, std::ios::binary);
+	if (!out.is_open())
+		return false;
+
+	out << target_set << "\n";
+	if (!remaining_data.empty()) {
+		out.write(remaining_data.data(), remaining_data.size());
+	}
+	out.close();
+
+	std::string dst_ini = dst_path + ".ini";
+	std::ofstream out_ini(dst_ini);
+	if (out_ini.is_open()) {
+		out_ini << "[Workshop]\n";
+		out_ini << "workshop_id = \n";
+		out_ini << "workshop_hash = \n";
+		out_ini << "author = " << (forked_from_author.empty() ? "Player" : forked_from_author) << "\n";
+		out_ini << "version = 1\n";
+		if (!forked_from_id.empty()) {
+			out_ini << "forked_from_id = " << forked_from_id << "\n";
+			out_ini << "forked_from_author = " << forked_from_author << "\n";
+			out_ini << "forked_from_version = " << forked_from_version << "\n";
+		}
+	}
+	return true;
 }
 
 bool SaveManager::save_stamp_to_file(const std::string& name, const std::string& current_set,
@@ -848,6 +951,14 @@ bool SaveManager::inspect_stamp_file(const std::string& path_or_name, const std:
 				try {
 					info.version = static_cast<uint32_t>(std::stoul(v));
 				} catch (...) {}
+			} else if (k == "forked_from_id") {
+				info.forked_from_id = v;
+			} else if (k == "forked_from_author") {
+				info.forked_from_author = v;
+			} else if (k == "forked_from_version") {
+				try {
+					info.forked_from_version = static_cast<uint32_t>(std::stoul(v));
+				} catch (...) {}
 			}
 		}
 	}
@@ -879,4 +990,99 @@ bool SaveManager::delete_stamp_file(const std::string& filename, const std::stri
 	} catch (...) {
 		return false;
 	}
+}
+
+bool SaveManager::migrate_stamp_file(const std::string& filename, const std::string& source_set,
+									 const std::string& target_set) {
+	std::string src_path = get_saves_directory(source_set) + filename;
+	std::ifstream in(src_path, std::ios::binary);
+	if (!in.is_open())
+		return false;
+
+	std::string old_set_line;
+	std::getline(in, old_set_line);
+
+	std::vector<char> remaining_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	in.close();
+
+	std::string dst_dir = get_saves_directory(target_set);
+	std::string dst_path = dst_dir + filename;
+	std::ofstream out(dst_path, std::ios::binary);
+	if (!out.is_open())
+		return false;
+
+	out << target_set << "\n";
+	if (!remaining_data.empty()) {
+		out.write(remaining_data.data(), remaining_data.size());
+	}
+	out.close();
+
+	StampFileInfo src_info;
+	inspect_stamp_file(filename, source_set, src_info);
+
+	std::string dst_ini = dst_path + ".ini";
+	std::ofstream out_ini(dst_ini);
+	if (out_ini.is_open()) {
+		out_ini << "[Workshop]\n";
+		out_ini << "workshop_id = \n";
+		out_ini << "workshop_hash = \n";
+		out_ini << "author = " << src_info.author << "\n";
+		out_ini << "version = 1\n";
+		if (!src_info.workshop_id.empty()) {
+			out_ini << "forked_from_id = " << src_info.workshop_id << "\n";
+			out_ini << "forked_from_author = " << src_info.author << "\n";
+			out_ini << "forked_from_version = " << src_info.version << "\n";
+		} else if (!src_info.forked_from_id.empty()) {
+			out_ini << "forked_from_id = " << src_info.forked_from_id << "\n";
+			out_ini << "forked_from_author = " << src_info.forked_from_author << "\n";
+			out_ini << "forked_from_version = " << src_info.forked_from_version << "\n";
+		}
+	}
+	return true;
+}
+
+bool SaveManager::fork_stamp_to_set(const std::string& src_filepath, const std::string& target_set,
+									const std::string& new_name, const std::string& forked_from_id,
+									const std::string& forked_from_author, uint32_t forked_from_version) {
+	std::ifstream in(src_filepath, std::ios::binary);
+	if (!in.is_open())
+		return false;
+
+	std::string old_set_line;
+	std::getline(in, old_set_line);
+
+	std::vector<char> remaining_data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	in.close();
+
+	std::string dst_dir = get_saves_directory(target_set);
+	std::string dst_name = new_name;
+	if (dst_name.length() < 6 || dst_name.substr(dst_name.length() - 6) != ".stamp") {
+		dst_name += ".stamp";
+	}
+	std::string dst_path = dst_dir + dst_name;
+	std::ofstream out(dst_path, std::ios::binary);
+	if (!out.is_open())
+		return false;
+
+	out << target_set << "\n";
+	if (!remaining_data.empty()) {
+		out.write(remaining_data.data(), remaining_data.size());
+	}
+	out.close();
+
+	std::string dst_ini = dst_path + ".ini";
+	std::ofstream out_ini(dst_ini);
+	if (out_ini.is_open()) {
+		out_ini << "[Workshop]\n";
+		out_ini << "workshop_id = \n";
+		out_ini << "workshop_hash = \n";
+		out_ini << "author = " << (forked_from_author.empty() ? "Player" : forked_from_author) << "\n";
+		out_ini << "version = 1\n";
+		if (!forked_from_id.empty()) {
+			out_ini << "forked_from_id = " << forked_from_id << "\n";
+			out_ini << "forked_from_author = " << forked_from_author << "\n";
+			out_ini << "forked_from_version = " << forked_from_version << "\n";
+		}
+	}
+	return true;
 }

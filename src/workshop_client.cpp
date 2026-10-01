@@ -11,6 +11,8 @@
 
 #ifdef HAVE_CURL
 #include <curl/curl.h>
+#else
+#include <fstream>
 #endif
 
 std::string WorkshopClient::base_url = "https://sand3.vercel.app/api";
@@ -109,6 +111,7 @@ namespace {
 		it.downloads_count = json_int(item_json, "downloads_count");
 		it.is_liked = json_bool(item_json, "is_liked");
 		it.is_favorited = json_bool(item_json, "is_favorited");
+		it.is_private = json_int(item_json, "is_private", 0);
 		it.created_at = json_str(item_json, "created_at");
 		it.forked_from_id = json_str(item_json, "forked_from_id");
 		it.forked_from_version = json_int(item_json, "forked_from_version", 0);
@@ -224,8 +227,9 @@ std::string WorkshopClient::http_get(const std::string& url, int& out_status) {
 	curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, string_write_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "Sand3/1.0");
 
 	CURLcode res = curl_easy_perform(curl);
 	if (res == CURLE_OK) {
@@ -234,6 +238,7 @@ std::string WorkshopClient::http_get(const std::string& url, int& out_status) {
 		out_status = static_cast<int>(http_code);
 	} else {
 		std::cerr << "CURL GET error: " << curl_easy_strerror(res) << " on url: " << url << std::endl;
+		out_status = 0;
 	}
 	if (headers)
 		curl_slist_free_all(headers);
@@ -244,10 +249,12 @@ std::string WorkshopClient::http_get(const std::string& url, int& out_status) {
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
-	std::string cmd = "curl -s" + auth_arg + " -w \"\\n%{http_code}\" \"" + url + "\"";
+	std::string cmd = "curl -s -L -A \"Sand3/1.0\"" + auth_arg + " -w \"\\n%{http_code}\" \"" + url + "\"";
 	FILE* pipe = popen(cmd.c_str(), "r");
-	if (!pipe)
+	if (!pipe) {
+		out_status = 0;
 		return "";
+	}
 	char buf[512];
 	std::string full_output;
 	while (fgets(buf, sizeof(buf), pipe)) {
@@ -255,20 +262,28 @@ std::string WorkshopClient::http_get(const std::string& url, int& out_status) {
 	}
 	pclose(pipe);
 
+	if (full_output.empty()) {
+		out_status = 0;
+		return "";
+	}
+
 	size_t last_nl = full_output.find_last_of('\n');
 	if (last_nl != std::string::npos) {
 		size_t prev_nl = full_output.find_last_of('\n', last_nl - 1);
 		std::string status_str = (prev_nl != std::string::npos) ? full_output.substr(prev_nl + 1, last_nl - prev_nl - 1)
 																: full_output.substr(0, last_nl);
+		if (!status_str.empty() && status_str.back() == '\r') {
+			status_str.pop_back();
+		}
 		try {
 			out_status = std::stoi(status_str);
 		} catch (...) {
-			out_status = 200;
+			out_status = 0;
 		}
 		return (prev_nl != std::string::npos) ? full_output.substr(0, prev_nl) : "";
 	}
-	out_status = 200;
-	return full_output;
+	out_status = 0;
+	return "";
 #endif
 }
 
@@ -293,19 +308,28 @@ std::string WorkshopClient::http_post_json(const std::string& url, const std::st
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, string_write_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "Sand3/1.0");
 
 	CURLcode res = curl_easy_perform(curl);
 	if (res == CURLE_OK) {
 		long http_code = 0;
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 		out_status = static_cast<int>(http_code);
+	} else {
+		std::cerr << "CURL POST error: " << curl_easy_strerror(res) << " on url: " << url << std::endl;
+		out_status = 0;
 	}
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 	return response;
 #else
+	std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
 	std::string temp_file =
-		"/tmp/sand3_req_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".json";
+		(temp_dir /
+		 ("sand3_req_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".json"))
+			.string();
+
 	std::ofstream out(temp_file);
 	out << json_body;
 	out.close();
@@ -315,7 +339,7 @@ std::string WorkshopClient::http_post_json(const std::string& url, const std::st
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
 	std::string cmd =
-		"curl -s -X POST -H \"Content-Type: application/json\"" + auth_arg + " -d @" + temp_file + " \"" + url + "\"";
+		"curl -s -L -A \"Sand3/1.0\" -X POST -H \"Content-Type: application/json\"" + auth_arg + " -w \"\\n%{http_code}\" -d @" + temp_file + " \"" + url + "\"";
 	FILE* pipe = popen(cmd.c_str(), "r");
 	std::string resp;
 	if (pipe) {
@@ -326,8 +350,29 @@ std::string WorkshopClient::http_post_json(const std::string& url, const std::st
 		pclose(pipe);
 	}
 	std::filesystem::remove(temp_file);
-	out_status = 200;
-	return resp;
+
+	if (resp.empty()) {
+		out_status = 0;
+		return "";
+	}
+
+	size_t last_nl = resp.find_last_of('\n');
+	if (last_nl != std::string::npos) {
+		size_t prev_nl = resp.find_last_of('\n', last_nl - 1);
+		std::string status_str = (prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1)
+																: resp.substr(0, last_nl);
+		if (!status_str.empty() && status_str.back() == '\r') {
+			status_str.pop_back();
+		}
+		try {
+			out_status = std::stoi(status_str);
+		} catch (...) {
+			out_status = 0;
+		}
+		return (prev_nl != std::string::npos) ? resp.substr(0, prev_nl) : "";
+	}
+	out_status = 0;
+	return "";
 #endif
 }
 
@@ -353,19 +398,28 @@ std::string WorkshopClient::http_put_json(const std::string& url, const std::str
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, string_write_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "Sand3/1.0");
 
 	CURLcode res = curl_easy_perform(curl);
 	if (res == CURLE_OK) {
 		long http_code = 0;
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 		out_status = static_cast<int>(http_code);
+	} else {
+		std::cerr << "CURL PUT error: " << curl_easy_strerror(res) << " on url: " << url << std::endl;
+		out_status = 0;
 	}
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 	return response;
 #else
+	std::filesystem::path temp_dir = std::filesystem::temp_directory_path();
 	std::string temp_file =
-		"/tmp/sand3_req_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".json";
+		(temp_dir /
+		 ("sand3_req_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".json"))
+			.string();
+
 	std::ofstream out(temp_file);
 	out << json_body;
 	out.close();
@@ -375,7 +429,7 @@ std::string WorkshopClient::http_put_json(const std::string& url, const std::str
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
 	std::string cmd =
-		"curl -s -X PUT -H \"Content-Type: application/json\"" + auth_arg + " -d @" + temp_file + " \"" + url + "\"";
+		"curl -s -L -A \"Sand3/1.0\" -X PUT -H \"Content-Type: application/json\"" + auth_arg + " -w \"\\n%{http_code}\" -d @" + temp_file + " \"" + url + "\"";
 	FILE* pipe = popen(cmd.c_str(), "r");
 	std::string resp;
 	if (pipe) {
@@ -386,8 +440,29 @@ std::string WorkshopClient::http_put_json(const std::string& url, const std::str
 		pclose(pipe);
 	}
 	std::filesystem::remove(temp_file);
-	out_status = 200;
-	return resp;
+
+	if (resp.empty()) {
+		out_status = 0;
+		return "";
+	}
+
+	size_t last_nl = resp.find_last_of('\n');
+	if (last_nl != std::string::npos) {
+		size_t prev_nl = resp.find_last_of('\n', last_nl - 1);
+		std::string status_str = (prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1)
+																: resp.substr(0, last_nl);
+		if (!status_str.empty() && status_str.back() == '\r') {
+			status_str.pop_back();
+		}
+		try {
+			out_status = std::stoi(status_str);
+		} catch (...) {
+			out_status = 0;
+		}
+		return (prev_nl != std::string::npos) ? resp.substr(0, prev_nl) : "";
+	}
+	out_status = 0;
+	return "";
 #endif
 }
 
@@ -411,12 +486,17 @@ std::string WorkshopClient::http_delete(const std::string& url, int& out_status)
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, string_write_cb);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "Sand3/1.0");
 
 	CURLcode res = curl_easy_perform(curl);
 	if (res == CURLE_OK) {
 		long http_code = 0;
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 		out_status = static_cast<int>(http_code);
+	} else {
+		std::cerr << "CURL DELETE error: " << curl_easy_strerror(res) << " on url: " << url << std::endl;
+		out_status = 0;
 	}
 	if (headers)
 		curl_slist_free_all(headers);
@@ -427,7 +507,7 @@ std::string WorkshopClient::http_delete(const std::string& url, int& out_status)
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
-	std::string cmd = "curl -s -X DELETE" + auth_arg + " \"" + url + "\"";
+	std::string cmd = "curl -s -L -A \"Sand3/1.0\" -X DELETE" + auth_arg + " -w \"\\n%{http_code}\" \"" + url + "\"";
 	FILE* pipe = popen(cmd.c_str(), "r");
 	std::string resp;
 	if (pipe) {
@@ -437,8 +517,29 @@ std::string WorkshopClient::http_delete(const std::string& url, int& out_status)
 		}
 		pclose(pipe);
 	}
-	out_status = 200;
-	return resp;
+
+	if (resp.empty()) {
+		out_status = 0;
+		return "";
+	}
+
+	size_t last_nl = resp.find_last_of('\n');
+	if (last_nl != std::string::npos) {
+		size_t prev_nl = resp.find_last_of('\n', last_nl - 1);
+		std::string status_str = (prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1)
+																: resp.substr(0, last_nl);
+		if (!status_str.empty() && status_str.back() == '\r') {
+			status_str.pop_back();
+		}
+		try {
+			out_status = std::stoi(status_str);
+		} catch (...) {
+			out_status = 0;
+		}
+		return (prev_nl != std::string::npos) ? resp.substr(0, prev_nl) : "";
+	}
+	out_status = 0;
+	return "";
 #endif
 }
 
@@ -469,21 +570,38 @@ bool WorkshopClient::http_download_file(const std::string& url, const std::strin
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, "Sand3/1.0");
 
 	CURLcode res = curl_easy_perform(curl);
+	long http_code = 0;
+	if (res == CURLE_OK) {
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+	} else {
+		std::cerr << "CURL download error: " << curl_easy_strerror(res) << " on url: " << url << std::endl;
+	}
 	fclose(fp);
 	if (headers)
 		curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
-	return (res == CURLE_OK);
+
+	bool ok = (res == CURLE_OK && http_code >= 200 && http_code < 300);
+	if (!ok) {
+		std::filesystem::remove(dest_path, ec);
+	}
+	return ok;
 #else
 	std::string auth_arg = "";
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
-	std::string cmd = "curl -s -L" + auth_arg + " -o \"" + dest_path + "\" \"" + url + "\"";
+	std::string cmd = "curl -s -L -A \"Sand3/1.0\" -f" + auth_arg + " -o \"" + dest_path + "\" \"" + url + "\"";
 	int code = std::system(cmd.c_str());
-	return (code == 0 && std::filesystem::exists(dest_path) && std::filesystem::file_size(dest_path) > 0);
+	bool ok = (code == 0 && std::filesystem::exists(dest_path) && std::filesystem::file_size(dest_path) > 0);
+	if (!ok) {
+		std::error_code ec;
+		std::filesystem::remove(dest_path, ec);
+	}
+	return ok;
 #endif
 }
 
@@ -497,7 +615,7 @@ void WorkshopClient::login(const std::string& username, const std::string& passw
 		body["password"] = password;
 		int status = 0;
 		std::string resp = http_post_json(url, body.dump(), status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::string err_str;
 
 		if (ok) {
@@ -514,10 +632,16 @@ void WorkshopClient::login(const std::string& username, const std::string& passw
 				err_str = e.what();
 			}
 		} else {
-			try {
-				auto j = nlohmann::json::parse(resp);
-				err_str = j.value("error", "Login failed (HTTP " + std::to_string(status) + ")");
-			} catch (...) {
+			if (status == 0) {
+				err_str = "Could not reach workshop server. Please check your connection.";
+			} else if (!resp.empty()) {
+				try {
+					auto j = nlohmann::json::parse(resp);
+					err_str = j.value("error", "Login failed (HTTP " + std::to_string(status) + ")");
+				} catch (...) {
+					err_str = "Login failed (HTTP " + std::to_string(status) + ")";
+				}
+			} else {
 				err_str = "Login failed (HTTP " + std::to_string(status) + ")";
 			}
 		}
@@ -536,7 +660,7 @@ void WorkshopClient::register_user(const std::string& username, const std::strin
 		body["password"] = password;
 		int status = 0;
 		std::string resp = http_post_json(url, body.dump(), status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::string err_str;
 
 		if (ok) {
@@ -553,10 +677,16 @@ void WorkshopClient::register_user(const std::string& username, const std::strin
 				err_str = e.what();
 			}
 		} else {
-			try {
-				auto j = nlohmann::json::parse(resp);
-				err_str = j.value("error", "Registration failed (HTTP " + std::to_string(status) + ")");
-			} catch (...) {
+			if (status == 0) {
+				err_str = "Could not reach workshop server. Please check your connection.";
+			} else if (!resp.empty()) {
+				try {
+					auto j = nlohmann::json::parse(resp);
+					err_str = j.value("error", "Registration failed (HTTP " + std::to_string(status) + ")");
+				} catch (...) {
+					err_str = "Registration failed (HTTP " + std::to_string(status) + ")";
+				}
+			} else {
 				err_str = "Registration failed (HTTP " + std::to_string(status) + ")";
 			}
 		}
@@ -575,7 +705,7 @@ void WorkshopClient::check_auth(std::function<void(bool success, const std::stri
 		std::string url = base_url + "/workshop/auth/me";
 		int status = 0;
 		std::string resp = http_get(url, status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::string uname;
 
 		if (ok) {
@@ -610,14 +740,15 @@ void WorkshopClient::logout() {
 void WorkshopClient::fetch_items(
 	const std::string& type, const std::string& sort, const std::string& query,
 	std::function<void(bool success, const std::vector<WorkshopItemClient>& items, int total)> callback) {
-	fetch_items(type, sort, query, "", callback);
+	fetch_items(type, sort, query, "", false, callback);
 }
 
 void WorkshopClient::fetch_items(
 	const std::string& type, const std::string& sort, const std::string& query, const std::string& author,
+	bool favorites,
 	std::function<void(bool success, const std::vector<WorkshopItemClient>& items, int total)> callback) {
 	Window::increment_busy();
-	std::thread([type, sort, query, author, callback]() {
+	std::thread([type, sort, query, author, favorites, callback]() {
 		std::string url =
 			base_url + "/workshop/items?type=" + type + "&sort=" + sort + "&client_uuid=" + get_client_uuid();
 		if (!query.empty()) {
@@ -626,10 +757,13 @@ void WorkshopClient::fetch_items(
 		if (!author.empty()) {
 			url += "&author=" + url_encode(author);
 		}
+		if (favorites) {
+			url += "&favorites=1";
+		}
 
 		int status = 0;
 		std::string resp = http_get(url, status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::vector<WorkshopItemClient> result_items;
 		int total = 0;
 
@@ -663,7 +797,7 @@ void WorkshopClient::fetch_item(const std::string& id,
 		std::string url = base_url + "/workshop/items/" + id + "?client_uuid=" + get_client_uuid();
 		int status = 0;
 		std::string resp = http_get(url, status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		WorkshopItemClient it;
 
 		if (ok) {
@@ -692,7 +826,7 @@ void WorkshopClient::check_item_exists(const std::string& id,
 		std::string url = base_url + "/workshop/items/" + id + "?client_uuid=" + get_client_uuid();
 		int status = 0;
 		std::string resp = http_get(url, status);
-		bool exists = (status >= 200 && status < 300);
+		bool exists = (status >= 200 && status < 300 && !resp.empty());
 		enqueue_task_completion([callback, exists, status]() {
 			if (callback) {
 				callback(exists, status);
@@ -709,7 +843,7 @@ void WorkshopClient::fetch_set_saves(
 		std::string url = base_url + "/workshop/items/sets/" + set_id + "/saves";
 		int status = 0;
 		std::string resp = http_get(url, status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::vector<WorkshopItemClient> saves;
 
 		if (ok) {
@@ -739,7 +873,7 @@ void WorkshopClient::fetch_set_stamps(
 		std::string url = base_url + "/workshop/items/sets/" + set_id + "/stamps";
 		int status = 0;
 		std::string resp = http_get(url, status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::vector<WorkshopItemClient> stamps;
 
 		if (ok) {
@@ -769,7 +903,7 @@ void WorkshopClient::fetch_item_versions(
 		std::string url = base_url + "/workshop/items/" + item_id + "/versions";
 		int status = 0;
 		std::string resp = http_get(url, status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::vector<WorkshopItemVersion> versions;
 
 		if (ok) {
@@ -807,7 +941,7 @@ void WorkshopClient::download_item(const std::string& id, const std::string& tar
 }
 
 void WorkshopClient::download_item_version(const std::string& id, int version, const std::string& target_path,
-										  std::function<void(bool success, const std::string& path)> callback) {
+										   std::function<void(bool success, const std::string& path)> callback) {
 	Window::increment_busy();
 	std::thread([id, version, target_path, callback]() {
 		std::string url = base_url + "/workshop/items/" + id + "/download?version=" + std::to_string(version);
@@ -835,7 +969,7 @@ void WorkshopClient::toggle_like(const std::string& id,
 		body["client_uuid"] = get_client_uuid();
 		int status = 0;
 		std::string resp = http_post_json(url, body.dump(), status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		bool is_liked = false;
 		int count = 0;
 
@@ -861,7 +995,7 @@ void WorkshopClient::toggle_favorite(const std::string& id,
 		body["client_uuid"] = get_client_uuid();
 		int status = 0;
 		std::string resp = http_post_json(url, body.dump(), status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		bool is_favorited = false;
 		int count = 0;
 
@@ -879,6 +1013,29 @@ void WorkshopClient::toggle_favorite(const std::string& id,
 	}).detach();
 }
 
+void WorkshopClient::toggle_private(const std::string& id,
+									std::function<void(bool success, int is_private)> callback) {
+	Window::increment_busy();
+	std::thread([id, callback]() {
+		std::string url = base_url + "/workshop/items/" + id + "/toggle-private";
+		int status = 0;
+		std::string resp = http_post_json(url, "{}", status);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
+		int is_private = 0;
+
+		if (ok) {
+			try {
+				auto j = nlohmann::json::parse(resp);
+				is_private = j.value("is_private", 0);
+			} catch (...) {
+				ok = false;
+			}
+		}
+
+		enqueue_task_completion([callback, ok, is_private]() { callback(ok, is_private); });
+	}).detach();
+}
+
 void WorkshopClient::submit_report(const std::string& id, const std::string& reason, const std::string& details,
 								   std::function<void(bool success, const std::string& message)> callback) {
 	std::thread([id, reason, details, callback]() {
@@ -892,7 +1049,7 @@ void WorkshopClient::submit_report(const std::string& id, const std::string& rea
 		bool ok = (status >= 200 && status < 300);
 		std::string msg = "Report submitted.";
 
-		if (ok) {
+		if (ok && !resp.empty()) {
 			try {
 				auto j = nlohmann::json::parse(resp);
 				msg = j.value("message", msg);
@@ -908,16 +1065,19 @@ void WorkshopClient::publish_item(
 	const std::string& parent_set_id, const std::vector<uint8_t>& file_bytes, const std::string& file_ext,
 	const std::string& meta_json, const std::string& set_hash, const std::string& thumbnail_data,
 	std::function<void(bool success, const std::string& created_id, const std::string& error)> callback,
-	const std::string& forked_from_id, int forked_from_version) {
+	const std::string& forked_from_id, int forked_from_version, bool is_private) {
 	Window::increment_busy();
 	std::thread([type, title, description, author, parent_set_id, file_bytes, file_ext, meta_json, set_hash,
-				 thumbnail_data, callback, forked_from_id, forked_from_version]() {
+				 thumbnail_data, callback, forked_from_id, forked_from_version, is_private]() {
 		std::string url = base_url + "/workshop/items";
 		nlohmann::json body;
 		body["type"] = type;
 		body["title"] = title;
 		body["description"] = description;
 		body["author"] = author;
+		if (is_private) {
+			body["is_private"] = 1;
+		}
 		if (!parent_set_id.empty()) {
 			body["parent_set_id"] = parent_set_id;
 		}
@@ -939,7 +1099,7 @@ void WorkshopClient::publish_item(
 
 		int status = 0;
 		std::string resp = http_post_json(url, body.dump(), status);
-		bool ok = (status >= 200 && status < 300);
+		bool ok = (status >= 200 && status < 300 && !resp.empty());
 		std::string created_id;
 		std::string err_str;
 
@@ -952,10 +1112,16 @@ void WorkshopClient::publish_item(
 				err_str = e.what();
 			}
 		} else {
-			try {
-				auto j = nlohmann::json::parse(resp);
-				err_str = j.value("error", "HTTP " + std::to_string(status));
-			} catch (...) {
+			if (status == 0) {
+				err_str = "Could not reach workshop server. Please check your connection.";
+			} else if (!resp.empty()) {
+				try {
+					auto j = nlohmann::json::parse(resp);
+					err_str = j.value("error", "HTTP " + std::to_string(status));
+				} catch (...) {
+					err_str = "HTTP " + std::to_string(status);
+				}
+			} else {
 				err_str = "HTTP " + std::to_string(status);
 			}
 		}
@@ -968,10 +1134,11 @@ void WorkshopClient::update_item(const std::string& id, const std::string& title
 								 int version, const std::string& changelog, const std::vector<uint8_t>& file_bytes,
 								 const std::string& file_ext, const std::string& meta_json, const std::string& set_hash,
 								 const std::string& thumbnail_data,
-								 std::function<void(bool success, const std::string& error)> callback) {
+								 std::function<void(bool success, const std::string& error)> callback,
+								 int is_private) {
 	Window::increment_busy();
 	std::thread([id, title, description, version, changelog, file_bytes, file_ext, meta_json, set_hash, thumbnail_data,
-				 callback]() {
+				 callback, is_private]() {
 		std::string url = base_url + "/workshop/items/" + id;
 		nlohmann::json body;
 		if (!title.empty())
@@ -985,6 +1152,8 @@ void WorkshopClient::update_item(const std::string& id, const std::string& title
 			body["meta_json"] = meta_json;
 		if (!set_hash.empty())
 			body["set_hash"] = set_hash;
+		if (is_private >= 0)
+			body["is_private"] = is_private;
 		if (!file_bytes.empty()) {
 			body["file_data"] = base64_encode(file_bytes.data(), file_bytes.size());
 			body["file_ext"] = file_ext;
@@ -999,10 +1168,16 @@ void WorkshopClient::update_item(const std::string& id, const std::string& title
 		std::string err_str;
 
 		if (!ok) {
-			try {
-				auto j = nlohmann::json::parse(resp);
-				err_str = j.value("error", "HTTP " + std::to_string(status));
-			} catch (...) {
+			if (status == 0) {
+				err_str = "Could not reach workshop server. Please check your connection.";
+			} else if (!resp.empty()) {
+				try {
+					auto j = nlohmann::json::parse(resp);
+					err_str = j.value("error", "HTTP " + std::to_string(status));
+				} catch (...) {
+					err_str = "HTTP " + std::to_string(status);
+				}
+			} else {
 				err_str = "HTTP " + std::to_string(status);
 			}
 		}
@@ -1013,8 +1188,9 @@ void WorkshopClient::update_item(const std::string& id, const std::string& title
 
 void WorkshopClient::update_item_metadata(const std::string& id, const std::string& title,
 										  const std::string& description, const std::string& meta_json,
-										  std::function<void(bool success, const std::string& error)> callback) {
-	update_item(id, title, description, 0, "", {}, "", meta_json, "", "", callback);
+										  std::function<void(bool success, const std::string& error)> callback,
+										  int is_private) {
+	update_item(id, title, description, 0, "", {}, "", meta_json, "", "", callback, is_private);
 }
 
 void WorkshopClient::delete_item(const std::string& id,
@@ -1028,10 +1204,16 @@ void WorkshopClient::delete_item(const std::string& id,
 		std::string err_str;
 
 		if (!ok) {
-			try {
-				auto j = nlohmann::json::parse(resp);
-				err_str = j.value("error", "HTTP " + std::to_string(status));
-			} catch (...) {
+			if (status == 0) {
+				err_str = "Could not reach workshop server. Please check your connection.";
+			} else if (!resp.empty()) {
+				try {
+					auto j = nlohmann::json::parse(resp);
+					err_str = j.value("error", "HTTP " + std::to_string(status));
+				} catch (...) {
+					err_str = "HTTP " + std::to_string(status);
+				}
+			} else {
 				err_str = "HTTP " + std::to_string(status);
 			}
 		}

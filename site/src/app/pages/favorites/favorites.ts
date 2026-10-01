@@ -209,7 +209,7 @@ export class FavoritesComponent implements OnInit {
   toggleLike(item: WorkshopItem, event: Event) {
     event.stopPropagation();
     if (!this.auth.currentUser()) {
-      alert('Please sign in to like workshop items.');
+      alert('Please log in to like workshop items.');
       return;
     }
     const prevLiked = !!item.is_liked;

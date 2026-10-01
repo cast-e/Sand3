@@ -25,6 +25,24 @@
     </div>
   </div>
 
+  @if (set.forked_from_id) {
+  <div class="forked-from-banner">
+    <img src="/icons/arrow_divide.png" class="silk-icon" alt="Forked" />
+    <div class="banner-text">
+      Forked from:
+      <a [routerLink]="['/workshop/sets', set.forked_from_id]" class="set-link">
+        <strong>{{ set.forked_from_title || set.forked_from_id }}</strong>
+      </a>
+      @if (set.forked_from_version) {
+      <span class="badge badge-version" style="margin-left: 0.5rem;">v{{ set.forked_from_version }}</span>
+      }
+      @if (set.forked_from_author) {
+      <span class="forked-author-label">&bull; by <strong>{{ set.forked_from_author }}</strong></span>
+      }
+    </div>
+  </div>
+  }
+
   <div class="card set-overview-card">
     <div class="card-header">
       <div class="set-title-group">
@@ -33,6 +51,11 @@
         </span>
         @if (set.version && set.version > 1) {
         <span class="badge badge-version">v{{ set.version }}</span>
+        }
+        @if (set.is_private) {
+        <span class="badge badge-warning" title="This set is private and only visible to you">
+          <img src="/icons/lock.png" class="silk-icon" alt="Private" /> Private
+        </span>
         }
         <h1>{{ set.title }}</h1>
       </div>
@@ -50,7 +73,11 @@
           <img src="/icons/star.png" class="silk-icon" alt="Favorite" />
           {{ set.favorites_count }}
         </button>
-        @if (isOwner()) {
+        @if (canManage()) {
+        <button class="btn" (click)="togglePrivate()" [title]="set.is_private ? 'Make public for everyone' : 'Make private (only visible to you)'">
+          <img [src]="set.is_private ? '/icons/world.png' : '/icons/lock.png'" class="silk-icon" [alt]="set.is_private ? 'Public' : 'Private'" />
+          {{ set.is_private ? 'Make Public' : 'Make Private' }}
+        </button>
         <button class="btn" (click)="openEditModal()" title="Edit set details">
           <img src="/icons/pencil.png" class="silk-icon" alt="Edit" />
           Edit
@@ -140,7 +167,14 @@
         </div>
         }
         <div class="card-header">
-          <span class="item-title">{{ save.title }}</span>
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span class="item-title">{{ save.title }}</span>
+            @if (save.is_private) {
+            <span class="badge badge-warning" style="font-size: 10px; padding: 1px 4px;" title="Private item">
+              <img src="/icons/lock.png" class="silk-icon-sm" alt="Private" /> Private
+            </span>
+            }
+          </div>
           <span class="item-author">by {{ save.author }}</span>
         </div>
         <div class="card-body">
@@ -185,7 +219,14 @@
         </div>
         }
         <div class="card-header">
-          <span class="item-title">{{ stamp.title }}</span>
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span class="item-title">{{ stamp.title }}</span>
+            @if (stamp.is_private) {
+            <span class="badge badge-warning" style="font-size: 10px; padding: 1px 4px;" title="Private item">
+              <img src="/icons/lock.png" class="silk-icon-sm" alt="Private" /> Private
+            </span>
+            }
+          </div>
           <span class="item-author">by {{ stamp.author }}</span>
         </div>
         <div class="card-body">
@@ -240,6 +281,14 @@
           <label>Description:</label>
           <textarea class="textarea" rows="4" [ngModel]="editDescription()"
             (ngModelChange)="editDescription.set($event)"></textarea>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="editSetPrivate" [ngModel]="editIsPrivate()" (ngModelChange)="editIsPrivate.set($event)" />
+          <label for="editSetPrivate" style="margin-bottom: 0; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+            <img src="/icons/lock.png" class="silk-icon" alt="Private" />
+            Make this set private (only visible to you)
+          </label>
         </div>
 
         <div class="form-group">

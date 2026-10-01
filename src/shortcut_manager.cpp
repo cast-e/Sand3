@@ -263,6 +263,7 @@ void ShortcutManager::init() {
 	add(ShortcutAction::RotateCCW, "rotate_ccw", "Rotate 90° Counter-Clockwise", "Tools & Selection", "E");
 
 	add(ShortcutAction::BrushShape, "brush_shape", "Toggle Brush Shape", "Brush", "T");
+	add(ShortcutAction::ToggleTransparent, "toggle_transparent", "Toggle Transparent Selection", "Tools & Selection", "Alt+T");
 
 	s_initialized = true;
 }

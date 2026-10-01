@@ -137,6 +137,7 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
     user_id = '',
     q = '',
     client_uuid = '',
+    favorites = '',
     page = '1',
     limit = '30'
   } = req.query as Record<string, string>;
@@ -145,8 +146,18 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 30));
   const offset = (pageNum - 1) * limitNum;
 
+  const authUser = await getAuthenticatedUser(req);
   const conditions: string[] = ['is_hidden = 0'];
   const params: any[] = [];
+
+  if (authUser?.is_admin) {
+    // Admin can see all non-hidden items
+  } else if (authUser) {
+    conditions.push('(is_private = 0 OR user_id = ?)');
+    params.push(authUser.id);
+  } else {
+    conditions.push('is_private = 0');
+  }
 
   if (type && type !== 'all') {
     conditions.push('type = ?');
@@ -166,6 +177,18 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
   if (user_id) {
     conditions.push('user_id = ?');
     params.push(user_id);
+  }
+
+  if (favorites === 'true' || favorites === '1') {
+    if (authUser) {
+      conditions.push("id IN (SELECT item_id FROM interactions WHERE user_id = ? AND interaction_type = 'favorite')");
+      params.push(authUser.id);
+    } else if (client_uuid) {
+      conditions.push("id IN (SELECT item_id FROM interactions WHERE client_uuid = ? AND interaction_type = 'favorite')");
+      params.push(client_uuid);
+    } else {
+      conditions.push('1 = 0');
+    }
   }
 
   if (q.trim()) {
@@ -201,6 +224,7 @@ itemsRouter.get('/', async (req: Request, res: Response) => {
       (SELECT title FROM items p WHERE p.id = i.parent_set_id) as parent_set_title,
       (SELECT title FROM items f WHERE f.id = i.forked_from_id) as forked_from_title,
       (SELECT author FROM items f WHERE f.id = i.forked_from_id) as forked_from_author,
+      (SELECT type FROM items f WHERE f.id = i.forked_from_id) as forked_from_type,
       (SELECT COUNT(*) FROM items fk WHERE fk.forked_from_id = i.id) as forks_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'save') as child_saves_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'stamp') as child_stamps_count
@@ -249,6 +273,7 @@ itemsRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
       (SELECT title FROM items p WHERE p.id = i.parent_set_id) as parent_set_title,
       (SELECT title FROM items f WHERE f.id = i.forked_from_id) as forked_from_title,
       (SELECT author FROM items f WHERE f.id = i.forked_from_id) as forked_from_author,
+      (SELECT type FROM items f WHERE f.id = i.forked_from_id) as forked_from_type,
       (SELECT COUNT(*) FROM items fk WHERE fk.forked_from_id = i.id) as forks_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'save') as child_saves_count,
       (SELECT COUNT(*) FROM items c WHERE c.parent_set_id = i.id AND c.type = 'stamp') as child_stamps_count
@@ -262,9 +287,21 @@ itemsRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
+  const user = await getAuthenticatedUser(req);
+  if (row.is_private) {
+    const isOwnerOrAdmin =
+      user &&
+      (user.is_admin ||
+        (row.user_id && row.user_id === user.id) ||
+        (!row.user_id && row.author.toLowerCase() === user.username.toLowerCase()));
+    if (!isOwnerOrAdmin) {
+      res.status(404).json({ error: 'Item not found' });
+      return;
+    }
+  }
+
   let is_liked = false;
   let is_favorited = false;
-  const user = await getAuthenticatedUser(req);
   if (user) {
     const interactions = (await db.prepare(`SELECT interaction_type FROM interactions WHERE item_id = ? AND user_id = ?`).all(id, user.id)) as any[];
     for (const inter of interactions) {
@@ -283,25 +320,43 @@ itemsRouter.get('/:id', async (req: Request, res: Response): Promise<void> => {
 
 itemsRouter.get('/sets/:id/saves', async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params['id']);
+  const authUser = await getAuthenticatedUser(req);
+  let privClause = 'AND i.is_private = 0';
+  let params: any[] = [id];
+  if (authUser?.is_admin) {
+    privClause = '';
+  } else if (authUser) {
+    privClause = 'AND (i.is_private = 0 OR i.user_id = ?)';
+    params.push(authUser.id);
+  }
   const query = `
     SELECT i.*
     FROM items i
-    WHERE i.parent_set_id = ? AND i.type = 'save' AND i.is_hidden = 0
+    WHERE i.parent_set_id = ? AND i.type = 'save' AND i.is_hidden = 0 ${privClause}
     ORDER BY i.likes_count DESC, i.created_at DESC
   `;
-  const rows = await db.prepare(query).all(id);
+  const rows = await db.prepare(query).all(...params);
   res.json(rows);
 });
 
 itemsRouter.get('/sets/:id/stamps', async (req: Request, res: Response): Promise<void> => {
   const id = String(req.params['id']);
+  const authUser = await getAuthenticatedUser(req);
+  let privClause = 'AND i.is_private = 0';
+  let params: any[] = [id];
+  if (authUser?.is_admin) {
+    privClause = '';
+  } else if (authUser) {
+    privClause = 'AND (i.is_private = 0 OR i.user_id = ?)';
+    params.push(authUser.id);
+  }
   const query = `
     SELECT i.*
     FROM items i
-    WHERE i.parent_set_id = ? AND i.type = 'stamp' AND i.is_hidden = 0
+    WHERE i.parent_set_id = ? AND i.type = 'stamp' AND i.is_hidden = 0 ${privClause}
     ORDER BY i.likes_count DESC, i.created_at DESC
   `;
-  const rows = await db.prepare(query).all(id);
+  const rows = await db.prepare(query).all(...params);
   res.json(rows);
 });
 
@@ -447,6 +502,7 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
     }
 
     const userId = authUser ? authUser.id : null;
+    const is_private = (body.is_private === true || body.is_private === 1 || body.is_private === '1' || body.is_private === 'true') ? 1 : 0;
     const forked_from_id = body.forked_from_id ? String(body.forked_from_id).trim() : null;
     const forked_from_version = body.forked_from_version ? parseInt(String(body.forked_from_version), 10) : null;
 
@@ -463,10 +519,10 @@ itemsRouter.post('/', uploadFields, async (req: Request, res: Response): Promise
 
     await db
       .prepare(`
-        INSERT INTO items (id, user_id, type, title, description, author, parent_set_id, forked_from_id, forked_from_version, version, set_hash, file_path, file_size, thumbnail_path, meta_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+        INSERT INTO items (id, user_id, type, title, description, author, parent_set_id, forked_from_id, forked_from_version, version, set_hash, file_path, file_size, thumbnail_path, meta_json, is_private)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
       `)
-      .run(id, userId, type, title, description, author, parent_set_id, forked_from_id, forked_from_version, finalSetHash, filePath, fileSize, thumbnailPath, meta_json);
+      .run(id, userId, type, title, description, author, parent_set_id, forked_from_id, forked_from_version, finalSetHash, filePath, fileSize, thumbnailPath, meta_json, is_private);
 
     try {
       await db.prepare(`
@@ -639,13 +695,18 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
       }
     }
 
+    let is_private = item.is_private !== undefined ? item.is_private : 0;
+    if (body.is_private !== undefined) {
+      is_private = (body.is_private === true || body.is_private === 1 || body.is_private === '1' || body.is_private === 'true') ? 1 : 0;
+    }
+
     await db
       .prepare(`
         UPDATE items 
-        SET title = ?, description = ?, version = ?, set_hash = ?, file_path = ?, file_size = ?, thumbnail_path = ?, meta_json = ?, updated_at = CURRENT_TIMESTAMP
+        SET title = ?, description = ?, version = ?, set_hash = ?, file_path = ?, file_size = ?, thumbnail_path = ?, meta_json = ?, is_private = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `)
-      .run(title, description, version, set_hash, filePath, fileSize, thumbnailPath, meta_json, id);
+      .run(title, description, version, set_hash, filePath, fileSize, thumbnailPath, meta_json, is_private, id);
 
     if (fileDataBase64 || thumbnailDataBase64) {
       await ensureItemBlobsTable();
@@ -681,6 +742,45 @@ itemsRouter.put('/:id', uploadFields, async (req: Request, res: Response): Promi
   } catch (err: any) {
     console.error('Error updating workshop item:', err);
     res.status(500).json({ error: 'Failed to update item: ' + err.message });
+  }
+});
+
+itemsRouter.post('/:id/toggle-private', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = String(req.params['id']);
+    const authUser = await getAuthenticatedUser(req);
+    if (!authUser) {
+      res.status(401).json({ error: 'You must be logged in to change item privacy' });
+      return;
+    }
+
+    const item = (await db.prepare('SELECT id, user_id, author, title, is_private FROM items WHERE id = ?').get(id)) as any;
+    if (!item) {
+      res.status(404).json({ error: 'Item not found' });
+      return;
+    }
+
+    const isOwnerOrAdmin =
+      authUser.is_admin ||
+      (item.user_id && item.user_id === authUser.id) ||
+      (!item.user_id && item.author.toLowerCase() === authUser.username.toLowerCase());
+
+    if (!isOwnerOrAdmin) {
+      res.status(403).json({ error: 'You do not have permission to modify this item' });
+      return;
+    }
+
+    const newPrivate = item.is_private ? 0 : 1;
+    await db.prepare('UPDATE items SET is_private = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newPrivate, id);
+
+    res.json({
+      success: true,
+      id,
+      is_private: newPrivate,
+      message: newPrivate ? `Item '${item.title}' is now private.` : `Item '${item.title}' is now public.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -32,6 +32,7 @@ struct WorkshopItemClient {
 	int downloads_count = 0;
 	bool is_liked = false;
 	bool is_favorited = false;
+	int is_private = 0;
 	std::string created_at;
 	nlohmann::json meta;
 };
@@ -74,7 +75,14 @@ public:
 
 	static void
 	fetch_items(const std::string& type, const std::string& sort, const std::string& query, const std::string& author,
+				bool favorites,
 				std::function<void(bool success, const std::vector<WorkshopItemClient>& items, int total)> callback);
+
+	static void
+	fetch_items(const std::string& type, const std::string& sort, const std::string& query, const std::string& author,
+				std::function<void(bool success, const std::vector<WorkshopItemClient>& items, int total)> callback) {
+		fetch_items(type, sort, query, author, false, callback);
+	}
 
 	static void fetch_item(const std::string& id,
 						   std::function<void(bool success, const WorkshopItemClient& item)> callback);
@@ -108,6 +116,9 @@ public:
 	static void toggle_favorite(const std::string& id,
 								std::function<void(bool success, bool is_favorited, int count)> callback);
 
+	static void toggle_private(const std::string& id,
+							   std::function<void(bool success, int is_private)> callback);
+
 	static void submit_report(const std::string& id, const std::string& reason, const std::string& details,
 							  std::function<void(bool success, const std::string& message)> callback);
 
@@ -117,17 +128,19 @@ public:
 				 const std::string& file_ext, const std::string& meta_json, const std::string& set_hash,
 				 const std::string& thumbnail_data,
 				 std::function<void(bool success, const std::string& created_id, const std::string& error)> callback,
-				 const std::string& forked_from_id = "", int forked_from_version = 0);
+				 const std::string& forked_from_id = "", int forked_from_version = 0, bool is_private = false);
 
 	static void update_item(const std::string& id, const std::string& title, const std::string& description,
 							int version, const std::string& changelog, const std::vector<uint8_t>& file_bytes,
 							const std::string& file_ext, const std::string& meta_json, const std::string& set_hash,
 							const std::string& thumbnail_data,
-							std::function<void(bool success, const std::string& error)> callback);
+							std::function<void(bool success, const std::string& error)> callback,
+							int is_private = -1);
 
 	static void update_item_metadata(const std::string& id, const std::string& title, const std::string& description,
 									 const std::string& meta_json,
-									 std::function<void(bool success, const std::string& error)> callback);
+									 std::function<void(bool success, const std::string& error)> callback,
+									 int is_private = -1);
 
 	static void delete_item(const std::string& id,
 							std::function<void(bool success, const std::string& error)> callback);

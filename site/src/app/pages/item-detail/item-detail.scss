@@ -58,6 +58,33 @@
   }
 }
 
+.forked-from-banner {
+  background-color: rgba(163, 113, 247, 0.1);
+  border: 1px solid rgba(163, 113, 247, 0.35);
+  border-radius: 6px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: var(--text);
+
+  .set-link {
+    color: var(--link);
+    text-decoration: underline;
+  }
+
+  .forked-author-label {
+    margin-left: 8px;
+    color: var(--text-muted);
+
+    strong {
+      color: var(--text);
+    }
+  }
+}
+
 .overview-card {
   margin-bottom: 30px;
 

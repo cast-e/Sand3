@@ -39,6 +39,7 @@ enum class ShortcutAction {
 	RotateCW,
 	RotateCCW,
 	BrushShape,
+	ToggleTransparent,
 	Count
 };
 

@@ -26,6 +26,7 @@ export class ItemDetailComponent implements OnInit {
   editingItem = signal<boolean>(false);
   editTitle = signal<string>('');
   editDescription = signal<string>('');
+  editIsPrivate = signal<boolean>(false);
   editLoading = signal<boolean>(false);
   editError = signal<string>('');
 
@@ -93,7 +94,7 @@ export class ItemDetailComponent implements OnInit {
     const it = this.item();
     if (!it) return;
     if (!this.auth.currentUser()) {
-      alert('Please sign in to like workshop items.');
+      alert('Please log in to like workshop items.');
       return;
     }
     const prevLiked = !!it.is_liked;
@@ -117,7 +118,7 @@ export class ItemDetailComponent implements OnInit {
     const it = this.item();
     if (!it) return;
     if (!this.auth.currentUser()) {
-      alert('Please sign in to favorite workshop items.');
+      alert('Please log in to favorite workshop items.');
       return;
     }
     const prevFav = !!it.is_favorited;
@@ -176,11 +177,25 @@ export class ItemDetailComponent implements OnInit {
     this.showUsageModal.set(false);
   }
 
+  togglePrivate() {
+    const it = this.item();
+    if (!it) return;
+    this.api.togglePrivateItem(it.id).subscribe({
+      next: (res) => {
+        this.item.update((val) => (val ? { ...val, is_private: res.is_private } : null));
+      },
+      error: (err) => {
+        alert(err.error?.error || 'Failed to toggle privacy status.');
+      }
+    });
+  }
+
   openEditModal() {
     const it = this.item();
     if (!it) return;
     this.editTitle.set(it.title);
     this.editDescription.set(it.description);
+    this.editIsPrivate.set(!!it.is_private);
     this.editError.set('');
     this.editingItem.set(true);
   }
@@ -204,11 +219,12 @@ export class ItemDetailComponent implements OnInit {
     this.api
       .updateItem(it.id, {
         title,
-        description: this.editDescription().trim()
+        description: this.editDescription().trim(),
+        is_private: this.editIsPrivate() ? 1 : 0
       })
       .subscribe({
         next: (updated) => {
-          this.item.update((val) => (val ? { ...val, title: updated.title, description: updated.description } : null));
+          this.item.update((val) => (val ? { ...val, title: updated.title, description: updated.description, is_private: updated.is_private } : null));
           this.editLoading.set(false);
           this.closeEditModal();
         },
@@ -243,7 +259,7 @@ export class ItemDetailComponent implements OnInit {
 
   openReportModal() {
     if (!this.auth.currentUser()) {
-      alert('Please sign in to report items.');
+      alert('Please log in to report items.');
       return;
     }
     this.reportReason.set('broken');

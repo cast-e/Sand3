@@ -24,6 +24,7 @@ namespace {
 	WorkshopItemClient s_edit_item;
 	char s_edit_title[128] = "";
 	char s_edit_desc[1024] = "";
+	bool s_edit_private = false;
 	std::string s_edit_status = "";
 	bool s_edit_saving = false;
 	std::function<void()> s_edit_on_success = nullptr;
@@ -122,6 +123,7 @@ void WorkshopItemEditor::open_edit_modal(const WorkshopItemClient& item, std::fu
 	s_edit_item = item;
 	std::snprintf(s_edit_title, sizeof(s_edit_title), "%s", item.title.c_str());
 	std::snprintf(s_edit_desc, sizeof(s_edit_desc), "%s", item.description.c_str());
+	s_edit_private = (item.is_private != 0);
 	s_edit_status = "";
 	s_edit_saving = false;
 	s_edit_on_success = on_success;
@@ -199,7 +201,21 @@ void WorkshopItemEditor::render_edit_modal() {
 
 		ImGui::Spacing();
 		ImGui::Text("Description:");
-		ImGui::InputTextMultiline("##edit_desc", s_edit_desc, sizeof(s_edit_desc), ImVec2(-1, 90));
+		auto filterNewline = [](ImGuiInputTextCallbackData* data) -> int {
+			if (data->EventChar == '\r' || data->EventChar == '\n') {
+				return true;
+			}
+			return false;
+		};
+
+		ImGui::InputTextMultiline("##edit_desc", s_edit_desc, sizeof(s_edit_desc), ImVec2(-1.0f, 60.0f),
+								  ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter, filterNewline);
+
+		ImGui::Spacing();
+		ImGui::Checkbox("Private item (only visible to you)", &s_edit_private);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Make this item private so only you can see and download it.");
+		}
 
 		if (!s_edit_status.empty()) {
 			ImGui::Spacing();
@@ -221,6 +237,7 @@ void WorkshopItemEditor::render_edit_modal() {
 			std::string title_str = s_edit_title;
 			std::string desc_str = s_edit_desc;
 			std::string meta_str = s_edit_item.meta.dump();
+			int priv_val = s_edit_private ? 1 : 0;
 
 			WorkshopClient::update_item_metadata(item_id, title_str, desc_str, meta_str,
 												 [title_str](bool success, const std::string& err) {
@@ -234,7 +251,8 @@ void WorkshopItemEditor::render_edit_modal() {
 													 } else {
 														 s_edit_status = "Failed: " + err;
 													 }
-												 });
+												 },
+												 priv_val);
 		}
 		if (!can_save) {
 			ImGui::EndDisabled();
@@ -277,7 +295,16 @@ void WorkshopItemEditor::render_update_modal() {
 
 		ImGui::Spacing();
 		ImGui::Text("Changelog / Release Notes:");
-		ImGui::InputTextMultiline("##update_changelog", s_update_changelog, sizeof(s_update_changelog), ImVec2(-1, 55));
+		auto filterNewline = [](ImGuiInputTextCallbackData* data) -> int {
+			if (data->EventChar == '\r' || data->EventChar == '\n') {
+				return true;
+			}
+			return false;
+		};
+
+		ImGui::InputTextMultiline("##update_changelog", s_update_changelog, sizeof(s_update_changelog),
+								  ImVec2(-1.0f, 60.0f),
+								  ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter, filterNewline);
 
 		ImGui::Spacing();
 		ImGui::Text("Title:");
@@ -286,7 +313,8 @@ void WorkshopItemEditor::render_update_modal() {
 
 		ImGui::Spacing();
 		ImGui::Text("Description:");
-		ImGui::InputTextMultiline("##update_desc", s_update_desc, sizeof(s_update_desc), ImVec2(-1, 55));
+		ImGui::InputTextMultiline("##update_desc", s_update_desc, sizeof(s_update_desc), ImVec2(-1.0f, 60.0f),
+								  ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter, filterNewline);
 
 		ImGui::Spacing();
 		ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "Source Payload:");
@@ -568,8 +596,8 @@ void WorkshopItemEditor::render_delete_modal() {
 		ImGui::TextWrapped("Are you sure you want to permanently delete '%s' (v%d)?", s_delete_item.title.c_str(),
 						   s_delete_item.version);
 		ImGui::Spacing();
-		ImGui::TextDisabled("This will remove the item, its files, and ratings from the community Workshop. This "
-							"cannot be undone.");
+		ImGui::TextWrapped("This will remove the item, its files, and ratings from the community Workshop. This "
+						   "cannot be undone.");
 
 		if (!s_delete_status.empty()) {
 			ImGui::Spacing();
