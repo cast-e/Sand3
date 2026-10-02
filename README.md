@@ -1,11 +1,19 @@
 # Sand3
  Fast celullar automaton with fully customizable materials and rules.
 
-<img src=./src/resources/sand3.png alt="Sand3" width="100"/>
+<p align="center">
+  <img src=./src/resources/sand3.png alt="Sand3" width="300"/>
+</p>
 
+<p align="center">
+  <a href="https://sand3.vercel.app">
+    <img src="https://img.shields.io/badge/Download-Sand3-ffa757?style=for-the-badge">
+  </a>
 
-[![Download Sand3](https://img.shields.io/badge/Download-Sand3-ffa757?style=for-the-badge)](https://sand3.vercel.app/)
-[![Open Workshop](https://img.shields.io/badge/Open-Workshop-blue?style=for-the-badge)](https://sand3.vercel.app/workshop)
+  <a href="https://sand3.vercel.app/workshop">
+    <img src="https://img.shields.io/badge/Open-Workshop-blue?style=for-the-badge">
+  </a>
+</p>
 
 ## Features
 
