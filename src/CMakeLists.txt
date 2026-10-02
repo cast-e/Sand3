@@ -60,6 +60,7 @@ set(SOURCES
     sha256.hpp
     sha256.cpp
 
+    miniz.h
     zip_util.hpp
     zip_util.cpp
 
@@ -92,7 +93,8 @@ endif()
 target_include_directories(sand3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} "${PROJECT_SOURCE_DIR}/third_party/volk")
 
 if(WIN32)
-    target_link_options(sand3 PRIVATE -static)
+    set_target_properties(sand3 PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_link_options(sand3 PRIVATE -static -mwindows)
 endif()
 
 set_property(TARGET sand3 PROPERTY CXX_STANDARD 20)

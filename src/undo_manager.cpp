@@ -13,6 +13,10 @@ void UndoManager::init() {
 }
 
 void UndoManager::push_snapshot(const std::string& action_name) {
+	if (action_name != "Step Simulation") {
+		UI::reset_stepping_sequence();
+	}
+
 	if (current_index >= 0 && current_index < static_cast<int>(history.size()) - 1) {
 		history.erase(history.begin() + current_index + 1, history.end());
 	}
@@ -40,6 +44,7 @@ bool UndoManager::can_redo() { return current_index >= 0 && current_index < stat
 void UndoManager::undo() {
 	if (!can_undo())
 		return;
+	UI::reset_stepping_sequence();
 	UI::pause_simulation();
 	current_index--;
 	const auto& snap = history[current_index];
@@ -64,6 +69,7 @@ void UndoManager::undo() {
 void UndoManager::redo() {
 	if (!can_redo())
 		return;
+	UI::reset_stepping_sequence();
 	UI::pause_simulation();
 	current_index++;
 	const auto& snap = history[current_index];
@@ -86,12 +92,16 @@ void UndoManager::redo() {
 }
 
 void UndoManager::clear() {
+	UI::reset_stepping_sequence();
 	history.clear();
 	current_index = -1;
 	pending_grid_state.clear();
 }
 
-void UndoManager::set_pending_grid_snapshot() { pending_grid_state = Grid::get_all_cells(); }
+void UndoManager::set_pending_grid_snapshot() {
+	UI::reset_stepping_sequence();
+	pending_grid_state = Grid::get_all_cells();
+}
 
 void UndoManager::commit_grid_snapshot_if_changed(const std::string& action_name) {
 	if (pending_grid_state.empty())

@@ -549,6 +549,7 @@ bool UI::exit_save_as_new_set = false;
 
 bool UI::update = false;
 bool UI::step_frame = false;
+bool UI::stepping_sequence_active = false;
 
 bool UI::show_exit_popup = false;
 
@@ -2247,6 +2248,13 @@ void UI::handle_interaction() {
 	handle_canvas_interaction();
 }
 
+void UI::on_step_completed() {
+	if (!stepping_sequence_active) {
+		UndoManager::push_snapshot("Step Simulation");
+		stepping_sequence_active = true;
+	}
+}
+
 void UI::render_header(ImGuiIO& io) {
 	const auto& cfg = ConfigManager::get_config();
 	if (cfg.ui.show_fps) {
@@ -2300,7 +2308,6 @@ void UI::render_sim_content() {
 	}
 	if (button_with_icon("##SimStep", IconManager::get(IconID::Step), sim_btn_sz)) {
 		step_frame = true;
-		UndoManager::push_snapshot("Step Simulation");
 	}
 	if (ImGui::IsItemHovered()) {
 		ImGui::SetTooltip("Step simulation by one frame (%s)",
@@ -3591,8 +3598,7 @@ void UI::render_manage_sets() {
 		char set_rename_buf[64];
 		strncpy(set_rename_buf, current_set.c_str(), sizeof(set_rename_buf));
 		set_rename_buf[sizeof(set_rename_buf) - 1] = '\0';
-		if (ImGui::InputText("Name##set_rename_input", set_rename_buf, sizeof(set_rename_buf),
-							 ImGuiInputTextFlags_EnterReturnsTrue)) {
+		if (ImGui::InputText("Name##set_rename_input", set_rename_buf, sizeof(set_rename_buf))) {
 			std::string new_name = set_rename_buf;
 			new_name = sanitize_name(new_name);
 			if (!new_name.empty() && new_name != current_set) {
@@ -4501,8 +4507,12 @@ namespace {
 			uint32_t gw = 0, gh = 0;
 
 			if (!target_file.empty()) {
-				std::string fpath = SaveManager::get_saves_directory(target_set) + target_file;
-				std::ifstream fin(fpath, std::ios::binary);
+				std::string fname = target_file;
+				if (fname.length() < 5 || fname.substr(fname.length() - 5) != ".save") {
+					fname += ".save";
+				}
+				std::string fpath = SaveManager::get_saves_directory(target_set) + fname;
+				std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
 				if (fin.is_open()) {
 					std::string set_str;
 					std::getline(fin, set_str);
@@ -4626,35 +4636,70 @@ namespace {
 			}
 		}
 
-		std::string temp_png =
-			"/tmp/sand3_thumb_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".png";
-		SDL_SavePNG(surf, temp_png.c_str());
-		SDL_DestroySurface(surf);
-
 		std::string b64 = "";
-		std::ifstream fin(temp_png, std::ios::binary);
-		if (fin.is_open()) {
-			std::vector<uint8_t> png_bytes((std::istreambuf_iterator<char>(fin)), std::istreambuf_iterator<char>());
-			fin.close();
-			std::filesystem::remove(temp_png);
-			if (!png_bytes.empty()) {
-				static const char b64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-				std::string enc;
-				enc.reserve(((png_bytes.size() + 2) / 3) * 4);
-				for (size_t i = 0; i < png_bytes.size(); i += 3) {
-					uint32_t val = (static_cast<uint32_t>(png_bytes[i]) << 16);
-					if (i + 1 < png_bytes.size())
-						val |= (static_cast<uint32_t>(png_bytes[i + 1]) << 8);
-					if (i + 2 < png_bytes.size())
-						val |= static_cast<uint32_t>(png_bytes[i + 2]);
-					enc.push_back(b64_chars[(val >> 18) & 0x3F]);
-					enc.push_back(b64_chars[(val >> 12) & 0x3F]);
-					enc.push_back((i + 1 < png_bytes.size()) ? b64_chars[(val >> 6) & 0x3F] : '=');
-					enc.push_back((i + 2 < png_bytes.size()) ? b64_chars[val & 0x3F] : '=');
+		SDL_IOStream* io = SDL_IOFromDynamicMem();
+		if (io) {
+			if (SDL_SavePNG_IO(surf, io, false)) {
+				Sint64 size = SDL_TellIO(io);
+				SDL_PropertiesID props = SDL_GetIOProperties(io);
+				const uint8_t* mem = static_cast<const uint8_t*>(
+					SDL_GetPointerProperty(props, SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER, nullptr));
+				if (mem && size > 0) {
+					static const char b64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+					std::string enc;
+					enc.reserve(((size + 2) / 3) * 4);
+					for (Sint64 i = 0; i < size; i += 3) {
+						uint32_t val = (static_cast<uint32_t>(mem[i]) << 16);
+						if (i + 1 < size)
+							val |= (static_cast<uint32_t>(mem[i + 1]) << 8);
+						if (i + 2 < size)
+							val |= static_cast<uint32_t>(mem[i + 2]);
+						enc.push_back(b64_chars[(val >> 18) & 0x3F]);
+						enc.push_back(b64_chars[(val >> 12) & 0x3F]);
+						enc.push_back((i + 1 < size) ? b64_chars[(val >> 6) & 0x3F] : '=');
+						enc.push_back((i + 2 < size) ? b64_chars[val & 0x3F] : '=');
+					}
+					b64 = "data:image/png;base64," + enc;
 				}
-				b64 = "data:image/png;base64," + enc;
+			}
+			SDL_CloseIO(io);
+		} else {
+			std::error_code tec;
+			std::filesystem::path temp_dir = std::filesystem::temp_directory_path(tec);
+			if (!tec) {
+				std::filesystem::path temp_png =
+					temp_dir / ("sand3_thumb_" +
+								std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".png");
+				if (SDL_SavePNG(surf, temp_png.string().c_str())) {
+					std::ifstream fin(temp_png, std::ios::binary);
+					if (fin.is_open()) {
+						std::vector<uint8_t> png_bytes((std::istreambuf_iterator<char>(fin)),
+													   std::istreambuf_iterator<char>());
+						fin.close();
+						std::filesystem::remove(temp_png, tec);
+						if (!png_bytes.empty()) {
+							static const char b64_chars[] =
+								"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+							std::string enc;
+							enc.reserve(((png_bytes.size() + 2) / 3) * 4);
+							for (size_t i = 0; i < png_bytes.size(); i += 3) {
+								uint32_t val = (static_cast<uint32_t>(png_bytes[i]) << 16);
+								if (i + 1 < png_bytes.size())
+									val |= (static_cast<uint32_t>(png_bytes[i + 1]) << 8);
+								if (i + 2 < png_bytes.size())
+									val |= static_cast<uint32_t>(png_bytes[i + 2]);
+								enc.push_back(b64_chars[(val >> 18) & 0x3F]);
+								enc.push_back(b64_chars[(val >> 12) & 0x3F]);
+								enc.push_back((i + 1 < png_bytes.size()) ? b64_chars[(val >> 6) & 0x3F] : '=');
+								enc.push_back((i + 2 < png_bytes.size()) ? b64_chars[val & 0x3F] : '=');
+							}
+							b64 = "data:image/png;base64," + enc;
+						}
+					}
+				}
 			}
 		}
+		SDL_DestroySurface(surf);
 		return b64;
 	}
 
@@ -4761,6 +4806,119 @@ namespace {
 			return false;
 		}
 		return !get_item_local_path(item).empty();
+	}
+
+	static bool is_item_modified_locally(const WorkshopItemClient& item, const std::string& target_version_hash = "") {
+		if (item.type == "set") {
+			if (SetManager::get_current_set() == item.title && UI::has_unsaved_changes()) {
+				return true;
+			}
+
+			std::string set_dir = std::string(SETS_DIRECTORY) + item.title;
+			std::error_code ec;
+			if (!std::filesystem::exists(std::filesystem::path(set_dir), ec) ||
+				!std::filesystem::is_directory(std::filesystem::path(set_dir), ec)) {
+				return false;
+			}
+			if (WorkshopCache::is_transient(set_dir)) {
+				return false;
+			}
+
+			std::string current_hash = SetManager::compute_set_hash(item.title);
+			if (current_hash.empty()) {
+				return false;
+			}
+
+			if (!target_version_hash.empty() && current_hash == target_version_hash) {
+				return false;
+			}
+
+			SetMetadata meta = SetManager::load_set_metadata(item.title);
+			if (!meta.workshop_hash.empty()) {
+				return current_hash != meta.workshop_hash;
+			}
+
+			if (!item.set_hash.empty()) {
+				return current_hash != item.set_hash;
+			}
+
+			return true;
+		} else if (item.type == "save") {
+			std::string local_path = get_item_local_path(item);
+			if (local_path.empty()) {
+				return false;
+			}
+			std::error_code ec;
+			if (!std::filesystem::exists(std::filesystem::path(local_path), ec)) {
+				return false;
+			}
+			if (WorkshopCache::is_transient(local_path)) {
+				return false;
+			}
+
+			std::string parent_name =
+				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
+			SaveFileInfo info;
+			if (!SaveManager::inspect_save_file(local_path, parent_name, info)) {
+				return true;
+			}
+
+			std::string current_fhash = SaveManager::compute_file_hash(local_path);
+			if (!info.file_hash.empty()) {
+				return current_fhash != info.file_hash;
+			}
+
+			std::string cache_p = get_item_cache_path(item);
+			if (!cache_p.empty() && std::filesystem::exists(std::filesystem::path(cache_p), ec)) {
+				std::string cache_fhash = SaveManager::compute_file_hash(cache_p);
+				if (!cache_fhash.empty()) {
+					return current_fhash != cache_fhash;
+				}
+			}
+
+			if (info.workshop_id.empty()) {
+				return true;
+			}
+			return false;
+		} else if (item.type == "stamp") {
+			std::string local_path = get_item_local_path(item);
+			if (local_path.empty()) {
+				return false;
+			}
+			std::error_code ec;
+			if (!std::filesystem::exists(std::filesystem::path(local_path), ec)) {
+				return false;
+			}
+			if (WorkshopCache::is_transient(local_path)) {
+				return false;
+			}
+
+			std::string parent_name =
+				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
+			StampFileInfo info;
+			if (!SaveManager::inspect_stamp_file(local_path, parent_name, info)) {
+				return true;
+			}
+
+			std::string current_fhash = SaveManager::compute_file_hash(local_path);
+			if (!info.file_hash.empty()) {
+				return current_fhash != info.file_hash;
+			}
+
+			std::string cache_p = get_item_cache_path(item);
+			if (!cache_p.empty() && std::filesystem::exists(std::filesystem::path(cache_p), ec)) {
+				std::string cache_fhash = SaveManager::compute_file_hash(cache_p);
+				if (!cache_fhash.empty()) {
+					return current_fhash != cache_fhash;
+				}
+			}
+
+			if (info.workshop_id.empty()) {
+				return true;
+			}
+			return false;
+		}
+		return false;
 	}
 }  // namespace
 
@@ -4873,8 +5031,12 @@ namespace {
 	static bool s_show_set_override_warning = false;
 	static WorkshopItemClient s_pending_override_item;
 	static uint32_t s_pending_local_version = 1;
+	static uint32_t s_pending_target_version = 1;
 	static bool s_pending_is_update = false;
+	static bool s_pending_is_version_load = false;
+	static bool s_pending_is_switch = false;
 	static std::function<void()> s_pending_override_confirm = nullptr;
+	static std::function<void()> s_pending_override_keep_local = nullptr;
 
 	bool apply_theme_from_file(const std::string& theme_path, const std::string& title = "") {
 		std::ifstream fin(theme_path);
@@ -5366,11 +5528,56 @@ namespace {
 			s_items_activating.insert(item.id);
 			if (item.type == "set") {
 				if (is_local) {
-					if (is_update) {
+					bool has_modifications = is_item_modified_locally(item, item.set_hash);
+					if (has_modifications) {
 						s_pending_override_item = item;
 						s_pending_local_version = local_version;
-						s_pending_is_update = true;
+						s_pending_target_version = item.version;
+						s_pending_is_update = is_update;
+						s_pending_is_version_load = false;
+						s_pending_is_switch = true;
+
 						s_pending_override_confirm = [item]() {
+							auto apply_update = [item](const std::string& p) {
+								std::string dest_dir = std::string(SETS_DIRECTORY) + item.title;
+								ZipUtil::extract_zip(p, dest_dir);
+								SetManager::set_workshop_info(item.title, item.id, item.set_hash, item.version,
+															  item.author);
+								SetManager::mark_set_online(item.title, true);
+								SetManager::set_current_set(item.title);
+								s_items_activating.erase(item.id);
+								ToastManager::success("Set '" + item.title + "' loaded from Workshop (v" +
+													  std::to_string(item.version) + ")!");
+							};
+							std::string cache_p = get_item_cache_path(item);
+							if (!cache_p.empty()) {
+								apply_update(cache_p);
+							} else {
+								std::string zip_path = WorkshopCache::get_cache_path(item.id, "set", "set.zip");
+								WorkshopClient::download_item(
+									item.id, zip_path,
+									[apply_update, item_id = item.id](bool success, const std::string& p) {
+										if (success) {
+											apply_update(p);
+										} else {
+											s_items_activating.erase(item_id);
+											ToastManager::error("Failed to download set.");
+										}
+									});
+							}
+						};
+
+						s_pending_override_keep_local = [item]() {
+							if (SetManager::get_current_set() != item.title) {
+								SetManager::set_current_set(item.title);
+							}
+							s_items_activating.erase(item.id);
+							ToastManager::info("Switched to local set '" + item.title + "'!");
+						};
+
+						s_show_set_override_warning = true;
+					} else {
+						if (is_update) {
 							auto apply_update = [item](const std::string& p) {
 								std::string dest_dir = std::string(SETS_DIRECTORY) + item.title;
 								ZipUtil::extract_zip(p, dest_dir);
@@ -5398,14 +5605,13 @@ namespace {
 										}
 									});
 							}
-						};
-						s_show_set_override_warning = true;
-					} else {
-						if (SetManager::get_current_set() != item.title) {
-							SetManager::set_current_set(item.title);
+						} else {
+							if (SetManager::get_current_set() != item.title) {
+								SetManager::set_current_set(item.title);
+							}
+							s_items_activating.erase(item.id);
+							ToastManager::info("Switched to local set '" + item.title + "'!");
 						}
-						s_items_activating.erase(item.id);
-						ToastManager::info("Switched to local set '" + item.title + "'!");
 					}
 				} else if (is_cached) {
 					std::string target_set_dir = std::string(SETS_DIRECTORY) + item.title;
@@ -5862,7 +6068,7 @@ void UI::render_workshop() {
 				ImGui::SetTooltip("Show items you have favorited");
 			}
 		} else {
-			if (ImGui::SmallButton("Log in / Register")) {
+			if (UI::button_with_icon("Log in##login_guest", IconManager::get(IconID::User), ImVec2(0, 20.0f))) {
 				s_show_auth_modal = true;
 				s_auth_status = "";
 			}
@@ -5891,11 +6097,11 @@ void UI::render_workshop() {
 		float avail_w = ImGui::GetContentRegionAvail().x;
 		ImGui::SetNextItemWidth(avail_w - 28.0f);
 		if (ImGui::InputTextWithHint("##ws_sidebar_search", "Search items...", s_workshop_search,
-									 sizeof(s_workshop_search), ImGuiInputTextFlags_EnterReturnsTrue)) {
+									 sizeof(s_workshop_search))) {
 			refresh_workshop_items();
 		}
 		ImGui::SameLine(0, 4.0f);
-		if (UI::button_with_icon("##ws_refresh_btn", IconManager::get(IconID::Refresh), ImVec2(24, 22))) {
+		if (UI::button_with_icon("##ws_refresh_btn", IconManager::get(IconID::Refresh), ImVec2(28, 28))) {
 			refresh_workshop_items();
 		}
 		if (ImGui::IsItemHovered()) {
@@ -6332,23 +6538,30 @@ namespace {
 									fname += ".save";
 								}
 								std::string fpath = SaveManager::get_saves_directory(cur_s) + fname;
-								std::ifstream fin(fpath, std::ios::binary);
+								std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
 								if (fin.is_open()) {
 									bytes.assign((std::istreambuf_iterator<char>(fin)),
 												 std::istreambuf_iterator<char>());
 									fin.close();
 								}
-							}
-							if (bytes.empty()) {
+							} else {
 								SaveManager::save_to_file("__ws_temp_pub", cur_s);
 								std::string fpath = SaveManager::get_saves_directory(cur_s) + "__ws_temp_pub.save";
-								std::ifstream fin(fpath, std::ios::binary);
+								std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
 								if (fin.is_open()) {
 									bytes.assign((std::istreambuf_iterator<char>(fin)),
 												 std::istreambuf_iterator<char>());
 									fin.close();
 								}
-								std::filesystem::remove(fpath);
+								std::error_code rm_ec;
+								std::filesystem::remove(std::filesystem::path(fpath), rm_ec);
+							}
+
+							if (bytes.empty()) {
+								s_publishing = false;
+								ToastManager::error(
+									"No save data found to publish. Please check that the file exists.");
+								return;
 							}
 
 							std::string parent_id = set_meta.workshop_id;
@@ -6385,21 +6598,36 @@ namespace {
 							}
 							std::string set_dir = std::string(SETS_DIRECTORY) + cur_s;
 							std::vector<std::pair<std::string, std::vector<uint8_t>>> set_files;
-							for (const auto& entry : std::filesystem::directory_iterator(set_dir)) {
-								if (entry.is_regular_file()) {
-									std::string fname = entry.path().filename().string();
-									std::string ext = entry.path().extension().string();
-									if (ext == ".mat" || fname == "set_config.ini") {
-										std::ifstream in(entry.path().string(), std::ios::binary);
-										if (in.is_open()) {
-											std::vector<uint8_t> fbytes((std::istreambuf_iterator<char>(in)),
-																		std::istreambuf_iterator<char>());
-											set_files.emplace_back(fname, fbytes);
+							std::error_code dir_ec;
+							if (std::filesystem::exists(std::filesystem::path(set_dir), dir_ec)) {
+								for (const auto& entry :
+									 std::filesystem::directory_iterator(std::filesystem::path(set_dir), dir_ec)) {
+									if (entry.is_regular_file(dir_ec)) {
+										std::string fname = entry.path().filename().string();
+										std::string ext = entry.path().extension().string();
+										if (ext == ".mat" || fname == "set_config.ini") {
+											std::ifstream in(entry.path(), std::ios::binary);
+											if (in.is_open()) {
+												std::vector<uint8_t> fbytes((std::istreambuf_iterator<char>(in)),
+																			std::istreambuf_iterator<char>());
+												set_files.emplace_back(fname, fbytes);
+											}
 										}
 									}
 								}
 							}
+							if (set_files.empty()) {
+								s_publishing = false;
+								ToastManager::error("No material or config files found in set directory '" + cur_s +
+													"' to publish.");
+								return;
+							}
 							std::vector<uint8_t> zip_bytes = ZipUtil::create_zip(set_files);
+							if (zip_bytes.empty()) {
+								s_publishing = false;
+								ToastManager::error("Failed to generate zip file for set '" + cur_s + "'.");
+								return;
+							}
 							std::string set_hash = SetManager::compute_set_hash(cur_s);
 							std::string thumb_b64 = generate_thumbnail_base64(1, cur_s);
 
@@ -6442,14 +6670,13 @@ namespace {
 									fname += ".stamp";
 								}
 								std::string fpath = SaveManager::get_saves_directory(cur_s) + fname;
-								std::ifstream fin(fpath, std::ios::binary);
+								std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
 								if (fin.is_open()) {
 									stamp_bytes.assign((std::istreambuf_iterator<char>(fin)),
 													   std::istreambuf_iterator<char>());
 									fin.close();
 								}
-							}
-							if (stamp_bytes.empty()) {
+							} else {
 								const auto& clip = UI::get_clipboard();
 								if (!clip.empty() && clip.width > 0 && clip.height > 0) {
 									sw = clip.width;
@@ -6457,49 +6684,51 @@ namespace {
 									SaveManager::save_stamp_to_file("__ws_temp_stamp", cur_s, clip.cells, sw, sh);
 									std::string fpath =
 										SaveManager::get_saves_directory(cur_s) + "__ws_temp_stamp.stamp";
-									std::ifstream fin(fpath, std::ios::binary);
+									std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
 									if (fin.is_open()) {
 										stamp_bytes.assign((std::istreambuf_iterator<char>(fin)),
 														   std::istreambuf_iterator<char>());
 										fin.close();
 									}
-									std::filesystem::remove(fpath);
+									std::error_code rm_ec;
+									std::filesystem::remove(std::filesystem::path(fpath), rm_ec);
 								}
 							}
 
 							if (stamp_bytes.empty()) {
 								s_publishing = false;
 								ToastManager::error("No stamp file or clipboard selection found to publish.");
-							} else {
-								std::string parent_id = set_meta.workshop_id;
-								std::string set_hash = SetManager::compute_set_hash(cur_s);
-
-								std::string thumb_b64 = generate_thumbnail_base64(2, cur_s, s_publish_target_stamp);
-								nlohmann::json meta;
-								meta["width"] = sw;
-								meta["height"] = sh;
-								meta["set_name"] = cur_s;
-
-								WorkshopClient::publish_item(
-									"stamp", s_publish_title, s_publish_desc, s_publish_author, parent_id, stamp_bytes,
-									".stamp", meta.dump(), set_hash, thumb_b64,
-									[cur_s, s_target_stamp = std::string(s_publish_target_stamp),
-									 s_title = std::string(s_publish_title), set_hash,
-									 s_author = std::string(s_publish_author)](
-										bool success, const std::string& created_id, const std::string& err) {
-										s_publishing = false;
-										if (success) {
-											std::string stamp_name = s_target_stamp.empty() ? s_title : s_target_stamp;
-											SaveManager::set_stamp_workshop_info(stamp_name, cur_s, created_id,
-																				 set_hash, s_author, 1);
-											s_publish_status = "Stamp published successfully!";
-											ToastManager::success("Stamp published to Workshop!");
-										} else {
-											s_publish_status = "Upload failed: " + err;
-										}
-									},
-									s_publish_forked_from_id, s_publish_forked_from_version, s_publish_is_private);
+								return;
 							}
+
+							std::string parent_id = set_meta.workshop_id;
+							std::string set_hash = SetManager::compute_set_hash(cur_s);
+
+							std::string thumb_b64 = generate_thumbnail_base64(2, cur_s, s_publish_target_stamp);
+							nlohmann::json meta;
+							meta["width"] = sw;
+							meta["height"] = sh;
+							meta["set_name"] = cur_s;
+
+							WorkshopClient::publish_item(
+								"stamp", s_publish_title, s_publish_desc, s_publish_author, parent_id, stamp_bytes,
+								".stamp", meta.dump(), set_hash, thumb_b64,
+								[cur_s, s_target_stamp = std::string(s_publish_target_stamp),
+								 s_title = std::string(s_publish_title), set_hash,
+								 s_author = std::string(s_publish_author)](bool success, const std::string& created_id,
+																		   const std::string& err) {
+									s_publishing = false;
+									if (success) {
+										std::string stamp_name = s_target_stamp.empty() ? s_title : s_target_stamp;
+										SaveManager::set_stamp_workshop_info(stamp_name, cur_s, created_id, set_hash,
+																			 s_author, 1);
+										s_publish_status = "Stamp published successfully!";
+										ToastManager::success("Stamp published to Workshop!");
+									} else {
+										s_publish_status = "Upload failed: " + err;
+									}
+								},
+								s_publish_forked_from_id, s_publish_forked_from_version, s_publish_is_private);
 						} else if (s_publish_type_idx == 3) {
 							auto& cfg = ConfigManager::get_config();
 							nlohmann::json tj;
@@ -6668,19 +6897,61 @@ namespace {
 									});
 							}
 						};
-						if (std::filesystem::exists(cache_path)) {
-							apply_ver();
+
+						auto execute_load = [cache_path, apply_ver, item_id = s_versions_item.id, ver = v.version]() {
+							if (std::filesystem::exists(cache_path)) {
+								apply_ver();
+							} else {
+								WorkshopClient::download_item_version(
+									item_id, ver, cache_path, [apply_ver](bool ok, const std::string&) {
+										if (ok) {
+											apply_ver();
+										} else {
+											ToastManager::error("Failed to download version.");
+										}
+									});
+							}
+						};
+
+						bool has_modifications = is_item_modified_locally(s_versions_item, v.set_hash);
+						if (has_modifications) {
+							uint32_t cur_ver = 1;
+							if (s_versions_item.type == "set") {
+								SetMetadata sm = SetManager::load_set_metadata(s_versions_item.title);
+								cur_ver = sm.version;
+							} else if (s_versions_item.type == "save") {
+								std::string lp = get_item_local_path(s_versions_item);
+								std::string pname = !s_versions_item.parent_set_title.empty()
+														? s_versions_item.parent_set_title
+														: SetManager::get_current_set();
+								SaveFileInfo fi;
+								if (SaveManager::inspect_save_file(lp, pname, fi)) {
+									cur_ver = fi.version;
+								}
+							} else if (s_versions_item.type == "stamp") {
+								std::string lp = get_item_local_path(s_versions_item);
+								std::string pname = !s_versions_item.parent_set_title.empty()
+														? s_versions_item.parent_set_title
+														: SetManager::get_current_set();
+								StampFileInfo fi;
+								if (SaveManager::inspect_stamp_file(lp, pname, fi)) {
+									cur_ver = fi.version;
+								}
+							}
+
+							s_pending_override_item = s_versions_item;
+							s_pending_local_version = cur_ver;
+							s_pending_target_version = v.version;
+							s_pending_is_update = false;
+							s_pending_is_version_load = true;
+							s_pending_is_switch = false;
+							s_pending_override_keep_local = nullptr;
+							s_pending_override_confirm = execute_load;
+							s_show_set_override_warning = true;
 							s_show_versions_modal = false;
 							ImGui::CloseCurrentPopup();
 						} else {
-							WorkshopClient::download_item_version(
-								s_versions_item.id, v.version, cache_path, [apply_ver](bool ok, const std::string&) {
-									if (ok) {
-										apply_ver();
-									} else {
-										ToastManager::error("Failed to download version.");
-									}
-								});
+							execute_load();
 							s_show_versions_modal = false;
 							ImGui::CloseCurrentPopup();
 						}
@@ -7120,7 +7391,7 @@ void UI::render_shortcuts() {
 			char key_buf[32];
 			std::snprintf(key_buf, sizeof(key_buf), "%s", s.current_key.c_str());
 			ImGui::SetNextItemWidth(120);
-			if (ImGui::InputText("##key", key_buf, sizeof(key_buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+			if (ImGui::InputText("##key", key_buf, sizeof(key_buf))) {
 				if (ShortcutManager::set_key_string(s.action, key_buf)) {
 					ConfigManager::save();
 				}
@@ -7222,8 +7493,7 @@ void UI::render_shortcuts() {
 			char mat_buf[32];
 			std::snprintf(mat_buf, sizeof(mat_buf), "%s", item.effective_shortcut.c_str());
 			ImGui::SetNextItemWidth(120);
-			if (ImGui::InputTextWithHint("##mat_input", "-", mat_buf, sizeof(mat_buf),
-										 ImGuiInputTextFlags_EnterReturnsTrue)) {
+			if (ImGui::InputTextWithHint("##mat_input", "-", mat_buf, sizeof(mat_buf))) {
 				std::string new_str = trim_string(mat_buf);
 				if (new_str.empty() || new_str == "-") {
 					SetManager::remove_current_material_shortcut(item.name);
@@ -7266,7 +7536,7 @@ void UI::render_theme_editor() {
 		ImGuiStyle& style = ImGui::GetStyle();
 
 		ImGui::Spacing();
-		if (button_with_icon("Share Custom Theme to Workshop", IconManager::get(IconID::Transmit), ImVec2(-1, 28))) {
+		if (button_with_icon("Share Custom Theme to Workshop", IconManager::get(IconID::Transmit), ImVec2(-1, 20))) {
 			open_share_for_theme();
 		}
 		if (ImGui::IsItemHovered()) {
@@ -7507,16 +7777,42 @@ void UI::render_modals() {
 	}
 
 	if (s_show_set_override_warning) {
-		ImGui::OpenPopup("Set Warning##OverrideModal");
+		ImGui::OpenPopup("Item Warning##OverrideModal");
 		s_show_set_override_warning = false;
 	}
 
 	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(440.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	if (ImGui::BeginPopupModal("Set Warning##OverrideModal", nullptr,
+	ImGui::SetNextWindowSizeConstraints(ImVec2(460.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
+	if (ImGui::BeginPopupModal("Item Warning##OverrideModal", nullptr,
 							   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
 		ImGui::Spacing();
-		if (s_pending_is_update) {
+		if (s_pending_is_version_load) {
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "WARNING: LOCAL MODIFICATIONS DETECTED");
+			ImGui::Separator();
+			ImGui::Spacing();
+			ImGui::TextWrapped("You have made local modifications to the %s '%s'.",
+							   s_pending_override_item.type.c_str(), s_pending_override_item.title.c_str());
+			ImGui::Spacing();
+			ImGui::BulletText("Installed Local Version: v%u (Modified)", s_pending_local_version);
+			ImGui::BulletText("Target Version to Load: v%u", s_pending_target_version);
+			ImGui::Spacing();
+			ImGui::TextWrapped("Loading version v%u from the Workshop will overwrite your local changes.\n"
+							   "Are you sure you want to proceed?",
+							   s_pending_target_version);
+		} else if (s_pending_is_switch) {
+			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "WARNING: LOCAL MODIFICATIONS DETECTED");
+			ImGui::Separator();
+			ImGui::Spacing();
+			ImGui::TextWrapped("You have made local modifications to the %s '%s'.",
+							   s_pending_override_item.type.c_str(), s_pending_override_item.title.c_str());
+			ImGui::Spacing();
+			ImGui::BulletText("Installed Local Version: v%u (Modified)", s_pending_local_version);
+			ImGui::BulletText("Workshop Latest Version: v%u", s_pending_target_version);
+			ImGui::Spacing();
+			ImGui::TextWrapped("Loading the latest version from the Workshop will overwrite your local changes.\n"
+							   "You can choose to overwrite and load the Workshop version, or keep your local "
+							   "modifications and switch.");
+		} else if (s_pending_is_update) {
 			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "SET UPDATE AVAILABLE");
 			ImGui::Separator();
 			ImGui::Spacing();
@@ -7525,31 +7821,52 @@ void UI::render_modals() {
 			ImGui::Spacing();
 			ImGui::BulletText("Installed Local Version: v%u", s_pending_local_version);
 			ImGui::BulletText("Workshop Online Version: v%d", s_pending_override_item.version);
+			ImGui::Spacing();
+			ImGui::TextWrapped(
+				"Proceeding will replace your local set files with the online version.\n"
+				"Any local modifications made to this set's materials or configuration will be overwritten.");
 		} else {
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "WARNING: OVERWRITING LOCAL SET");
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "WARNING: OVERWRITING LOCAL ITEM");
 			ImGui::Separator();
 			ImGui::Spacing();
-			ImGui::TextWrapped("A local set named '%s' (v%u) already exists on disk.",
-							   s_pending_override_item.title.c_str(), s_pending_local_version);
+			ImGui::TextWrapped("A local %s named '%s' (v%u) already exists on disk.",
+							   s_pending_override_item.type.c_str(), s_pending_override_item.title.c_str(),
+							   s_pending_local_version);
 			ImGui::Spacing();
 			ImGui::BulletText("Workshop Online Version: v%d", s_pending_override_item.version);
+			ImGui::Spacing();
+			ImGui::TextWrapped("Proceeding will replace your local files with the online version.\n"
+							   "Any local modifications will be overwritten.");
 		}
-		ImGui::Spacing();
-		ImGui::TextWrapped(
-			"Proceeding will replace your local set files with the online version.\n"
-			"Any local modifications made to this set's materials or configuration will be overwritten.");
 		ImGui::Spacing();
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		if (ImGui::Button("Overwrite & Update", ImVec2(160, 30))) {
+		std::string confirm_lbl = s_pending_is_version_load
+									  ? ("Overwrite & Load v" + std::to_string(s_pending_target_version))
+									  : (s_pending_is_update ? "Overwrite & Update" : "Overwrite & Load");
+		if (ImGui::Button(confirm_lbl.c_str(), ImVec2(160, 30))) {
 			if (s_pending_override_confirm) {
 				s_pending_override_confirm();
 			}
+			s_items_activating.erase(s_pending_override_item.id);
 			ImGui::CloseCurrentPopup();
 		}
+
+		if (s_pending_is_switch && s_pending_override_keep_local) {
+			ImGui::SameLine();
+			if (ImGui::Button("Keep Local & Switch", ImVec2(160, 30))) {
+				if (s_pending_override_keep_local) {
+					s_pending_override_keep_local();
+				}
+				s_items_activating.erase(s_pending_override_item.id);
+				ImGui::CloseCurrentPopup();
+			}
+		}
+
 		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(100, 30))) {
+		if (ImGui::Button("Cancel", ImVec2(90, 30))) {
+			s_items_activating.erase(s_pending_override_item.id);
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::EndPopup();

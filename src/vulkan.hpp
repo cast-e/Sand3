@@ -72,9 +72,11 @@ public:
 	static void keep_awake();
 	static bool is_prevent_downclock_enabled() { return prevent_downclocking; }
 	static void set_prevent_downclock(bool enable) { prevent_downclocking = enable; }
+	static bool is_integrated_gpu() { return is_integrated; }
 
 private:
 	static bool initialized;
+	static bool is_integrated;
 	static bool prevent_downclocking;
 	static uint32_t width;
 	static uint32_t height;

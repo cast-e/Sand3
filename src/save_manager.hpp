@@ -19,6 +19,8 @@ struct SaveFileInfo {
 	bool dimensions_differ = false;
 	bool is_online = false;
 	std::string workshop_id;
+	std::string workshop_hash;
+	std::string file_hash;
 	std::string author;
 	uint32_t version = 1;
 	std::string forked_from_id;
@@ -35,6 +37,8 @@ struct StampFileInfo {
 	uint64_t file_size = 0;
 	bool is_online = false;
 	std::string workshop_id;
+	std::string workshop_hash;
+	std::string file_hash;
 	std::string author;
 	uint32_t version = 1;
 	std::string forked_from_id;
@@ -46,6 +50,7 @@ class SaveManager {
 public:
 	SaveManager() = delete;
 
+	static std::string compute_file_hash(const std::string& filepath);
 	static std::string get_saves_directory(const std::string& current_set);
 
 	static void set_save_workshop_info(const std::string& name_or_filename, const std::string& current_set,

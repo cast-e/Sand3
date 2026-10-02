@@ -3,28 +3,28 @@
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 layout(push_constant) uniform PushConstants {
-	uint pass_type;	 
-	uint phase_x;	 
-	uint phase_y;	 
+	uint pass_type;
+	uint phase_x;
+	uint phase_y;
 	uint frame_count;
 	uint sim_width;
 	uint sim_height;
-	uint reverse_x;	 
-	uint reverse_y;	 
+	uint reverse_x;
+	uint reverse_y;
 }
 pc;
 
 struct GpuRuleVariant {
-	uint when_bits[200];  
-	uint then_val[25];	  
-	uint when_wildcard;	  
-	uint pad[6];		  
+	uint when_bits[200];
+	uint then_val[25];
+	uint when_wildcard;
+	uint pad[6];
 };
 
 struct GpuRule {
 	uint variant_start;
 	uint variant_count;
-	uint chance_scaled;	 
+	uint chance_scaled;
 	uint pad;
 };
 
@@ -65,7 +65,6 @@ uint xorshift32(inout uint state) {
 }
 
 bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uint local_changed) {
-	
 	for (uint n_id = 0u; n_id < 25u; ++n_id) {
 		if ((variants[var_idx].when_wildcard & (1u << n_id)) != 0u) {
 			continue;
@@ -86,7 +85,6 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 		}
 	}
 
-	
 	for (uint n_id = 0u; n_id < 25u; ++n_id) {
 		uint then_m = variants[var_idx].then_val[n_id];
 		if (then_m != 255u) {
@@ -104,7 +102,6 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 		}
 	}
 
-	
 	next_cells[center_id] = (next_cells[center_id] & 0xFFu) | (1u << 8u);
 	for (uint n_id = 0u; n_id < 25u; ++n_id) {
 		uint then_m = variants[var_idx].then_val[n_id];
@@ -128,7 +125,6 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 
 void main() {
 	if (pc.pass_type == 1u) {
-		
 		uint cx = gl_GlobalInvocationID.x;
 		uint cy = gl_GlobalInvocationID.y;
 		if (cx >= pc.sim_width || cy >= pc.sim_height) {
@@ -139,18 +135,15 @@ void main() {
 		uint next_val = next_cells[idx];
 		uint mat_id = next_val & 0xFFu;
 
-		
 		current_cells[idx] = mat_id;
 
-		
 		display_pixels[idx] = materials[mat_id].color;
 		return;
 	}
 
 	if (pc.pass_type == 2u) {
-		
 		uint dummy = gl_GlobalInvocationID.x ^ (gl_GlobalInvocationID.y << 16u);
-		for (uint i = 0u; i < 2000u; ++i) {
+		for (uint i = 0u; i < 16u; ++i) {
 			dummy = (dummy * 1664525u + 1013904223u) ^ i;
 		}
 		if (dummy == 0x12345678u) {
@@ -172,7 +165,6 @@ void main() {
 		return;
 	}
 
-	
 	uint kx = gl_GlobalInvocationID.x;
 	uint ky = gl_GlobalInvocationID.y;
 

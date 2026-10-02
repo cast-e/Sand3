@@ -11,10 +11,21 @@
 #include "const.hpp"
 #include "grid.hpp"
 #include "set_manager.hpp"
+#include "sha256.hpp"
 #include "undo_manager.hpp"
 #include "window.hpp"
 #include "workshop_cache.hpp"
 #include "workshop_client.hpp"
+
+std::string SaveManager::compute_file_hash(const std::string& filepath) {
+	std::ifstream in(std::filesystem::path(filepath), std::ios::binary);
+	if (!in.is_open())
+		return "";
+	std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	if (bytes.empty())
+		return "";
+	return sha256(bytes.data(), bytes.size());
+}
 
 void SaveManager::bwt_encode(const uint8_t* in_data, size_t N, std::vector<uint8_t>& out_L, uint16_t& out_primary_id) {
 	if (N == 0) {
@@ -515,6 +526,10 @@ bool SaveManager::inspect_save_file(const std::string& path_or_name, const std::
 				info.workshop_id = v;
 				if (!v.empty())
 					info.is_online = true;
+			} else if (k == "workshop_hash") {
+				info.workshop_hash = v;
+			} else if (k == "file_hash") {
+				info.file_hash = v;
 			} else if (k == "author") {
 				info.author = v;
 			} else if (k == "version") {
@@ -553,6 +568,10 @@ void SaveManager::set_save_workshop_info(const std::string& name_or_filename, co
 		out << "workshop_hash = " << workshop_hash << "\n";
 		out << "author = " << author << "\n";
 		out << "version = " << version << "\n";
+		std::string f_hash = compute_file_hash(filepath);
+		if (!f_hash.empty()) {
+			out << "file_hash = " << f_hash << "\n";
+		}
 	}
 }
 
@@ -588,6 +607,10 @@ void SaveManager::set_stamp_workshop_info(const std::string& name_or_filename, c
 		out << "workshop_hash = " << workshop_hash << "\n";
 		out << "author = " << author << "\n";
 		out << "version = " << version << "\n";
+		std::string f_hash = compute_file_hash(filepath);
+		if (!f_hash.empty()) {
+			out << "file_hash = " << f_hash << "\n";
+		}
 	}
 }
 
@@ -945,6 +968,10 @@ bool SaveManager::inspect_stamp_file(const std::string& path_or_name, const std:
 				info.workshop_id = v;
 				if (!v.empty())
 					info.is_online = true;
+			} else if (k == "workshop_hash") {
+				info.workshop_hash = v;
+			} else if (k == "file_hash") {
+				info.file_hash = v;
 			} else if (k == "author") {
 				info.author = v;
 			} else if (k == "version") {

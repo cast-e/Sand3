@@ -1,4 +1,5 @@
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 #include <fmt/base.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
@@ -79,7 +80,8 @@ int main(int argc, char* argv[]) {
 
 		UI::handle_interaction();
 
-		bool running = (UI::should_update() || UI::should_step());
+		bool is_step = UI::should_step();
+		bool running = (UI::should_update() || is_step);
 		bool desired_vsync = Window::get_vsync();
 		static int active_vsync = -1;
 		if (active_vsync != static_cast<int>(desired_vsync)) {
@@ -90,6 +92,11 @@ int main(int argc, char* argv[]) {
 		if (running) {
 			Grid::update();
 			UI::reset_step();
+			if (is_step) {
+				UI::on_step_completed();
+			} else {
+				UI::reset_stepping_sequence();
+			}
 		} else {
 			Grid::keep_awake_gpu();
 		}

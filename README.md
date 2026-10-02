@@ -63,21 +63,32 @@ cmake -B build --preset linux-gcc
 cmake --build build
 ```
 
-#### Windows cross-compilation using MinGW-w64
+To build as a Debug:
+
+```bash
+cmake -B build --preset linux-gcc-debug
+cmake --build build
+```
+
+#### Cross-compilation using MinGW-w64 (Linux -> Windows)
+
+To build as a Release (default):
 
 ```bash
 cmake -B build --preset windows-mingw
+cmake --build build
+```
+
+To build as a Debug:
+
+```bash
+cmake -B build --preset windows-mingw-debug
 cmake --build build
 ```
 
 ### Windows Building
 
-#### Native compilation using MSYS2 MinGW-w64
-
-```bash
-cmake -B build --preset windows-mingw
-cmake --build build
-```
+Windows building is currently not supported.
 
 ## Running
 
@@ -101,7 +112,7 @@ cd .\bin\w64
 
 ## Dependencies
 
-All dependencies are included as a submodule in the "third-party/" directory.
+All major dependencies are included as a submodule in the "third-party/" directory.
 
 - [fmt](https://github.com/fmtlib/fmt) - Fast formatting library.
 - [nlohmann_json](https://github.com/nlohmann/json) - Modern JSON for C++.
@@ -114,3 +125,4 @@ All dependencies are included as a submodule in the "third-party/" directory.
 ## Credits
 
 - [Roboto](https://fonts.google.com/specimen/Roboto) for the font.
+- [Miniz](https://github.com/richgel999/miniz) for the C .ZIP library.

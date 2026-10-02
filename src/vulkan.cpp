@@ -9,6 +9,7 @@
 #include "resources/simulation_spv.h"
 
 bool Vulkan::initialized = false;
+bool Vulkan::is_integrated = false;
 bool Vulkan::prevent_downclocking = false;
 uint32_t Vulkan::width = 0;
 uint32_t Vulkan::height = 0;
@@ -193,7 +194,9 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 
 	VkPhysicalDeviceProperties selected_props;
 	vkGetPhysicalDeviceProperties(physical_device, &selected_props);
-	fmt::print("Vulkan: Selected GPU: {}\n", selected_props.deviceName);
+	is_integrated = (selected_props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+	fmt::print("Vulkan: Selected GPU: {} (Type: {})\n", selected_props.deviceName,
+			   is_integrated ? "Integrated" : "Discrete/Other");
 
 	float queue_priority = 1.0f;
 	VkDeviceQueueCreateInfo queue_create_info{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
@@ -1004,7 +1007,7 @@ uint32_t Vulkan::get_changed_cells() {
 }
 
 void Vulkan::keep_awake() {
-	if (!initialized) {
+	if (!initialized || is_integrated) {
 		return;
 	}
 
@@ -1025,9 +1028,7 @@ void Vulkan::keep_awake() {
 	pc.sim_height = height;
 	vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
-	uint32_t group_x = (width + 15) / 16;
-	uint32_t group_y = (height + 15) / 16;
-	vkCmdDispatch(command_buffer, group_x, group_y, 1);
+	vkCmdDispatch(command_buffer, 1, 1, 1);
 
 	vkEndCommandBuffer(command_buffer);
 

@@ -239,20 +239,21 @@ void WorkshopItemEditor::render_edit_modal() {
 			std::string meta_str = s_edit_item.meta.dump();
 			int priv_val = s_edit_private ? 1 : 0;
 
-			WorkshopClient::update_item_metadata(item_id, title_str, desc_str, meta_str,
-												 [title_str](bool success, const std::string& err) {
-													 s_edit_saving = false;
-													 if (success) {
-														 ToastManager::success("Updated '" + title_str + "' details!");
-														 s_show_edit_modal = false;
-														 if (s_edit_on_success) {
-															 s_edit_on_success();
-														 }
-													 } else {
-														 s_edit_status = "Failed: " + err;
-													 }
-												 },
-												 priv_val);
+			WorkshopClient::update_item_metadata(
+				item_id, title_str, desc_str, meta_str,
+				[title_str](bool success, const std::string& err) {
+					s_edit_saving = false;
+					if (success) {
+						ToastManager::success("Updated '" + title_str + "' details!");
+						s_show_edit_modal = false;
+						if (s_edit_on_success) {
+							s_edit_on_success();
+						}
+					} else {
+						s_edit_status = "Failed: " + err;
+					}
+				},
+				priv_val);
 		}
 		if (!can_save) {
 			ImGui::EndDisabled();
@@ -316,83 +317,6 @@ void WorkshopItemEditor::render_update_modal() {
 		ImGui::InputTextMultiline("##update_desc", s_update_desc, sizeof(s_update_desc), ImVec2(-1.0f, 60.0f),
 								  ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter, filterNewline);
 
-		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "Source Payload:");
-
-		if (s_update_item.type == "set") {
-			if (s_update_available_sets.empty()) {
-				ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "No local sets found.");
-			} else {
-				std::string preview =
-					(s_update_set_idx >= 0 && s_update_set_idx < static_cast<int>(s_update_available_sets.size()))
-						? s_update_available_sets[s_update_set_idx]
-						: "Select a set";
-				ImGui::SetNextItemWidth(-1);
-				if (ImGui::BeginCombo("##update_set_combo", preview.c_str())) {
-					for (size_t i = 0; i < s_update_available_sets.size(); ++i) {
-						bool is_sel = (static_cast<int>(i) == s_update_set_idx);
-						if (ImGui::Selectable(s_update_available_sets[i].c_str(), is_sel)) {
-							s_update_set_idx = static_cast<int>(i);
-						}
-						if (is_sel) {
-							ImGui::SetItemDefaultFocus();
-						}
-					}
-					ImGui::EndCombo();
-				}
-			}
-			ImGui::Checkbox("Regenerate palette swatch thumbnail", &s_update_update_thumb);
-		} else if (s_update_item.type == "save") {
-			ImGui::RadioButton("Active Sandbox Canvas", &s_update_save_mode, 0);
-			ImGui::SameLine();
-			ImGui::RadioButton("Choose from Local Saves", &s_update_save_mode, 1);
-
-			if (s_update_save_mode == 1) {
-				if (s_update_available_saves.empty()) {
-					ImGui::TextDisabled("No saves found in current set.");
-				} else {
-					std::string preview = (s_update_save_idx >= 0 &&
-										   s_update_save_idx < static_cast<int>(s_update_available_saves.size()))
-											  ? s_update_available_saves[s_update_save_idx]
-											  : "Select save";
-					ImGui::SetNextItemWidth(-1);
-					if (ImGui::BeginCombo("##update_save_combo", preview.c_str())) {
-						for (size_t i = 0; i < s_update_available_saves.size(); ++i) {
-							bool is_sel = (static_cast<int>(i) == s_update_save_idx);
-							if (ImGui::Selectable(s_update_available_saves[i].c_str(), is_sel)) {
-								s_update_save_idx = static_cast<int>(i);
-							}
-						}
-						ImGui::EndCombo();
-					}
-				}
-			}
-			ImGui::Checkbox("Regenerate thumbnail image", &s_update_update_thumb);
-		} else if (s_update_item.type == "stamp") {
-			if (s_update_available_stamps.empty()) {
-				ImGui::TextDisabled("No stamps found in current set.");
-			} else {
-				std::string preview =
-					(s_update_stamp_idx >= 0 && s_update_stamp_idx < static_cast<int>(s_update_available_stamps.size()))
-						? s_update_available_stamps[s_update_stamp_idx]
-						: "Select stamp";
-				ImGui::SetNextItemWidth(-1);
-				if (ImGui::BeginCombo("##update_stamp_combo", preview.c_str())) {
-					for (size_t i = 0; i < s_update_available_stamps.size(); ++i) {
-						bool is_sel = (static_cast<int>(i) == s_update_stamp_idx);
-						if (ImGui::Selectable(s_update_available_stamps[i].c_str(), is_sel)) {
-							s_update_stamp_idx = static_cast<int>(i);
-						}
-					}
-					ImGui::EndCombo();
-				}
-			}
-			ImGui::Checkbox("Regenerate thumbnail image", &s_update_update_thumb);
-		} else if (s_update_item.type == "theme") {
-			ImGui::TextDisabled("Will export current active theme configuration.");
-			ImGui::Checkbox("Regenerate theme preview thumbnail", &s_update_update_thumb);
-		}
-
 		if (!s_update_status.empty()) {
 			ImGui::Spacing();
 			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", s_update_status.c_str());
@@ -445,16 +369,20 @@ void WorkshopItemEditor::render_update_modal() {
 
 					std::string set_dir = std::string(SETS_DIRECTORY) + chosen_set;
 					std::vector<std::pair<std::string, std::vector<uint8_t>>> set_files;
-					for (const auto& entry : std::filesystem::directory_iterator(set_dir)) {
-						if (entry.is_regular_file()) {
-							std::string fname = entry.path().filename().string();
-							std::string ext = entry.path().extension().string();
-							if (ext == ".mat" || fname == "set_config.ini") {
-								std::ifstream in(entry.path().string(), std::ios::binary);
-								if (in.is_open()) {
-									std::vector<uint8_t> fbytes((std::istreambuf_iterator<char>(in)),
-																std::istreambuf_iterator<char>());
-									set_files.emplace_back(fname, fbytes);
+					std::error_code dir_ec;
+					if (std::filesystem::exists(std::filesystem::path(set_dir), dir_ec)) {
+						for (const auto& entry :
+							 std::filesystem::directory_iterator(std::filesystem::path(set_dir), dir_ec)) {
+							if (entry.is_regular_file(dir_ec)) {
+								std::string fname = entry.path().filename().string();
+								std::string ext = entry.path().extension().string();
+								if (ext == ".mat" || fname == "set_config.ini") {
+									std::ifstream in(entry.path(), std::ios::binary);
+									if (in.is_open()) {
+										std::vector<uint8_t> fbytes((std::istreambuf_iterator<char>(in)),
+																	std::istreambuf_iterator<char>());
+										set_files.emplace_back(fname, fbytes);
+									}
 								}
 							}
 						}
@@ -474,12 +402,13 @@ void WorkshopItemEditor::render_update_modal() {
 					std::string cur_s = SetManager::get_current_set();
 					SaveManager::save_to_file("__ws_temp_update", cur_s);
 					std::string fpath = SaveManager::get_saves_directory(cur_s) + "__ws_temp_update.save";
-					std::ifstream fin(fpath, std::ios::binary);
+					std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
 					if (fin.is_open()) {
 						payload_bytes.assign((std::istreambuf_iterator<char>(fin)), std::istreambuf_iterator<char>());
 						fin.close();
 					}
-					std::filesystem::remove(fpath);
+					std::error_code rm_ec;
+					std::filesystem::remove(std::filesystem::path(fpath), rm_ec);
 					if (s_update_update_thumb) {
 						thumb_b64 = UI::generate_thumbnail_base64(0, cur_s, "");
 					}
@@ -491,7 +420,7 @@ void WorkshopItemEditor::render_update_modal() {
 						std::string fname = s_update_available_saves[s_update_save_idx];
 						std::string fpath =
 							std::string(SETS_DIRECTORY) + SetManager::get_current_set() + "/saves/" + fname;
-						std::ifstream in(fpath, std::ios::binary);
+						std::ifstream in(std::filesystem::path(fpath), std::ios::binary);
 						if (in.is_open()) {
 							payload_bytes.assign((std::istreambuf_iterator<char>(in)),
 												 std::istreambuf_iterator<char>());
@@ -507,7 +436,7 @@ void WorkshopItemEditor::render_update_modal() {
 					s_update_stamp_idx < static_cast<int>(s_update_available_stamps.size())) {
 					std::string fname = s_update_available_stamps[s_update_stamp_idx];
 					std::string fpath = SaveManager::get_saves_directory(SetManager::get_current_set()) + fname;
-					std::ifstream in(fpath, std::ios::binary);
+					std::ifstream in(std::filesystem::path(fpath), std::ios::binary);
 					if (in.is_open()) {
 						payload_bytes.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 					}
@@ -612,7 +541,8 @@ void WorkshopItemEditor::render_delete_modal() {
 		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.6f, 0.15f, 0.15f, 1.0f));
 
-		if (s_delete_saving) {
+		bool can_delete = !s_delete_saving;
+		if (!can_delete) {
 			ImGui::BeginDisabled();
 		}
 		if (ImGui::Button(s_delete_saving ? "Deleting..." : "Delete Permanently", ImVec2(150, 26))) {
@@ -656,7 +586,7 @@ void WorkshopItemEditor::render_delete_modal() {
 				}
 			});
 		}
-		if (s_delete_saving) {
+		if (!can_delete) {
 			ImGui::EndDisabled();
 		}
 

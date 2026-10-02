@@ -53,10 +53,14 @@ public:
 	static void handle_interaction();
 
 	static void trigger_exit() { show_exit_popup = true; }
+	static bool has_unsaved_changes() { return unsaved_changes; }
 	static bool should_update() { return update; }
 	static void pause_simulation() { update = false; }
 	static bool should_step() { return step_frame; }
 	static void reset_step() { step_frame = false; }
+	static void on_step_completed();
+	static void reset_stepping_sequence() { stepping_sequence_active = false; }
+	static bool is_stepping_sequence_active() { return stepping_sequence_active; }
 
 	static const ImVec4* get_default_colors();
 	static void reset_theme_colors();
@@ -160,6 +164,7 @@ private:
 
 	static bool update;
 	static bool step_frame;
+	static bool stepping_sequence_active;
 
 	static bool show_exit_popup;
 
