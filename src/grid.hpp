@@ -69,11 +69,18 @@ public:
 	static bool get_gpu_needs_upload() { return gpu_needs_upload; }
 	static void set_gpu_needs_upload(bool val) { gpu_needs_upload = val; }
 
+	static void set_max_rule_radius(int rx, int ry) {
+		max_rule_radius_x = std::max(1, rx);
+		max_rule_radius_y = std::max(1, ry);
+	}
+	static int get_max_rule_radius_x() { return max_rule_radius_x; }
+	static int get_max_rule_radius_y() { return max_rule_radius_y; }
+
 private:
 	static uint32_t width;
 	static uint32_t height;
-	static std::array<int, NEIGHBOR_COUNT> neighbor_offsets;
-	static void recompute_neighbor_offsets();
+	static int max_rule_radius_x;
+	static int max_rule_radius_y;
 
 	static ProcessingMode processing_mode;
 	static std::vector<Cell> cells;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "grid.hpp"
 #include "material_manager.hpp"
 #include "resources/simulation_spv.h"
 
@@ -596,6 +597,8 @@ void Vulkan::update_rules() {
 
 	uint32_t current_rule_idx = 0;
 	uint32_t current_var_idx = 0;
+	uint32_t current_cond_idx = 0;
+	uint32_t current_act_idx = 0;
 
 	for (uint32_t mat_id = 0; mat_id < 256; ++mat_id) {
 		const auto& rm = MaterialManager::get_runtime_material(static_cast<uint8_t>(mat_id));
@@ -619,29 +622,51 @@ void Vulkan::update_rules() {
 				}
 
 				GpuRuleVariant& gpu_v = rules_mapped->variants[current_var_idx++];
-				uint32_t wildcard_mask = 0;
-				for (uint32_t n = 0; n < 25; ++n) {
-					if (v.when[n].all()) {
-						wildcard_mask |= (1u << n);
+				gpu_v.cond_start = current_cond_idx;
+				gpu_v.cond_count = 0;
+				gpu_v.act_start = current_act_idx;
+				gpu_v.act_count = 0;
+
+				for (const auto& cond : v.conditions) {
+					if (current_cond_idx >= 32768) {
+						break;
 					}
+					GpuCondition& gpu_c = rules_mapped->conditions[current_cond_idx++];
+					gpu_c.dx = cond.dx;
+					gpu_c.dy = cond.dy;
 					for (uint32_t w = 0; w < 8; ++w) {
 						uint32_t word = 0;
 						for (uint32_t b = 0; b < 32; ++b) {
-							if (v.when[n].test(w * 32 + b)) {
+							if (cond.allowed.test(w * 32 + b)) {
 								word |= (1u << b);
 							}
 						}
-						gpu_v.when_bits[n * 8 + w] = word;
+						gpu_c.allowed_mask[w] = word;
 					}
-					gpu_v.then_val[n] = v.then[n];
+					gpu_c.pad[0] = 0;
+					gpu_c.pad[1] = 0;
+					gpu_v.cond_count++;
 				}
-				gpu_v.when_wildcard = wildcard_mask;
+
+				for (const auto& act : v.actions) {
+					if (current_act_idx >= 16384) {
+						break;
+					}
+					GpuAction& gpu_a = rules_mapped->actions[current_act_idx++];
+					gpu_a.dx = act.dx;
+					gpu_a.dy = act.dy;
+					gpu_a.target_material = act.target_material;
+					gpu_a.pad = 0;
+					gpu_v.act_count++;
+				}
 			}
 		}
 	}
 
 	rules_mapped->total_rules = current_rule_idx;
 	rules_mapped->total_variants = current_var_idx;
+	rules_mapped->total_conditions = current_cond_idx;
+	rules_mapped->total_actions = current_act_idx;
 }
 
 void Vulkan::step(uint32_t frame_count, bool upload_pending) {
@@ -696,6 +721,11 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 	const bool reverse_x = (frame_count % 2 == 0);
 	const bool reverse_y = (frame_count % 2 == 1);
 
+	uint32_t rx = std::max(1, Grid::get_max_rule_radius_x());
+	uint32_t ry = std::max(1, Grid::get_max_rule_radius_y());
+	uint32_t step_x = 2 * rx + 1;
+	uint32_t step_y = 2 * ry + 1;
+
 	GpuPushConstants pc{};
 	pc.pass_type = 0;
 	pc.frame_count = frame_count;
@@ -703,23 +733,28 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 	pc.sim_height = height;
 	pc.reverse_x = reverse_x ? 1 : 0;
 	pc.reverse_y = reverse_y ? 1 : 0;
+	pc.step_x = step_x;
+	pc.step_y = step_y;
 
 	VkMemoryBarrier phase_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
 	phase_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
 	phase_barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
 
-	for (uint32_t py_step = 0; py_step < 5; ++py_step) {
-		uint32_t py = reverse_y ? (4 - py_step) : py_step;
-		for (uint32_t px_step = 0; px_step < 5; ++px_step) {
-			uint32_t px = reverse_x ? (4 - px_step) : px_step;
+	for (uint32_t py_step = 0; py_step < step_y; ++py_step) {
+		uint32_t py = reverse_y ? (step_y - 1 - py_step) : py_step;
+		for (uint32_t px_step = 0; px_step < step_x; ++px_step) {
+			uint32_t px = reverse_x ? (step_x - 1 - px_step) : px_step;
 
 			pc.phase_x = px;
 			pc.phase_y = py;
 
+			uint32_t count_x = (width + step_x - 1 - px) / step_x;
+			uint32_t count_y = (height + step_y - 1 - py) / step_y;
+			if (count_x == 0 || count_y == 0)
+				continue;
+
 			vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
-			uint32_t count_x = (width + 4 - px) / 5;
-			uint32_t count_y = (height + 4 - py) / 5;
 			uint32_t group_x = (count_x + 15) / 16;
 			uint32_t group_y = (count_y + 15) / 16;
 

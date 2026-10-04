@@ -52,6 +52,259 @@ bool MaterialManager::is_valid_name(std::string_view name) {
 	return true;
 }
 
+void RuleDefinition::expand_top() {
+	int old_w = width();
+	int old_h = height();
+	min_dy--;
+	int new_h = height();
+	std::vector<std::vector<uint8_t>> new_when(old_w * new_h);
+	std::vector<uint8_t> new_then(old_w * new_h, 255);
+	for (int y = 0; y < old_h; ++y) {
+		for (int x = 0; x < old_w; ++x) {
+			new_when[(y + 1) * old_w + x] = std::move(when[y * old_w + x]);
+			new_then[(y + 1) * old_w + x] = then[y * old_w + x];
+		}
+	}
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::shrink_top() {
+	if (min_dy >= 0 || height() <= 1)
+		return;
+	int old_w = width();
+	min_dy++;
+	int new_h = height();
+	std::vector<std::vector<uint8_t>> new_when(old_w * new_h);
+	std::vector<uint8_t> new_then(old_w * new_h, 255);
+	for (int y = 0; y < new_h; ++y) {
+		for (int x = 0; x < old_w; ++x) {
+			new_when[y * old_w + x] = std::move(when[(y + 1) * old_w + x]);
+			new_then[y * old_w + x] = then[(y + 1) * old_w + x];
+		}
+	}
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::expand_bottom() {
+	int old_w = width();
+	max_dy++;
+	int new_h = height();
+	when.resize(old_w * new_h);
+	then.resize(old_w * new_h, 255);
+}
+
+void RuleDefinition::shrink_bottom() {
+	if (max_dy <= 0 || height() <= 1)
+		return;
+	int old_w = width();
+	max_dy--;
+	int new_h = height();
+	when.resize(old_w * new_h);
+	then.resize(old_w * new_h, 255);
+}
+
+void RuleDefinition::expand_left() {
+	int old_w = width();
+	int old_h = height();
+	min_dx--;
+	int new_w = width();
+	std::vector<std::vector<uint8_t>> new_when(new_w * old_h);
+	std::vector<uint8_t> new_then(new_w * old_h, 255);
+	for (int y = 0; y < old_h; ++y) {
+		for (int x = 0; x < old_w; ++x) {
+			new_when[y * new_w + (x + 1)] = std::move(when[y * old_w + x]);
+			new_then[y * new_w + (x + 1)] = then[y * old_w + x];
+		}
+	}
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::shrink_left() {
+	if (min_dx >= 0 || width() <= 1)
+		return;
+	int old_w = width();
+	int old_h = height();
+	min_dx++;
+	int new_w = width();
+	std::vector<std::vector<uint8_t>> new_when(new_w * old_h);
+	std::vector<uint8_t> new_then(new_w * old_h, 255);
+	for (int y = 0; y < old_h; ++y) {
+		for (int x = 0; x < new_w; ++x) {
+			new_when[y * new_w + x] = std::move(when[y * old_w + (x + 1)]);
+			new_then[y * new_w + x] = then[y * old_w + (x + 1)];
+		}
+	}
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::expand_right() {
+	int old_w = width();
+	int old_h = height();
+	max_dx++;
+	int new_w = width();
+	std::vector<std::vector<uint8_t>> new_when(new_w * old_h);
+	std::vector<uint8_t> new_then(new_w * old_h, 255);
+	for (int y = 0; y < old_h; ++y) {
+		for (int x = 0; x < old_w; ++x) {
+			new_when[y * new_w + x] = std::move(when[y * old_w + x]);
+			new_then[y * new_w + x] = then[y * old_w + x];
+		}
+	}
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::shrink_right() {
+	if (max_dx <= 0 || width() <= 1)
+		return;
+	int old_w = width();
+	int old_h = height();
+	max_dx--;
+	int new_w = width();
+	std::vector<std::vector<uint8_t>> new_when(new_w * old_h);
+	std::vector<uint8_t> new_then(new_w * old_h, 255);
+	for (int y = 0; y < old_h; ++y) {
+		for (int x = 0; x < new_w; ++x) {
+			new_when[y * new_w + x] = std::move(when[y * old_w + x]);
+			new_then[y * new_w + x] = then[y * old_w + x];
+		}
+	}
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::flip_x() {
+	int new_min_dx = -max_dx;
+	int new_max_dx = -min_dx;
+	int new_w = new_max_dx - new_min_dx + 1;
+	int new_h = height();
+	std::vector<std::vector<uint8_t>> new_when(new_w * new_h);
+	std::vector<uint8_t> new_then(new_w * new_h, 255);
+
+	for (int dy = min_dy; dy <= max_dy; ++dy) {
+		for (int dx = min_dx; dx <= max_dx; ++dx) {
+			int old_idx = get_cell_idx(dx, dy);
+			int new_dx = -dx;
+			int new_dy = dy;
+			int new_idx = (new_dy - min_dy) * new_w + (new_dx - new_min_dx);
+			new_when[new_idx] = std::move(when[old_idx]);
+			new_then[new_idx] = then[old_idx];
+		}
+	}
+	min_dx = new_min_dx;
+	max_dx = new_max_dx;
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::flip_y() {
+	int new_min_dy = -max_dy;
+	int new_max_dy = -min_dy;
+	int new_w = width();
+	int new_h = new_max_dy - new_min_dy + 1;
+	std::vector<std::vector<uint8_t>> new_when(new_w * new_h);
+	std::vector<uint8_t> new_then(new_w * new_h, 255);
+
+	for (int dy = min_dy; dy <= max_dy; ++dy) {
+		for (int dx = min_dx; dx <= max_dx; ++dx) {
+			int old_idx = get_cell_idx(dx, dy);
+			int new_dx = dx;
+			int new_dy = -dy;
+			int new_idx = (new_dy - new_min_dy) * new_w + (new_dx - min_dx);
+			new_when[new_idx] = std::move(when[old_idx]);
+			new_then[new_idx] = then[old_idx];
+		}
+	}
+	min_dy = new_min_dy;
+	max_dy = new_max_dy;
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::rotate_cw() {
+	int new_min_dx = -max_dy;
+	int new_max_dx = -min_dy;
+	int new_min_dy = min_dx;
+	int new_max_dy = max_dx;
+	int new_w = new_max_dx - new_min_dx + 1;
+	int new_h = new_max_dy - new_min_dy + 1;
+	std::vector<std::vector<uint8_t>> new_when(new_w * new_h);
+	std::vector<uint8_t> new_then(new_w * new_h, 255);
+
+	for (int dy = min_dy; dy <= max_dy; ++dy) {
+		for (int dx = min_dx; dx <= max_dx; ++dx) {
+			int old_idx = get_cell_idx(dx, dy);
+			int new_dx = -dy;
+			int new_dy = dx;
+			int new_idx = (new_dy - new_min_dy) * new_w + (new_dx - new_min_dx);
+			new_when[new_idx] = std::move(when[old_idx]);
+			new_then[new_idx] = then[old_idx];
+		}
+	}
+	min_dx = new_min_dx;
+	max_dx = new_max_dx;
+	min_dy = new_min_dy;
+	max_dy = new_max_dy;
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::rotate_ccw() {
+	int new_min_dx = min_dy;
+	int new_max_dx = max_dy;
+	int new_min_dy = -max_dx;
+	int new_max_dy = -min_dx;
+	int new_w = new_max_dx - new_min_dx + 1;
+	int new_h = new_max_dy - new_min_dy + 1;
+	std::vector<std::vector<uint8_t>> new_when(new_w * new_h);
+	std::vector<uint8_t> new_then(new_w * new_h, 255);
+
+	for (int dy = min_dy; dy <= max_dy; ++dy) {
+		for (int dx = min_dx; dx <= max_dx; ++dx) {
+			int old_idx = get_cell_idx(dx, dy);
+			int new_dx = dy;
+			int new_dy = -dx;
+			int new_idx = (new_dy - new_min_dy) * new_w + (new_dx - new_min_dx);
+			new_when[new_idx] = std::move(when[old_idx]);
+			new_then[new_idx] = then[old_idx];
+		}
+	}
+	min_dx = new_min_dx;
+	max_dx = new_max_dx;
+	min_dy = new_min_dy;
+	max_dy = new_max_dy;
+	when = std::move(new_when);
+	then = std::move(new_then);
+}
+
+void RuleDefinition::reset_to_3x3(uint8_t center_id) {
+	std::vector<std::vector<uint8_t>> new_when(9, std::vector<uint8_t>{});
+	std::vector<uint8_t> new_then(9, 255);
+	for (int dy = -1; dy <= 1; ++dy) {
+		for (int dx = -1; dx <= 1; ++dx) {
+			int old_idx = get_cell_idx(dx, dy);
+			int new_idx = (dy + 1) * 3 + (dx + 1);
+			if (old_idx >= 0 && old_idx < static_cast<int>(when.size())) {
+				new_when[new_idx] = std::move(when[old_idx]);
+				new_then[new_idx] = then[old_idx];
+			}
+		}
+	}
+	min_dx = -1;
+	max_dx = 1;
+	min_dy = -1;
+	max_dy = 1;
+	when = std::move(new_when);
+	then = std::move(new_then);
+	if (when[4].empty()) {
+		when[4] = {center_id};
+	}
+}
+
 void MaterialDefinition::sync_rule_order() {
 	std::vector<RuleReference> valid_refs;
 
@@ -109,8 +362,7 @@ void MaterialDefinition::sync_rule_order() {
 RuleDefinition MaterialDefinition::get_effective_rule(size_t order_idx) const {
 	if (order_idx >= rule_order.size()) {
 		RuleDefinition dummy;
-		dummy.when[12] = {id};
-		dummy.then.fill(255);
+		dummy.init_default(id);
 		return dummy;
 	}
 
@@ -120,20 +372,25 @@ RuleDefinition MaterialDefinition::get_effective_rule(size_t order_idx) const {
 		if (parent.id == inherits_from && reference.index < parent.rules.size()) {
 			RuleDefinition r = parent.rules[reference.index];
 			MaterialManager::replace_self_references(r, parent.id, id);
-			r.when[12] = {id};
+			int c_idx = r.get_center_idx();
+			if (c_idx >= 0 && c_idx < static_cast<int>(r.when.size())) {
+				r.when[c_idx] = {id};
+			}
 			return r;
 		}
 	} else if (!reference.is_inherited) {
 		if (reference.index < rules.size()) {
 			RuleDefinition r = rules[reference.index];
-			r.when[12] = {id};
+			int c_idx = r.get_center_idx();
+			if (c_idx >= 0 && c_idx < static_cast<int>(r.when.size())) {
+				r.when[c_idx] = {id};
+			}
 			return r;
 		}
 	}
 
 	RuleDefinition dummy;
-	dummy.when[12] = {id};
-	dummy.then.fill(255);
+	dummy.init_default(id);
 	return dummy;
 }
 
@@ -185,16 +442,64 @@ static MaterialDefinition parse_material_from_json(const nlohmann::ordered_json&
 				mat.rule_order.push_back({true, parent_idx});
 			} else {
 				RuleDefinition r;
-				const auto& when_arr = r_j["when"];
-				for (uint32_t i = 0; i < NEIGHBOR_COUNT; ++i) {
-					r.when[i] = when_arr[i].get<std::vector<uint8_t>>();
+				int8_t min_dx = -1, max_dx = 1, min_dy = -1, max_dy = 1;
+				if (r_j.contains("bounds") && r_j["bounds"].is_array() && r_j["bounds"].size() >= 4) {
+					min_dx = r_j["bounds"][0].get<int8_t>();
+					max_dx = r_j["bounds"][1].get<int8_t>();
+					min_dy = r_j["bounds"][2].get<int8_t>();
+					max_dy = r_j["bounds"][3].get<int8_t>();
+				} else if (r_j.contains("when") && r_j["when"].is_array() && r_j["when"].size() == 25) {
+					min_dx = -2;
+					max_dx = 2;
+					min_dy = -2;
+					max_dy = 2;
 				}
 
-				r.then.fill(255);
-				if (r_j.contains("then")) {
+				r.min_dx = min_dx;
+				r.max_dx = max_dx;
+				r.min_dy = min_dy;
+				r.max_dy = max_dy;
+				int total = r.total_cells();
+				r.when.assign(total, std::vector<uint8_t>{});
+				r.then.assign(total, 255);
+
+				if (r_j.contains("when") && r_j["when"].is_array()) {
+					const auto& when_arr = r_j["when"];
+					if (when_arr.size() == 25 && total != 25) {
+						for (int dy = min_dy; dy <= max_dy; ++dy) {
+							for (int dx = min_dx; dx <= max_dx; ++dx) {
+								if (dx >= -2 && dx <= 2 && dy >= -2 && dy <= 2) {
+									int old_idx = (dy + 2) * 5 + (dx + 2);
+									int new_idx = r.get_cell_idx(dx, dy);
+									r.when[new_idx] = when_arr[old_idx].get<std::vector<uint8_t>>();
+								}
+							}
+						}
+					} else {
+						size_t count = std::min(when_arr.size(), static_cast<size_t>(total));
+						for (size_t i = 0; i < count; ++i) {
+							r.when[i] = when_arr[i].get<std::vector<uint8_t>>();
+						}
+					}
+				}
+
+				if (r_j.contains("then") && r_j["then"].is_array()) {
 					const auto& then_arr = r_j["then"];
-					for (uint32_t i = 0; i < NEIGHBOR_COUNT; ++i) {
-						r.then[i] = then_arr[i].get<uint8_t>();
+					if (then_arr.size() == 25 && total != 25) {
+						for (int dy = min_dy; dy <= max_dy; ++dy) {
+							for (int dx = min_dx; dx <= max_dx; ++dx) {
+								if (dx >= -2 && dx <= 2 && dy >= -2 && dy <= 2) {
+									int old_idx = (dy + 2) * 5 + (dx + 2);
+									int new_idx = r.get_cell_idx(dx, dy);
+									r.then[new_idx] = then_arr[old_idx].get<uint8_t>();
+								}
+							}
+						}
+					} else {
+						size_t count = std::min(then_arr.size(), static_cast<size_t>(total));
+						for (size_t i = 0; i < count; ++i) {
+							r.then[i] = then_arr[i].get<uint8_t>();
+						}
 					}
 				}
 
@@ -202,7 +507,10 @@ static MaterialDefinition parse_material_from_json(const nlohmann::ordered_json&
 				r.symmetry.flip_y = r_j.contains("sym_y") && r_j["sym_y"].get<bool>();
 				r.symmetry.rotate = r_j.contains("sym_rot") && r_j["sym_rot"].get<bool>();
 				r.chance = r_j.contains("chance") ? r_j["chance"].get<float>() : 100.0f;
-				r.when[12] = {mat.id};
+				int c_idx = r.get_center_idx();
+				if (c_idx >= 0 && c_idx < static_cast<int>(r.when.size())) {
+					r.when[c_idx] = {mat.id};
+				}
 
 				mat.rules.push_back(r);
 				mat.rule_order.push_back({false, mat.rules.size() - 1});
@@ -258,7 +566,10 @@ void MaterialManager::load_all_materials(std::string_view directory_path) {
 		}
 		id_taken[mat.id] = true;
 		for (auto& r : mat.rules) {
-			r.when[12] = {mat.id};
+			int c_idx = r.get_center_idx();
+			if (c_idx >= 0 && c_idx < static_cast<int>(r.when.size())) {
+				r.when[c_idx] = {mat.id};
+			}
 		}
 
 		materials.push_back(mat);
@@ -316,13 +627,13 @@ void MaterialManager::save_all_materials(std::string_view directory_path) {
 					const auto& rule = mat.rules[reference.index];
 					nlohmann::ordered_json r;
 					auto when_copy = rule.when;
-					when_copy[12].clear();
-					nlohmann::ordered_json when_json = nlohmann::ordered_json::array();
-					for (uint32_t i = 0; i < NEIGHBOR_COUNT; ++i) {
-						when_json.push_back(when_copy[i]);
+					int c_idx = rule.get_center_idx();
+					if (c_idx >= 0 && c_idx < static_cast<int>(when_copy.size())) {
+						when_copy[c_idx].clear();
 					}
-					r["when"] = when_json;
+					r["when"] = when_copy;
 					r["then"] = rule.then;
+					r["bounds"] = {rule.min_dx, rule.max_dx, rule.min_dy, rule.max_dy};
 					if (rule.symmetry.flip_x)
 						r["sym_x"] = rule.symmetry.flip_x;
 					if (rule.symmetry.flip_y)
@@ -351,7 +662,10 @@ uint8_t MaterialManager::add_material(const MaterialDefinition& mat) {
 	m.id = get_unused_id();
 	replace_self_references_in_material(m, old_id, m.id);
 	for (auto& r : m.rules) {
-		r.when[12] = {m.id};
+		int c_idx = r.get_center_idx();
+		if (c_idx >= 0 && c_idx < static_cast<int>(r.when.size())) {
+			r.when[c_idx] = {m.id};
+		}
 	}
 	materials.push_back(m);
 	rebuild_compiled_rules();
@@ -483,73 +797,63 @@ void MaterialManager::rebuild_compiled_rules() {
 
 	runtime_materials.fill(default_runtime_empty);
 
+	int max_rx = 1;
+	int max_ry = 1;
+	const int gw = Grid::get_width();
+
+	auto transform_variant = [gw](const CompiledRuleVariant& src, auto coord_func) {
+		CompiledRuleVariant dst;
+		dst.min_dx = 0;
+		dst.max_dx = 0;
+		dst.min_dy = 0;
+		dst.max_dy = 0;
+		for (const auto& cond : src.conditions) {
+			auto [ndx, ndy] = coord_func(cond.dx, cond.dy);
+			dst.min_dx = std::min(dst.min_dx, static_cast<int8_t>(ndx));
+			dst.max_dx = std::max(dst.max_dx, static_cast<int8_t>(ndx));
+			dst.min_dy = std::min(dst.min_dy, static_cast<int8_t>(ndy));
+			dst.max_dy = std::max(dst.max_dy, static_cast<int8_t>(ndy));
+			dst.conditions.push_back(
+				{ndy * gw + ndx, static_cast<int8_t>(ndx), static_cast<int8_t>(ndy), cond.allowed});
+		}
+		for (const auto& act : src.actions) {
+			auto [ndx, ndy] = coord_func(act.dx, act.dy);
+			dst.min_dx = std::min(dst.min_dx, static_cast<int8_t>(ndx));
+			dst.max_dx = std::max(dst.max_dx, static_cast<int8_t>(ndx));
+			dst.min_dy = std::min(dst.min_dy, static_cast<int8_t>(ndy));
+			dst.max_dy = std::max(dst.max_dy, static_cast<int8_t>(ndy));
+			dst.actions.push_back(
+				{ndy * gw + ndx, static_cast<int8_t>(ndx), static_cast<int8_t>(ndy), act.target_material});
+		}
+		std::sort(dst.conditions.begin(), dst.conditions.end(), [](const ConditionCheck& a, const ConditionCheck& b) {
+			return std::tie(a.dy, a.dx) < std::tie(b.dy, b.dx);
+		});
+		std::sort(dst.actions.begin(), dst.actions.end(), [](const OutputAction& a, const OutputAction& b) {
+			return std::tie(a.dy, a.dx) < std::tie(b.dy, b.dx);
+		});
+		return dst;
+	};
+
+	auto are_variants_equal = [](const CompiledRuleVariant& a, const CompiledRuleVariant& b) {
+		if (a.conditions.size() != b.conditions.size() || a.actions.size() != b.actions.size())
+			return false;
+		for (size_t i = 0; i < a.conditions.size(); ++i) {
+			if (a.conditions[i].dx != b.conditions[i].dx || a.conditions[i].dy != b.conditions[i].dy ||
+				a.conditions[i].allowed != b.conditions[i].allowed)
+				return false;
+		}
+		for (size_t i = 0; i < a.actions.size(); ++i) {
+			if (a.actions[i].dx != b.actions[i].dx || a.actions[i].dy != b.actions[i].dy ||
+				a.actions[i].target_material != b.actions[i].target_material)
+				return false;
+		}
+		return true;
+	};
+
 	for (const auto& m : materials) {
 		RuntimeMaterial rm;
 		rm.id = m.id;
 		rm.packed_color = pack_color(m.color);
-
-		using WhenArray = std::array<std::bitset<256>, NEIGHBOR_COUNT>;
-		using ThenArray = std::array<uint8_t, NEIGHBOR_COUNT>;
-
-		auto flip_x_when = [](const WhenArray& arr) {
-			WhenArray result{};
-			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
-				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
-					result[y * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - x - 1)] = arr[y * NEIGHBOR_SIZE + x];
-				}
-			}
-			return result;
-		};
-
-		auto flip_x_then = [](const ThenArray& arr) {
-			ThenArray result{};
-			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
-				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
-					result[y * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - x - 1)] = arr[y * NEIGHBOR_SIZE + x];
-				}
-			}
-			return result;
-		};
-
-		auto flip_y_when = [](const WhenArray& arr) {
-			WhenArray result{};
-			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
-				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
-					result[(NEIGHBOR_SIZE - y - 1) * NEIGHBOR_SIZE + x] = arr[y * NEIGHBOR_SIZE + x];
-				}
-			}
-			return result;
-		};
-
-		auto flip_y_then = [](const ThenArray& arr) {
-			ThenArray result{};
-			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
-				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
-					result[(NEIGHBOR_SIZE - y - 1) * NEIGHBOR_SIZE + x] = arr[y * NEIGHBOR_SIZE + x];
-				}
-			}
-			return result;
-		};
-
-		auto rotate_90_when = [](const WhenArray& arr) {
-			WhenArray result{};
-			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
-				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
-					result[x * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - y - 1)] = arr[y * NEIGHBOR_SIZE + x];
-				}
-			}
-			return result;
-		};
-
-		auto rotate_90_then = [](const ThenArray& arr) {
-			ThenArray result{};
-			for (uint8_t x = 0; x < NEIGHBOR_SIZE; x++) {
-				for (uint8_t y = 0; y < NEIGHBOR_SIZE; y++) {
-					result[x * NEIGHBOR_SIZE + (NEIGHBOR_SIZE - y - 1)] = arr[y * NEIGHBOR_SIZE + x];
-				}
-			}
-			return result;
-		};
 
 		for (size_t r_idx = 0; r_idx < m.rule_order.size(); ++r_idx) {
 			RuleDefinition ur = m.get_effective_rule(r_idx);
@@ -557,24 +861,63 @@ void MaterialManager::rebuild_compiled_rules() {
 			cur.chance = ur.chance;
 
 			CompiledRuleVariant base_rule;
-			for (uint8_t i = 0; i < NEIGHBOR_COUNT; ++i) {
-				if (ur.when[i].empty()) {
-					base_rule.when[i].set();
-				} else {
-					base_rule.when[i].reset();
-					for (uint8_t id : ur.when[i]) {
-						base_rule.when[i].set(id);
+			base_rule.min_dx = ur.min_dx;
+			base_rule.max_dx = ur.max_dx;
+			base_rule.min_dy = ur.min_dy;
+			base_rule.max_dy = ur.max_dy;
+
+			for (int dy = ur.min_dy; dy <= ur.max_dy; ++dy) {
+				for (int dx = ur.min_dx; dx <= ur.max_dx; ++dx) {
+					int idx = ur.get_cell_idx(dx, dy);
+					if (idx < 0 || idx >= static_cast<int>(ur.when.size()))
+						continue;
+					const auto& w_list = ur.when[idx];
+					uint8_t then_val = (idx < static_cast<int>(ur.then.size())) ? ur.then[idx] : 255;
+
+					if (dx == 0 && dy == 0) {
+						if (then_val != 255) {
+							base_rule.actions.push_back({0, 0, 0, then_val});
+						}
+						continue;
+					}
+
+					if (!w_list.empty()) {
+						ConditionCheck cond;
+						cond.offset = dy * gw + dx;
+						cond.dx = static_cast<int8_t>(dx);
+						cond.dy = static_cast<int8_t>(dy);
+						cond.allowed.reset();
+						for (uint8_t wid : w_list) {
+							cond.allowed.set(wid);
+						}
+						base_rule.conditions.push_back(cond);
+					}
+
+					if (then_val != 255) {
+						OutputAction act;
+						act.offset = dy * gw + dx;
+						act.dx = static_cast<int8_t>(dx);
+						act.dy = static_cast<int8_t>(dy);
+						act.target_material = then_val;
+						base_rule.actions.push_back(act);
 					}
 				}
-				base_rule.then[i] = ur.then[i];
 			}
-			base_rule.when[12].set();
+
+			std::sort(base_rule.conditions.begin(), base_rule.conditions.end(),
+					  [](const ConditionCheck& a, const ConditionCheck& b) {
+						  return std::tie(a.dy, a.dx) < std::tie(b.dy, b.dx);
+					  });
+			std::sort(base_rule.actions.begin(), base_rule.actions.end(),
+					  [](const OutputAction& a, const OutputAction& b) {
+						  return std::tie(a.dy, a.dx) < std::tie(b.dy, b.dx);
+					  });
 
 			cur.variants.push_back(base_rule);
 
-			auto add_unique_variant = [&cur](const CompiledRuleVariant& candidate) {
+			auto add_unique_variant = [&cur, &are_variants_equal](const CompiledRuleVariant& candidate) {
 				for (const auto& existing : cur.variants) {
-					if (existing.when == candidate.when && existing.then == candidate.then) {
+					if (are_variants_equal(existing, candidate)) {
 						return;
 					}
 				}
@@ -582,46 +925,35 @@ void MaterialManager::rebuild_compiled_rules() {
 			};
 
 			if (ur.symmetry.rotate) {
-				CompiledRuleVariant r_90;
-				r_90.when = rotate_90_when(base_rule.when);
-				r_90.then = rotate_90_then(base_rule.then);
+				CompiledRuleVariant r_90 =
+					transform_variant(base_rule, [](int dx, int dy) { return std::pair(-dy, dx); });
 				add_unique_variant(r_90);
 
-				CompiledRuleVariant r_180;
-				r_180.when = rotate_90_when(r_90.when);
-				r_180.then = rotate_90_then(r_90.then);
+				CompiledRuleVariant r_180 = transform_variant(r_90, [](int dx, int dy) { return std::pair(-dy, dx); });
 				add_unique_variant(r_180);
 
-				CompiledRuleVariant r_270;
-				r_270.when = rotate_90_when(r_180.when);
-				r_270.then = rotate_90_then(r_180.then);
+				CompiledRuleVariant r_270 = transform_variant(r_180, [](int dx, int dy) { return std::pair(-dy, dx); });
 				add_unique_variant(r_270);
 			}
 
 			if (ur.symmetry.flip_x || ur.symmetry.flip_y) {
-				size_t current_variants_count = cur.variants.size();
-				for (size_t i = 0; i < current_variants_count; ++i) {
-					CompiledRuleVariant source = cur.variants[i];
-
+				std::vector<CompiledRuleVariant> current_variants = cur.variants;
+				for (const auto& src : current_variants) {
 					if (ur.symmetry.flip_x) {
-						CompiledRuleVariant r_x;
-						r_x.when = flip_x_when(source.when);
-						r_x.then = flip_x_then(source.then);
-						add_unique_variant(r_x);
+						add_unique_variant(transform_variant(src, [](int dx, int dy) { return std::pair(-dx, dy); }));
 					}
 					if (ur.symmetry.flip_y) {
-						CompiledRuleVariant r_y;
-						r_y.when = flip_y_when(source.when);
-						r_y.then = flip_y_then(source.then);
-						add_unique_variant(r_y);
+						add_unique_variant(transform_variant(src, [](int dx, int dy) { return std::pair(dx, -dy); }));
 					}
 					if (ur.symmetry.flip_x && ur.symmetry.flip_y) {
-						CompiledRuleVariant r_xy;
-						r_xy.when = flip_y_when(flip_x_when(source.when));
-						r_xy.then = flip_y_then(flip_x_then(source.then));
-						add_unique_variant(r_xy);
+						add_unique_variant(transform_variant(src, [](int dx, int dy) { return std::pair(-dx, -dy); }));
 					}
 				}
+			}
+
+			for (const auto& v : cur.variants) {
+				max_rx = std::max({max_rx, std::abs(static_cast<int>(v.min_dx)), std::abs(static_cast<int>(v.max_dx))});
+				max_ry = std::max({max_ry, std::abs(static_cast<int>(v.min_dy)), std::abs(static_cast<int>(v.max_dy))});
 			}
 
 			rm.rules.push_back(cur);
@@ -629,6 +961,8 @@ void MaterialManager::rebuild_compiled_rules() {
 
 		runtime_materials[m.id] = rm;
 	}
+
+	Grid::set_max_rule_radius(max_rx, max_ry);
 
 	if (Vulkan::is_available()) {
 		Vulkan::update_rules();

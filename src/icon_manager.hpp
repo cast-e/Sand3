@@ -38,6 +38,8 @@ enum class IconID {
 	Warning,
 	Branch,
 	Lock,
+	FlipHorizontal,
+	FlipVertical,
 	Count
 };
 

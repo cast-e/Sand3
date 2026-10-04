@@ -11,14 +11,30 @@ layout(push_constant) uniform PushConstants {
 	uint sim_height;
 	uint reverse_x;
 	uint reverse_y;
+	uint step_x;
+	uint step_y;
 }
 pc;
 
+struct GpuCondition {
+	int dx;
+	int dy;
+	uint allowed_mask[8];
+	uint pad[2];
+};
+
+struct GpuAction {
+	int dx;
+	int dy;
+	uint target_material;
+	uint pad;
+};
+
 struct GpuRuleVariant {
-	uint when_bits[200];
-	uint then_val[25];
-	uint when_wildcard;
-	uint pad[6];
+	uint cond_start;
+	uint cond_count;
+	uint act_start;
+	uint act_count;
 };
 
 struct GpuRule {
@@ -43,10 +59,12 @@ layout(std430, set = 0, binding = 2) readonly buffer RulesBuffer {
 	GpuMaterial materials[256];
 	uint total_rules;
 	uint total_variants;
-	uint pad0;
-	uint pad1;
+	uint total_conditions;
+	uint total_actions;
 	GpuRule rules[2048];
 	GpuRuleVariant variants[4096];
+	GpuCondition conditions[32768];
+	GpuAction actions[16384];
 };
 
 layout(std430, set = 0, binding = 3) writeonly buffer DisplayBuffer { uint display_pixels[]; };
@@ -65,59 +83,52 @@ uint xorshift32(inout uint state) {
 }
 
 bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uint local_changed) {
-	for (uint n_id = 0u; n_id < 25u; ++n_id) {
-		if ((variants[var_idx].when_wildcard & (1u << n_id)) != 0u) {
-			continue;
-		}
+	uint c_start = variants[var_idx].cond_start;
+	uint c_count = variants[var_idx].cond_count;
 
-		int dx = int(n_id % 5u) - 2;
-		int dy = int(n_id / 5u) - 2;
-		int nx = int(cx) + dx;
-		int ny = int(cy) + dy;
+	for (uint i = 0u; i < c_count; ++i) {
+		GpuCondition cond = conditions[c_start + i];
+		int nx = int(cx) + cond.dx;
+		int ny = int(cy) + cond.dy;
 		if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
 			return false;
 		}
 		uint n_idx = uint(ny) * pc.sim_width + uint(nx);
 		uint n_mat = current_cells[n_idx] & 0xFFu;
-		uint word = variants[var_idx].when_bits[n_id * 8u + (n_mat >> 5u)];
+		uint word = cond.allowed_mask[n_mat >> 5u];
 		if ((word & (1u << (n_mat & 31u))) == 0u) {
 			return false;
 		}
 	}
 
-	for (uint n_id = 0u; n_id < 25u; ++n_id) {
-		uint then_m = variants[var_idx].then_val[n_id];
-		if (then_m != 255u) {
-			int dx = int(n_id % 5u) - 2;
-			int dy = int(n_id / 5u) - 2;
-			int nx = int(cx) + dx;
-			int ny = int(cy) + dy;
-			if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
-				return false;
-			}
-			uint target_id = uint(ny) * pc.sim_width + uint(nx);
-			if (((next_cells[target_id] >> 8u) & 1u) != 0u) {
-				return false;
-			}
+	uint a_start = variants[var_idx].act_start;
+	uint a_count = variants[var_idx].act_count;
+
+	for (uint i = 0u; i < a_count; ++i) {
+		GpuAction act = actions[a_start + i];
+		int nx = int(cx) + act.dx;
+		int ny = int(cy) + act.dy;
+		if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
+			continue;
+		}
+		uint target_id = uint(ny) * pc.sim_width + uint(nx);
+		if (((next_cells[target_id] >> 8u) & 1u) != 0u) {
+			return false;
 		}
 	}
 
 	next_cells[center_id] = (next_cells[center_id] & 0xFFu) | (1u << 8u);
-	for (uint n_id = 0u; n_id < 25u; ++n_id) {
-		uint then_m = variants[var_idx].then_val[n_id];
-		if (then_m != 255u) {
-			int dx = int(n_id % 5u) - 2;
-			int dy = int(n_id / 5u) - 2;
-			int nx = int(cx) + dx;
-			int ny = int(cy) + dy;
-			if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
-				continue;
-			}
-			uint target_id = uint(ny) * pc.sim_width + uint(nx);
-			next_cells[target_id] = then_m | (1u << 8u);
-			if (target_id != center_id) {
-				local_changed++;
-			}
+	for (uint i = 0u; i < a_count; ++i) {
+		GpuAction act = actions[a_start + i];
+		int nx = int(cx) + act.dx;
+		int ny = int(cy) + act.dy;
+		if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
+			continue;
+		}
+		uint target_id = uint(ny) * pc.sim_width + uint(nx);
+		next_cells[target_id] = act.target_material | (1u << 8u);
+		if (target_id != center_id) {
+			local_changed++;
 		}
 	}
 	return true;
@@ -168,8 +179,8 @@ void main() {
 	uint kx = gl_GlobalInvocationID.x;
 	uint ky = gl_GlobalInvocationID.y;
 
-	uint num_kx = (pc.sim_width + 4u - pc.phase_x) / 5u;
-	uint num_ky = (pc.sim_height + 4u - pc.phase_y) / 5u;
+	uint num_kx = (pc.sim_width + pc.step_x - 1u - pc.phase_x) / pc.step_x;
+	uint num_ky = (pc.sim_height + pc.step_y - 1u - pc.phase_y) / pc.step_y;
 
 	if (kx >= num_kx || ky >= num_ky) {
 		return;
@@ -178,8 +189,8 @@ void main() {
 	uint active_kx = (pc.reverse_x != 0u) ? ((num_kx - 1u) - kx) : kx;
 	uint active_ky = (pc.reverse_y != 0u) ? ((num_ky - 1u) - ky) : ky;
 
-	uint cx = pc.phase_x + active_kx * 5u;
-	uint cy = pc.phase_y + active_ky * 5u;
+	uint cx = pc.phase_x + active_kx * pc.step_x;
+	uint cy = pc.phase_y + active_ky * pc.step_y;
 
 	if (cx >= pc.sim_width || cy >= pc.sim_height) {
 		return;

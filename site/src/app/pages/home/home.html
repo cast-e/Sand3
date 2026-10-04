@@ -6,7 +6,8 @@
         <h1>Sand3</h1>
       </div>
       <p class="hero-tagline">
-        Fast, hardware-accelerated cellular automaton with fully customizable materials and 5x5 neighborhood rules.
+        Fast, hardware-accelerated cellular automaton with fully customizable materials, custom neighborhood rules, and
+        dynamic grid sizes.
       </p>
 
       <div class="hero-badges">
@@ -54,7 +55,8 @@
           <p>
             <strong>Sand3</strong> is an open-source, high-performance cellular automaton sandbox engine designed for
             experimenting with complex particle dynamics, physical reactions, and cellular life. Every material in the
-            simulation can be created, styled, and given arbitrary reaction rules evaluated on a 5x5 grid neighborhood.
+            simulation can be created, styled, and given arbitrary reaction rules evaluated on a custom grid
+            neighborhood.
           </p>
           <div class="features-pill-grid">
             <div class="pill-item">
@@ -65,6 +67,13 @@
               </div>
             </div>
             <div class="pill-item">
+              <img src="/icons/shape_handles.png" class="silk-icon" alt="Grid Size" />
+              <div>
+                <strong>Customizable Grid Size</strong>
+                <span>Dynamic canvas sizes from 128×128 up to 4096×4096 with presets and content preservation.</span>
+              </div>
+            </div>
+            <div class="pill-item">
               <img src="/icons/palette.png" class="silk-icon" alt="Materials" />
               <div>
                 <strong>Up to 255 Materials</strong>
@@ -72,10 +81,17 @@
               </div>
             </div>
             <div class="pill-item">
-              <img src="/icons/cog.png" class="silk-icon" alt="5x5 Rules" />
+              <img src="/icons/cog.png" class="silk-icon" alt="Custom Rules" />
               <div>
-                <strong>5x5 Neighborhood Rules</strong>
+                <strong>Customizable Neighborhood Rules</strong>
                 <span>Defines complex emergent behaviors, rotational symmetries, and probabilities.</span>
+              </div>
+            </div>
+            <div class="pill-item">
+              <img src="/icons/shape_square.png" class="silk-icon" alt="Selection" />
+              <div>
+                <strong>Selection & Transform</strong>
+                <span>Move, copy, cut, paste, resize, flip, and rotate rectangular regions with transparency.</span>
               </div>
             </div>
             <div class="pill-item">
@@ -96,7 +112,7 @@
               <img src="/icons/world.png" class="silk-icon" alt="Workshop" />
               <div>
                 <strong>Integrated Workshop</strong>
-                <span>One-click downloading, automatic set resolution, and community item sharing.</span>
+                <span>One-click downloading, automatic set dependency resolving, and community item sharing.</span>
               </div>
             </div>
           </div>
@@ -128,7 +144,7 @@
           </p>
           <pre><code># 1. Download and extract the archive:
 unzip sand3-*-linux.zip
-cd bin/linux
+cd sand3-*-linux
 
 # 2. Grant executable permission and run:
 chmod +x sand3
@@ -136,11 +152,14 @@ chmod +x sand3
           } @else {
           <h4>Running on Windows</h4>
           <p class="text-muted">
-            Prerequisites: 64-bit Windows 10 or 11 with Vulkan-compatible graphics drivers.
+            Prerequisites: 64-bit Windows 10 or 11 with Vulkan-compatible graphics drivers. Runs as a clean native GUI
+            application with no persistent command prompt window.
           </p>
           <pre><code># 1. Extract the downloaded sand3-*-win64.zip archive
-# 2. Run the standalone executable:
-.\bin\win64\sand3.exe</code></pre>
+cd sand3-*-win64
+
+# 2. Run the standalone executable (double-click or via terminal):
+.\sand3.exe</code></pre>
           }
         </div>
       </section>
@@ -154,26 +173,24 @@ chmod +x sand3
         </div>
         <div class="card-body">
           <p>
-            Unlike traditional 3x3 Moore-neighborhood cellular automata, Sand3 utilizes a full <strong>5x5 neighborhood
-              matrix</strong>
-            centered on each cell. This allows modeling momentum, fluid dispersion, cellular growth, gas diffusion, and
-            mechanical collision:
+            Sand3 uses a <strong>completely</strong> customizable neighborhood for your rules! This allows for some
+            extremely complex behaviours. By default it uses a 3x3 neighborhood but you can increase it up to 10x10 if
+            you want (or even higher).
           </p>
           <div class="rule-explanation-box">
             <div class="rule-box-header">
-              <span class="badge badge-blue">WHEN Grid (5x5)</span>
+              <span class="badge badge-blue">WHEN Grid</span>
               <span>➔</span>
-              <span class="badge badge-green">THEN Grid (5x5)</span>
+              <span class="badge badge-green">THEN Grid</span>
             </div>
             <p class="text-muted small">
-              Rules can match multiple possible materials per neighbor cell, specify execution chances (probabilities),
-              and apply
-              horizontal flip, vertical flip, or 90° rotation symmetries automatically.
+              Rules can match multiple possible materials per cell, specify execution chances, and apply horizontal
+              flip, vertical flip, or 90° rotation symmetries automatically.
             </p>
           </div>
           <p class="mt-3">
-            Materials can inherit base rules from parent materials (e.g. all liquids inheriting standard gravity flow,
-            with custom rules added on top).
+            Materials can also inherit basic rules from parent materials (e.g. all liquids inheriting standard gravity
+            flow, with custom rules added on top).
           </p>
         </div>
       </section>
@@ -185,22 +202,62 @@ chmod +x sand3
             Building from Source
           </h3>
         </div>
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3>
+            <img src="/icons/application_osx_terminal.png" class="silk-icon" alt="Run" />
+            Quickstart & Running Instructions
+          </h3>
+          <div class="tab-toggles">
+            <button class="btn btn-sm" [class.btn-primary]="activeTab() === 'linux'" (click)="activeTab.set('linux')">
+              <img src="/icons/tux.png" class="silk-icon" alt="Linux" /> Linux
+            </button>
+            <button class="btn btn-sm" [class.btn-primary]="activeTab() === 'windows'"
+              (click)="activeTab.set('windows')">
+              <img src="/icons/application.png" class="silk-icon" alt="Windows" /> Windows
+            </button>
+          </div>
+        </div>
         <div class="card-body">
           <p class="text-muted">
-            Requires a C++20 compiler (GCC 12+ or Clang 16+) and CMake 3.25+. All third-party dependencies (SDL3, ImGui,
-            Volk, fmt, JSON) are bundled in the repository.
+            Requires a C++20 compiler (GCC 12+, Clang 16+) and CMake 3.25+. All major third-party
+            dependencies (SDL3, ImGui, Volk, fmt, nlohmann_json, miniz, libcurl) are bundled or linked. Just remember to
+            clone recursively for all the dependencies!
           </p>
-          <pre><code># Clone repository with all submodules
-git clone --recursive https://github.com/cast-e/Sand3.git
-cd Sand3
-
-# Build on Linux (Release)
-cmake -B build --preset linux-gcc
+          <pre><code>git clone --recursive https://github.com/cast-e/Sand3.git
+cd Sand3</code></pre>
+          <br>
+          @if (activeTab() === 'linux') {
+          <h4>Building on Linux</h4>
+          <p class="text-muted">
+            Release build (default)
+          </p>
+          <pre><code>cmake -B build --preset linux-gcc
 cmake --build build
-
-# Cross-compile for Windows with MinGW-w64
-cmake -B build --preset windows-mingw
-cmake --build build</code></pre>
+</code></pre>
+          <p class="text-muted">
+            Debug build
+          </p>
+          <pre><code>cmake -B build --preset linux-gcc-debug
+cmake --build build
+</code></pre>
+          <p class="text-muted">
+            Cross-compile to Windows Release build (default)
+          </p>
+          <pre><code>cmake -B build --preset windows-mingw
+cmake --build build
+</code></pre>
+          <p class="text-muted">
+            Cross-compile to Windows Debug build
+          </p>
+          <pre><code>cmake -B build --preset windows-mingw-debug
+cmake --build build
+</code></pre>
+          } @else {
+          <h4>Building on Windows</h4>
+          <p class="text-muted">
+            Windows building is currently not supported.
+          </p>
+          }
         </div>
       </section>
     </div>

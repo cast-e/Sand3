@@ -53,7 +53,8 @@ namespace {
 		{IconID::Warning, "error.png", icon_error_png, icon_error_png_len},
 		{IconID::Branch, "arrow_branch.png", icon_branch_png, icon_branch_png_len},
 		{IconID::Lock, "lock.png", icon_lock_png, icon_lock_png_len},
-	};
+		{IconID::FlipHorizontal, "shape_flip_horizontal.png", icon_flip_horizontal_png, icon_flip_horizontal_png_len},
+		{IconID::FlipVertical, "shape_flip_vertical.png", icon_flip_vertical_png, icon_flip_vertical_png_len}};
 
 	std::array<SDL_Texture*, static_cast<size_t>(IconID::Count)> textures{};
 
@@ -71,8 +72,15 @@ void IconManager::init() {
 	for (const auto& entry : ICON_ENTRIES) {
 		SDL_IOStream* io = nullptr;
 
-		const char* search_paths[] = {"src/resources/icons/", "../../src/resources/icons/", "../src/resources/icons/",
-									  "src/resources/Icons/", "../../src/resources/Icons/", "../src/resources/Icons/"};
+		const char* search_paths[] = {"src/resources/icons/",
+									  "../../src/resources/icons/",
+									  "../src/resources/icons/",
+									  "src/resources/Icons/",
+									  "../../src/resources/Icons/",
+									  "../src/resources/Icons/",
+									  "third_party/famfamfam-silk/src/",
+									  "../../third_party/famfamfam-silk/src/",
+									  "../third_party/famfamfam-silk/src/"};
 
 		for (const char* prefix : search_paths) {
 			std::string p = std::string(prefix) + entry.filename;

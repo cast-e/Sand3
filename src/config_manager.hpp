@@ -44,6 +44,7 @@ struct Config {
 	uint32_t processing_mode = 0;
 	uint32_t thread_count = (DEFAULT_SIM_HEIGHT + STRIP_HEIGHT - 1) / STRIP_HEIGHT / 2;
 	bool prevent_downclock = true;
+	bool allow_large_neighborhoods = false;
 
 	UIConfig ui;
 

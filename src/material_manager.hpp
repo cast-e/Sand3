@@ -8,8 +8,6 @@
 #include <string_view>
 #include <vector>
 
-#include "const.hpp"
-
 struct SymmetryFlags {
 	bool flip_x = false;
 	bool flip_y = false;
@@ -17,10 +15,55 @@ struct SymmetryFlags {
 };
 
 struct RuleDefinition {
-	std::array<std::vector<uint8_t>, NEIGHBOR_COUNT> when;
-	std::array<uint8_t, NEIGHBOR_COUNT> then;
+	int8_t min_dx = -1;
+	int8_t max_dx = 1;
+	int8_t min_dy = -1;
+	int8_t max_dy = 1;
+	std::vector<std::vector<uint8_t>> when;
+	std::vector<uint8_t> then;
 	SymmetryFlags symmetry;
-	float chance = 1.0f;
+	float chance = 100.0f;
+
+	RuleDefinition() { init_default(0); }
+
+	void init_default(uint8_t center_id = 0) {
+		min_dx = -1;
+		max_dx = 1;
+		min_dy = -1;
+		max_dy = 1;
+		when.assign(9, std::vector<uint8_t>{});
+		then.assign(9, 255);
+		when[4] = {center_id};
+		chance = 100.0f;
+		symmetry = SymmetryFlags{};
+	}
+
+	int width() const { return max_dx - min_dx + 1; }
+	int height() const { return max_dy - min_dy + 1; }
+	int total_cells() const { return width() * height(); }
+
+	int get_cell_idx(int dx, int dy) const {
+		if (dx < min_dx || dx > max_dx || dy < min_dy || dy > max_dy)
+			return -1;
+		return (dy - min_dy) * width() + (dx - min_dx);
+	}
+	int get_dx(int idx) const { return min_dx + (idx % width()); }
+	int get_dy(int idx) const { return min_dy + (idx / width()); }
+	int get_center_idx() const { return get_cell_idx(0, 0); }
+
+	void expand_top();
+	void shrink_top();
+	void expand_bottom();
+	void shrink_bottom();
+	void expand_left();
+	void shrink_left();
+	void expand_right();
+	void shrink_right();
+	void flip_x();
+	void flip_y();
+	void rotate_cw();
+	void rotate_ccw();
+	void reset_to_3x3(uint8_t center_id);
 };
 
 struct RuleReference {
@@ -45,9 +88,27 @@ struct MaterialDefinition {
 	RuleDefinition get_effective_rule(size_t order_idx) const;
 };
 
+struct ConditionCheck {
+	int offset = 0;
+	int8_t dx = 0;
+	int8_t dy = 0;
+	std::bitset<256> allowed;
+};
+
+struct OutputAction {
+	int offset = 0;
+	int8_t dx = 0;
+	int8_t dy = 0;
+	uint8_t target_material = 255;
+};
+
 struct CompiledRuleVariant {
-	std::array<std::bitset<256>, NEIGHBOR_COUNT> when;
-	std::array<uint8_t, NEIGHBOR_COUNT> then;
+	std::vector<ConditionCheck> conditions;
+	std::vector<OutputAction> actions;
+	int8_t min_dx = 0;
+	int8_t max_dx = 0;
+	int8_t min_dy = 0;
+	int8_t max_dy = 0;
 };
 
 struct CompiledRule {

@@ -19,7 +19,8 @@ inline static uint32_t xorshift32() {
 
 uint32_t Grid::width = DEFAULT_SIM_WIDTH;
 uint32_t Grid::height = DEFAULT_SIM_HEIGHT;
-std::array<int, NEIGHBOR_COUNT> Grid::neighbor_offsets{};
+int Grid::max_rule_radius_x = 2;
+int Grid::max_rule_radius_y = 2;
 
 ProcessingMode Grid::processing_mode = ProcessingMode::CPU;
 std::vector<Cell> Grid::cells;
@@ -35,17 +36,7 @@ bool Grid::gpu_data_valid = true;
 bool Grid::gpu_needs_upload = true;
 uint64_t Grid::sim_step_count = 0;
 
-void Grid::recompute_neighbor_offsets() {
-	for (int dy = -static_cast<int>(HALF_NEIGHBOR_SIZE); dy <= static_cast<int>(HALF_NEIGHBOR_SIZE); ++dy) {
-		for (int dx = -static_cast<int>(HALF_NEIGHBOR_SIZE); dx <= static_cast<int>(HALF_NEIGHBOR_SIZE); ++dx) {
-			uint32_t idx = (dy + HALF_NEIGHBOR_SIZE) * NEIGHBOR_SIZE + (dx + HALF_NEIGHBOR_SIZE);
-			neighbor_offsets[idx] = dy * static_cast<int>(width) + dx;
-		}
-	}
-}
-
 void Grid::init() {
-	recompute_neighbor_offsets();
 	num_active_threads = Grid::get_num_strips_y() / 2;
 	cells.resize(Grid::get_size());
 	next_cells.resize(Grid::get_size());
@@ -118,7 +109,7 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 	}
 	next_cells.assign(width * height, Cell{0, false});
 
-	recompute_neighbor_offsets();
+	MaterialManager::rebuild_compiled_rules();
 
 	shutdown_flag = false;
 	frame_changed = 0;
@@ -352,6 +343,22 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 					}
 				}
 			}
+		} else if (num_variants > 0) {
+			const uint32_t start_id = xorshift32() % num_variants;
+			for (uint32_t step = 0; step < num_variants; ++step) {
+				const CompiledRuleVariant& rule = cur.variants[(start_id + step) % num_variants];
+				if (is_fast_path) {
+					if (Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed)) {
+						match_found = true;
+						break;
+					}
+				} else {
+					if (Grid::try_apply_rule_safe(rule, cx, cy, local_changed)) {
+						match_found = true;
+						break;
+					}
+				}
+			}
 		}
 
 		if (match_found) {
@@ -377,7 +384,10 @@ void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool r
 			if (rules.empty())
 				continue;
 
-			const bool is_fast_path = (cx >= 2 && cx < Grid::get_width() - 2 && cy >= 2 && cy < Grid::get_height() - 2);
+			const bool is_fast_path = (cx >= static_cast<uint32_t>(max_rule_radius_x) &&
+									   cx < Grid::get_width() - static_cast<uint32_t>(max_rule_radius_x) &&
+									   cy >= static_cast<uint32_t>(max_rule_radius_y) &&
+									   cy < Grid::get_height() - static_cast<uint32_t>(max_rule_radius_y));
 
 			apply_compiled_rules(rules, cx, cy, is_fast_path, local_changed);
 		}
@@ -385,33 +395,25 @@ void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool r
 }
 
 bool Grid::try_apply_rule_fast(const CompiledRuleVariant& rule, const uint32_t center_id, uint32_t& local_changed) {
-	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.when[n_id].all()) {
-			continue;
-		}
-		if (!rule.when[n_id].test(cells[center_id + neighbor_offsets[n_id]].material)) {
+	for (const auto& cond : rule.conditions) {
+		if (!cond.allowed.test(cells[center_id + cond.offset].material)) {
 			return false;
 		}
 	}
 
-	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.then[n_id] != 255) {
-			uint32_t target_id = center_id + neighbor_offsets[n_id];
-			if (next_cells[target_id].updated) {
-				return false;
-			}
+	for (const auto& act : rule.actions) {
+		if (next_cells[center_id + act.offset].updated) {
+			return false;
 		}
 	}
 
 	next_cells[center_id].updated = true;
-	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.then[n_id] != 255) {
-			uint32_t target_id = center_id + neighbor_offsets[n_id];
-			next_cells[target_id].material = rule.then[n_id];
-			next_cells[target_id].updated = true;
-			if (target_id != center_id) {
-				local_changed++;
-			}
+	for (const auto& act : rule.actions) {
+		uint32_t target_id = center_id + act.offset;
+		next_cells[target_id].material = act.target_material;
+		next_cells[target_id].updated = true;
+		if (target_id != center_id) {
+			local_changed++;
 		}
 	}
 	return true;
@@ -419,60 +421,49 @@ bool Grid::try_apply_rule_fast(const CompiledRuleVariant& rule, const uint32_t c
 
 bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x, const uint32_t y,
 							   uint32_t& local_changed) {
-	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.when[n_id].all()) {
+	const uint32_t gw = Grid::get_width();
+	const uint32_t gh = Grid::get_height();
+
+	for (const auto& cond : rule.conditions) {
+		const uint32_t tx = x + cond.dx;
+		const uint32_t ty = y + cond.dy;
+
+		if (tx >= gw || ty >= gh) {
+			return false;
+		}
+
+		if (!cond.allowed.test(cells[ty * gw + tx].material)) {
+			return false;
+		}
+	}
+
+	for (const auto& act : rule.actions) {
+		const uint32_t tx = x + act.dx;
+		const uint32_t ty = y + act.dy;
+
+		if (tx >= gw || ty >= gh) {
 			continue;
 		}
 
-		const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-		const int dy = static_cast<int>(n_id / NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-		const uint32_t tx = x + dx;
-		const uint32_t ty = y + dy;
-
-		if (tx >= Grid::get_width() || ty >= Grid::get_height()) {
-			return false;
-		}
-
-		if (!rule.when[n_id].test(cells[ty * Grid::get_width() + tx].material)) {
+		if (next_cells[ty * gw + tx].updated) {
 			return false;
 		}
 	}
 
-	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.then[n_id] != 255) {
-			const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-			const int dy = static_cast<int>(n_id / NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-			const uint32_t tx = x + dx;
-			const uint32_t ty = y + dy;
+	next_cells[y * gw + x].updated = true;
+	for (const auto& act : rule.actions) {
+		const uint32_t tx = x + act.dx;
+		const uint32_t ty = y + act.dy;
 
-			if (tx >= Grid::get_width() || ty >= Grid::get_height()) {
-				continue;
-			}
-
-			if (next_cells[ty * Grid::get_width() + tx].updated) {
-				return false;
-			}
+		if (tx >= gw || ty >= gh) {
+			continue;
 		}
-	}
 
-	next_cells[y * Grid::get_width() + x].updated = true;
-	for (uint32_t n_id = 0; n_id < NEIGHBOR_COUNT; ++n_id) {
-		if (rule.then[n_id] != 255) {
-			const int dx = static_cast<int>(n_id % NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-			const int dy = static_cast<int>(n_id / NEIGHBOR_SIZE) - HALF_NEIGHBOR_SIZE;
-			const uint32_t tx = x + dx;
-			const uint32_t ty = y + dy;
-
-			if (tx >= Grid::get_width() || ty >= Grid::get_height()) {
-				continue;
-			}
-
-			const uint32_t target_id = ty * Grid::get_width() + tx;
-			next_cells[target_id].material = rule.then[n_id];
-			next_cells[target_id].updated = true;
-			if (tx != x || ty != y) {
-				local_changed++;
-			}
+		const uint32_t target_id = ty * gw + tx;
+		next_cells[target_id].material = act.target_material;
+		next_cells[target_id].updated = true;
+		if (tx != x || ty != y) {
+			local_changed++;
 		}
 	}
 	return true;

@@ -307,7 +307,7 @@ static std::vector<LineSpan> compute_line_spans(ImVec2 start_grid, ImVec2 end_gr
 	if (dist < 0.001f) {
 		stamp(b_start);
 	} else {
-		int steps = static_cast<int>(std::ceil(dist * 2.0f));
+		int steps = static_cast<int>(std::ceil(dist));
 		int last_bx = std::numeric_limits<int>::min();
 		int last_by = std::numeric_limits<int>::min();
 
@@ -543,6 +543,12 @@ bool UI::open_switch_popup = false;
 bool UI::open_create_set_popup = false;
 bool UI::open_delete_set_popup = false;
 bool UI::open_empty_rule_warning_popup = false;
+bool UI::open_large_neighborhood_warning_popup = false;
+
+enum class ExpandSide { Top, Bottom, Left, Right };
+static int s_pending_expand_rule_idx = -1;
+static uint8_t s_pending_expand_mat_id = 0;
+static ExpandSide s_pending_expand_side = ExpandSide::Top;
 
 bool UI::duplicate_set_checkbox = false;
 bool UI::exit_save_as_new_set = false;
@@ -1965,6 +1971,24 @@ static void finalize_canvas_drag() {
 
 void UI::handle_canvas_interaction() {
 	ImGuiIO& io = ImGui::GetIO();
+
+	static bool s_middle_dragged = false;
+	static ImVec2 s_middle_down_pos(0, 0);
+	static bool s_middle_down_on_canvas = false;
+
+	if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+		s_middle_down_pos = io.MousePos;
+		s_middle_dragged = false;
+		s_middle_down_on_canvas = !io.WantCaptureMouse;
+	}
+	if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+		float dx = io.MousePos.x - s_middle_down_pos.x;
+		float dy = io.MousePos.y - s_middle_down_pos.y;
+		if (dx * dx + dy * dy > 1.0f) {
+			s_middle_dragged = true;
+		}
+	}
+
 	if (io.WantCaptureMouse && selection_state != SelectionState::Moving &&
 		selection_state != SelectionState::Resizing) {
 		finalize_canvas_drag();
@@ -1975,15 +1999,20 @@ void UI::handle_canvas_interaction() {
 	ImVec2 grid_pos = screen_to_grid_pos(io.MousePos);
 
 	if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
-		ImVec2 drag_delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
-		if (drag_delta.x * drag_delta.x + drag_delta.y * drag_delta.y < 25.0f) {
-			uint32_t x_cell = static_cast<uint32_t>(grid_pos.x);
-			uint32_t y_cell = static_cast<uint32_t>(grid_pos.y);
-			if (x_cell < Grid::get_width() && y_cell < Grid::get_height()) {
-				uint8_t cell = Grid::get_cell(x_cell, y_cell);
-				selected_id = MaterialManager::get_material(cell).id;
+		if (!s_middle_dragged && s_middle_down_on_canvas && !io.WantCaptureMouse) {
+			float dx = io.MousePos.x - s_middle_down_pos.x;
+			float dy = io.MousePos.y - s_middle_down_pos.y;
+			if (dx * dx + dy * dy <= 1.0f) {
+				uint32_t x_cell = static_cast<uint32_t>(grid_pos.x);
+				uint32_t y_cell = static_cast<uint32_t>(grid_pos.y);
+				if (x_cell < Grid::get_width() && y_cell < Grid::get_height()) {
+					uint8_t cell = Grid::get_cell(x_cell, y_cell);
+					selected_id = MaterialManager::get_material(cell).id;
+				}
 			}
 		}
+		s_middle_dragged = false;
+		s_middle_down_on_canvas = false;
 	}
 
 	if (current_tool == ToolMode::Select) {
@@ -2371,6 +2400,20 @@ struct CopiedRuleCell {
 	uint8_t then_val = 255;
 	bool has_copied = false;
 
+	bool can_paste_as_then() const {
+		if (!has_copied)
+			return false;
+		if (type == Type::Then)
+			return true;
+		return when_val.size() <= 1;
+	}
+
+	bool can_paste_as_when() const {
+		if (!has_copied)
+			return false;
+		return true;
+	}
+
 	std::vector<uint8_t> get_as_when() const {
 		if (type == Type::When) {
 			return when_val;
@@ -2393,6 +2436,8 @@ struct CopiedRuleCell {
 };
 
 static CopiedRuleCell g_copied_rule_cell;
+static bool s_is_dragging_paint = false;
+static bool s_is_dragging_clear = false;
 
 std::vector<UI::MaterialShortcutItem> UI::get_all_material_shortcuts() {
 	const auto& mats = MaterialManager::get_materials();
@@ -2722,7 +2767,6 @@ void UI::render_material_editor() {
 		}
 
 		ImGui::Separator();
-
 		ImGui::Spacing();
 		ImGui::Text("Rules:");
 		ImGui::SameLine();
@@ -2730,14 +2774,12 @@ void UI::render_material_editor() {
 		mat.sync_rule_order();
 
 		if (button_with_icon("Add Rule", IconManager::get(IconID::Add))) {
-			if (selected_id == 0) {
+			if (selected_id == 0 && mat.rules.empty()) {
 				open_empty_rule_warning_popup = true;
 			} else {
 				UndoManager::push_snapshot("Add Rule");
 				RuleDefinition new_rule;
-				new_rule.when[12] = {selected_id};
-				new_rule.then.fill(255);
-				new_rule.chance = 100.0f;
+				new_rule.init_default(selected_id);
 				mat.rules.push_back(new_rule);
 				mat.rule_order.push_back({false, mat.rules.size() - 1});
 				rebuild_needed = true;
@@ -2754,7 +2796,20 @@ void UI::render_material_editor() {
 			RuleDefinition rule = mat.get_effective_rule(r_id);
 			ImGui::PushID(r_id);
 
-			ImGui::BeginChild(("##rule_card_" + std::to_string(r_id)).c_str(), ImVec2(0, 200), true,
+			int grid_w = rule.width();
+			int grid_h = rule.height();
+			int max_dim = std::max(grid_w, grid_h);
+			float avail_w = ImGui::GetContentRegionAvail().x;
+			float left_col_w = 160.0f;
+			float remaining_w = std::max(160.0f, avail_w - left_col_w - 40.0f);
+			float max_grid_w = (remaining_w - 60.0f) * 0.5f;
+			float avail_grid_space = std::clamp(max_grid_w, 80.0f, 180.0f);
+			float cell_sz = std::clamp(std::floor((avail_grid_space - (max_dim - 1) * 1.0f) / max_dim), 10.0f, 130.0f);
+			float when_grid_px_w = grid_w * cell_sz + (grid_w - 1) * 1.0f;
+			float when_grid_px_h = grid_h * cell_sz + (grid_h - 1) * 1.0f;
+			float card_h = std::max(290.0f, when_grid_px_h + 120.0f);
+
+			ImGui::BeginChild(("##rule_card_" + std::to_string(r_id)).c_str(), ImVec2(0, card_h), true,
 							  ImGuiWindowFlags_NoScrollbar);
 
 			ImGui::BeginGroup();
@@ -2884,211 +2939,477 @@ void UI::render_material_editor() {
 				ImGui::SetTooltip("Allows the rule to match with 90 degree rotations of itself.");
 			}
 
+			ImGui::Spacing();
+			ImGui::TextDisabled("Transform Grid:");
+			if (button_with_icon("CW##rot_cw", IconManager::get(IconID::RotateCW), ImVec2(76.0f, 26.0f))) {
+				UndoManager::push_snapshot("Rotate Rule Grid");
+				rule.rotate_cw();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Rotate grid 90 degrees clockwise");
+			ImGui::SameLine(0.0f, 4.0f);
+			if (button_with_icon("CCW##rot_ccw", IconManager::get(IconID::RotateCCW), ImVec2(76.0f, 26.0f))) {
+				UndoManager::push_snapshot("Rotate Rule Grid");
+				rule.rotate_ccw();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Rotate grid 90 degrees counter-clockwise");
+
+			if (button_with_icon("Flip X##flip_x", IconManager::get(IconID::FlipHorizontal), ImVec2(76.0f, 26.0f))) {
+				UndoManager::push_snapshot("Flip Rule Grid");
+				rule.flip_x();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Flip grid horizontally (left-right)");
+			ImGui::SameLine(0.0f, 4.0f);
+			if (button_with_icon("Flip Y##flip_y", IconManager::get(IconID::FlipVertical), ImVec2(76.0f, 26.0f))) {
+				UndoManager::push_snapshot("Flip Rule Grid");
+				rule.flip_y();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Flip grid vertically (top-bottom)");
+
 			ImGui::EndGroup();
 
-			ImGui::SameLine(0.0f, 5.0f);
+			ImGui::SameLine(0.0f, 10.0f);
 
+			// Expand check lambda
+			auto try_expand = [&](ExpandSide side) {
+				int new_w = grid_w;
+				int new_h = grid_h;
+				if (side == ExpandSide::Top || side == ExpandSide::Bottom)
+					new_h++;
+				else
+					new_w++;
+				int new_total = new_w * new_h;
+				if (new_total > static_cast<int>(DEFAULT_NEIGHBOR_MAX_CELLS) &&
+					!ConfigManager::get_config().allow_large_neighborhoods) {
+					s_pending_expand_side = side;
+					s_pending_expand_mat_id = selected_id;
+					s_pending_expand_rule_idx = reference.is_inherited ? -1 : static_cast<int>(reference.index);
+					open_large_neighborhood_warning_popup = true;
+					return;
+				}
+				UndoManager::push_snapshot("Expand Rule Neighborhood");
+				if (side == ExpandSide::Top)
+					rule.expand_top();
+				else if (side == ExpandSide::Bottom)
+					rule.expand_bottom();
+				else if (side == ExpandSide::Left)
+					rule.expand_left();
+				else if (side == ExpandSide::Right)
+					rule.expand_right();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			};
+
+			auto do_shrink = [&](ExpandSide side) {
+				UndoManager::push_snapshot("Shrink Rule Neighborhood");
+				if (side == ExpandSide::Top)
+					rule.shrink_top();
+				else if (side == ExpandSide::Bottom)
+					rule.shrink_bottom();
+				else if (side == ExpandSide::Left)
+					rule.shrink_left();
+				else if (side == ExpandSide::Right)
+					rule.shrink_right();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			};
+
+			// Right side controls & grids
+			ImGui::BeginGroup();
+
+			// Size header & Reset 3x3
+			ImGui::Text("Size: %dx%d (%d cells)", grid_w, grid_h, grid_w * grid_h);
+			if (grid_w != 3 || grid_h != 3) {
+				ImGui::SameLine(0.0f, 6.0f);
+				if (button_with_icon("Reset 3x3", IconManager::get(IconID::Refresh), ImVec2(0.0f, 20.0f))) {
+					UndoManager::push_snapshot("Reset Rule Neighborhood");
+					rule.reset_to_3x3(selected_id);
+					rebuild_needed = true;
+					unsaved_changes = true;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Reset neighborhood to standard 3x3");
+			}
+			ImGui::Spacing();
+
+			ImVec2 tiny_sz(20.0f, 20.0f);
+			ImDrawList* dl = ImGui::GetWindowDrawList();
+
+			// When Group
 			ImGui::BeginGroup();
 			ImGui::Text("When");
-			ImGuiIO& io = ImGui::GetIO();
 
-			for (int y = 0; y < NEIGHBOR_SIZE; ++y) {
-				for (int x = 0; x < NEIGHBOR_SIZE; ++x) {
-					int c_id = y * NEIGHBOR_SIZE + x;
+			// Top + / - row centered over grid
+			float btn_pair_w = tiny_sz.x * 2.0f + 2.0f;
+			float left_col_btn_w = tiny_sz.x + 2.0f;
+			float top_pad_x = left_col_btn_w + std::max(0.0f, (when_grid_px_w - btn_pair_w) * 0.5f);
+			ImGui::Dummy(ImVec2(top_pad_x, 0.0f));
+			ImGui::SameLine(0.0f, 0.0f);
+			ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, 2.0f));
+			if (ImGui::Button("+##top", tiny_sz)) {
+				try_expand(ExpandSide::Top);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Add row to top");
+			ImGui::SameLine(0.0f, 2.0f);
+			bool top_shrink_disabled = (rule.min_dy >= 0 || grid_h <= 1);
+			if (top_shrink_disabled)
+				ImGui::BeginDisabled();
+			if (ImGui::Button("-##top", tiny_sz)) {
+				do_shrink(ExpandSide::Top);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Remove row from top");
+			if (top_shrink_disabled)
+				ImGui::EndDisabled();
+
+			// Middle row: [Left +/-] [When Grid Canvas] [Right +/-]
+			ImGui::BeginGroup();
+			float left_v_pad = std::max(0.0f, (when_grid_px_h - (tiny_sz.y * 2.0f + 2.0f)) * 0.5f);
+			if (left_v_pad > 0.0f)
+				ImGui::Dummy(ImVec2(0.0f, left_v_pad));
+			if (ImGui::Button("+##left", tiny_sz)) {
+				try_expand(ExpandSide::Left);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Add column to left");
+			bool left_shrink_disabled = (rule.min_dx >= 0 || grid_w <= 1);
+			if (left_shrink_disabled)
+				ImGui::BeginDisabled();
+			if (ImGui::Button("-##left", tiny_sz)) {
+				do_shrink(ExpandSide::Left);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Remove column from left");
+			if (left_shrink_disabled)
+				ImGui::EndDisabled();
+			ImGui::EndGroup();
+
+			ImGui::SameLine(0.0f, 2.0f);
+
+			// When Grid Canvas
+			ImGui::BeginGroup();
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, 1.0f));
+			for (int dy = rule.min_dy; dy <= rule.max_dy; ++dy) {
+				for (int dx = rule.min_dx; dx <= rule.max_dx; ++dx) {
+					int c_id = rule.get_cell_idx(dx, dy);
 					ImGui::PushID(c_id);
 
-					std::string label = "*";
-					ImVec4 neutral_frame_col = ImGui::GetStyle().Colors[ImGuiCol_FrameBg];
-					neutral_frame_col.w = 1.0f;
-					ImVec4 btn_col = neutral_frame_col;
+					ImGui::InvisibleButton("##wc", ImVec2(cell_sz, cell_sz));
+					bool is_hovered = ImGui::IsItemHovered();
+					bool btn_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+					bool is_right_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+					bool is_middle_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Middle);
+					ImVec2 c_min = ImGui::GetItemRectMin();
+					ImVec2 c_max = ImGui::GetItemRectMax();
+					bool in_cell = (io.MousePos.x >= c_min.x && io.MousePos.x < c_max.x && io.MousePos.y >= c_min.y &&
+									io.MousePos.y < c_max.y);
 
-					if (c_id == 12) {
-						label = mat.name.substr(0, 1);
-						btn_col = ImVec4(mat.color[0] / 255.f, mat.color[1] / 255.f, mat.color[2] / 255.f, 1.0f);
-						ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
-						ImGui::Button(label.c_str(), ImVec2(25, 25));
-						ImGui::PopStyleColor();
+					if (dx == 0 && dy == 0) {
+						// Center cell: source material color
+						ImU32 col = IM_COL32(mat.color[0], mat.color[1], mat.color[2], 255);
+						dl->AddRectFilled(c_min, c_max, col);
+						float lum = 0.299f * mat.color[0] + 0.587f * mat.color[1] + 0.114f * mat.color[2];
+						ImU32 dot_col = (lum > 130.0f) ? IM_COL32(0, 0, 0, 180) : IM_COL32(255, 255, 255, 220);
+						dl->AddCircleFilled(ImVec2((c_min.x + c_max.x) * 0.5f, (c_min.y + c_max.y) * 0.5f),
+											std::max(1.5f, cell_sz * 0.14f), dot_col);
 					} else {
-						const auto& when_ids = rule.when[c_id];
-
-						if (when_ids.size() == 1) {
-							const auto& reference_mat = MaterialManager::get_material(when_ids[0]);
-							label = reference_mat.name.substr(0, 1);
-							btn_col = ImVec4(reference_mat.color[0] / 255.f, reference_mat.color[1] / 255.f,
-											 reference_mat.color[2] / 255.f, 1.0f);
-						} else if (when_ids.size() > 1) {
-							label = std::to_string(when_ids.size());
-							float r_sum = 0, g_sum = 0, b_sum = 0;
-							for (uint8_t id : when_ids) {
-								const auto& reference_mat = MaterialManager::get_material(id);
-								r_sum += reference_mat.color[0] / 255.f;
-								g_sum += reference_mat.color[1] / 255.f;
-								b_sum += reference_mat.color[2] / 255.f;
+						const auto& when_ids = (c_id >= 0 && c_id < static_cast<int>(rule.when.size()))
+												   ? rule.when[c_id]
+												   : std::vector<uint8_t>{};
+						if (when_ids.empty()) {
+							// Wildcard: dark canvas
+							dl->AddRectFilled(c_min, c_max, IM_COL32(26, 28, 33, 255));
+							dl->AddCircleFilled(ImVec2((c_min.x + c_max.x) * 0.5f, (c_min.y + c_max.y) * 0.5f), 1.2f,
+												IM_COL32(75, 80, 92, 140));
+						} else if (when_ids.size() == 1) {
+							const auto& ref_mat = MaterialManager::get_material(when_ids[0]);
+							dl->AddRectFilled(c_min, c_max,
+											  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255));
+						} else {
+							size_t num_mats = when_ids.size();
+							float stripe_w = (c_max.x - c_min.x) / static_cast<float>(num_mats);
+							for (size_t s = 0; s < num_mats; ++s) {
+								const auto& ref_mat = MaterialManager::get_material(when_ids[s]);
+								dl->AddRectFilled(ImVec2(c_min.x + s * stripe_w, c_min.y),
+												  ImVec2(c_min.x + (s + 1) * stripe_w, c_max.y),
+												  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255));
 							}
-							float n = static_cast<float>(when_ids.size());
-							btn_col = ImVec4(r_sum / n, g_sum / n, b_sum / n, 1.0f);
 						}
+					}
 
-						std::string popup_id =
-							"select_material_when_" + std::to_string(r_id) + "_" + std::to_string(c_id);
+					std::string popup_id = "select_material_when_" + std::to_string(r_id) + "_" + std::to_string(c_id);
 
-						ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
-						bool btn_clicked = ImGui::Button(label.c_str(), ImVec2(25, 25));
-						bool is_hovered = ImGui::IsItemHovered();
-						bool is_right_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Right) && is_hovered;
-						bool is_middle_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && is_hovered;
-						ImGui::PopStyleColor();
-
-						if (!reference.is_inherited) {
-							if (is_middle_clicked) {
+					if (!reference.is_inherited && c_id >= 0 && c_id < static_cast<int>(rule.when.size())) {
+						if (is_middle_clicked) {
+							// don't copy if there is more than one material selected in the when grid cell
+							if (dx == 0 && dy == 0) {
+								g_copied_rule_cell.type = CopiedRuleCell::Type::When;
+								g_copied_rule_cell.when_val = {mat.id};
+								g_copied_rule_cell.has_copied = true;
+							} else if (rule.when[c_id].size() <= 1) {
 								g_copied_rule_cell.type = CopiedRuleCell::Type::When;
 								g_copied_rule_cell.when_val = rule.when[c_id];
 								g_copied_rule_cell.has_copied = true;
-							} else if (is_right_clicked || (is_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Right))) {
+							}
+						} else if (is_right_clicked || (in_cell && ImGui::IsMouseDown(ImGuiMouseButton_Right))) {
+							if (dx != 0 || dy != 0) {
 								if (!rule.when[c_id].empty()) {
-									UndoManager::push_snapshot("Clear Rule Cell");
+									if (!s_is_dragging_clear) {
+										UndoManager::push_snapshot("Clear Rule Cell");
+										s_is_dragging_clear = true;
+									}
 									rule.when[c_id].clear();
 									rebuild_needed = true;
 									unsaved_changes = true;
 								}
-							} else if (io.KeyShift &&
-									   (btn_clicked || (is_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Left)))) {
-								if (g_copied_rule_cell.has_copied) {
+							}
+						} else if (io.KeyShift &&
+								   (btn_clicked || (in_cell && ImGui::IsMouseDown(ImGuiMouseButton_Left)))) {
+							if (dx != 0 || dy != 0) {
+								if (g_copied_rule_cell.can_paste_as_when()) {
 									auto target_when = g_copied_rule_cell.get_as_when();
 									if (rule.when[c_id] != target_when) {
-										UndoManager::push_snapshot("Paste Rule Cell");
+										if (!s_is_dragging_paint) {
+											UndoManager::push_snapshot("Paint Rule Cell");
+											s_is_dragging_paint = true;
+										}
 										rule.when[c_id] = target_when;
 										rebuild_needed = true;
 										unsaved_changes = true;
 									}
 								}
-							} else if (btn_clicked && !io.KeyShift) {
+							}
+						} else if (btn_clicked && !io.KeyShift) {
+							if (dx != 0 || dy != 0) {
 								ImGui::OpenPopup(popup_id.c_str());
 							}
 						}
-
-						if (is_hovered) {
-							std::string tip;
-							if (when_ids.empty()) {
-								tip = "Wildcard (*)";
-							} else {
-								for (size_t i = 0; i < when_ids.size(); ++i) {
-									if (i > 0)
-										tip += ", ";
-									tip += MaterialManager::get_material(when_ids[i]).name;
-								}
-							}
-							tip += "\n(Left-click menu, Shift-click/drag paint, Middle-click copy, Right-click clear)";
-							ImGui::SetTooltip("%s", tip.c_str());
-						}
-
-						if (ImGui::BeginPopup(popup_id.c_str())) {
-							for (const auto& m : materials) {
-								bool checked = std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) !=
-											   rule.when[c_id].end();
-								ImVec4 m_col = ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
-								if (UI::selectable_with_color((m.name + "##wcb_" + std::to_string(r_id) + "_" +
-															   std::to_string(c_id) + "_" + std::to_string(m.id))
-																  .c_str(),
-															  m_col, checked, ImGuiSelectableFlags_DontClosePopups,
-															  ImVec2(0, 0), true)) {
-									UndoManager::push_snapshot("Toggle Rule Checkbox");
-									if (!checked) {
-										if (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) ==
-											rule.when[c_id].end()) {
-											rule.when[c_id].push_back(m.id);
-										}
-									} else {
-										std::erase(rule.when[c_id], m.id);
-									}
-									g_copied_rule_cell.type = CopiedRuleCell::Type::When;
-									g_copied_rule_cell.when_val = rule.when[c_id];
-									g_copied_rule_cell.has_copied = true;
-									rebuild_needed = true;
-									unsaved_changes = true;
-								}
-							}
-
-							ImGui::EndPopup();
-						}
 					}
 
-					if (x < 4)
+					if (ImGui::BeginPopup(popup_id.c_str())) {
+						for (const auto& m : materials) {
+							bool checked = (c_id >= 0 && c_id < static_cast<int>(rule.when.size())) &&
+										   (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) !=
+											rule.when[c_id].end());
+							ImVec4 m_col = ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
+							if (UI::selectable_with_color((m.name + "##wcb_" + std::to_string(r_id) + "_" +
+														   std::to_string(c_id) + "_" + std::to_string(m.id))
+															  .c_str(),
+														  m_col, checked, ImGuiSelectableFlags_DontClosePopups,
+														  ImVec2(0, 0), true)) {
+								UndoManager::push_snapshot("Toggle Rule Checkbox");
+								if (!checked) {
+									if (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) ==
+										rule.when[c_id].end()) {
+										rule.when[c_id].push_back(m.id);
+									}
+								} else {
+									std::erase(rule.when[c_id], m.id);
+								}
+								g_copied_rule_cell.type = CopiedRuleCell::Type::When;
+								g_copied_rule_cell.when_val = rule.when[c_id];
+								g_copied_rule_cell.has_copied = true;
+								rebuild_needed = true;
+								unsaved_changes = true;
+							}
+						}
+						ImGui::EndPopup();
+					}
+
+					dl->AddRect(c_min, c_max, IM_COL32(45, 48, 56, 220));
+
+					if (is_hovered) {
+						dl->AddRect(c_min, c_max, IM_COL32(255, 255, 255, 240), 0.0f, 0, 1.5f);
+						std::string tip;
+						if (dx == 0 && dy == 0) {
+							tip = mat.name + " (Center)";
+						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size()) && rule.when[c_id].empty()) {
+							tip = "Wildcard (*)";
+						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size())) {
+							for (size_t i = 0; i < rule.when[c_id].size(); ++i) {
+								if (i > 0)
+									tip += ", ";
+								tip += MaterialManager::get_material(rule.when[c_id][i]).name;
+							}
+						}
+						tip += "\n(Left-click menu, Shift-click/drag paint, Middle-click copy, Right-click clear)";
+						ImGui::SetTooltip("%s", tip.c_str());
+					}
+
+					if (dx < rule.max_dx) {
 						ImGui::SameLine();
+					}
 					ImGui::PopID();
 				}
 			}
+			ImGui::PopStyleVar();
+			ImGui::EndGroup();	// When Grid Canvas
+
+			ImGui::SameLine(0.0f, 2.0f);
+
+			// Right column
+			ImGui::BeginGroup();
+			float right_v_pad = std::max(0.0f, (when_grid_px_h - (tiny_sz.y * 2.0f + 2.0f)) * 0.5f);
+			if (right_v_pad > 0.0f)
+				ImGui::Dummy(ImVec2(0.0f, right_v_pad));
+			if (ImGui::Button("+##right", tiny_sz)) {
+				try_expand(ExpandSide::Right);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Add column to right");
+			bool right_shrink_disabled = (rule.max_dx <= 0 || grid_w <= 1);
+			if (right_shrink_disabled)
+				ImGui::BeginDisabled();
+			if (ImGui::Button("-##right", tiny_sz)) {
+				do_shrink(ExpandSide::Right);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Remove column from right");
+			if (right_shrink_disabled)
+				ImGui::EndDisabled();
 			ImGui::EndGroup();
 
-			ImGui::SameLine(0.0f, 15.0f);
+			// Bottom + / - row centered under grid
+			float btm_pad_x = left_col_btn_w + std::max(0.0f, (when_grid_px_w - btn_pair_w) * 0.5f);
+			ImGui::Dummy(ImVec2(btm_pad_x, 0.0f));
+			ImGui::SameLine(0.0f, 0.0f);
+			if (ImGui::Button("+##bottom", tiny_sz)) {
+				try_expand(ExpandSide::Bottom);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Add row to bottom");
+			ImGui::SameLine(0.0f, 2.0f);
+			bool btm_shrink_disabled = (rule.max_dy <= 0 || grid_h <= 1);
+			if (btm_shrink_disabled)
+				ImGui::BeginDisabled();
+			if (ImGui::Button("-##bottom", tiny_sz)) {
+				do_shrink(ExpandSide::Bottom);
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Remove row from bottom");
+			if (btm_shrink_disabled)
+				ImGui::EndDisabled();
 
+			ImGui::PopStyleVar(2);	// FramePadding, ItemSpacing
+			ImGui::EndGroup();		// When Group
+
+			// Centered arrow between grids
+			ImGui::SameLine(0.0f, 6.0f);
+			ImGui::BeginGroup();
+			float arrow_y_offset = (tiny_sz.y + 2.0f) + std::max(0.0f, (when_grid_px_h - 14.0f) * 0.5f);
+			ImGui::Dummy(ImVec2(0.0f, arrow_y_offset));
+			ImGui::TextDisabled("->");
+			ImGui::EndGroup();
+
+			ImGui::SameLine(0.0f, 6.0f);
+
+			// Then Group
 			ImGui::BeginGroup();
 			ImGui::Text("Then");
+			ImGui::Dummy(ImVec2(0.0f, tiny_sz.y + 2.0f));
 
-			for (uint32_t y = 0; y < NEIGHBOR_SIZE; ++y) {
-				for (uint32_t x = 0; x < NEIGHBOR_SIZE; ++x) {
-					const uint32_t c_id = y * NEIGHBOR_SIZE + x;
-					ImGui::PushID(c_id + 100);
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, 1.0f));
+			for (int dy = rule.min_dy; dy <= rule.max_dy; ++dy) {
+				for (int dx = rule.min_dx; dx <= rule.max_dx; ++dx) {
+					int c_id = rule.get_cell_idx(dx, dy);
+					ImGui::PushID(c_id + 1000);
 
-					std::string label = "-";
-					ImVec4 btn_col = ImGui::GetStyle().Colors[ImGuiCol_FrameBg];
+					ImGui::InvisibleButton("##tc", ImVec2(cell_sz, cell_sz));
+					bool is_hovered = ImGui::IsItemHovered();
+					bool btn_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+					bool is_right_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+					bool is_middle_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Middle);
+					ImVec2 c_min = ImGui::GetItemRectMin();
+					ImVec2 c_max = ImGui::GetItemRectMax();
+					bool in_cell = (io.MousePos.x >= c_min.x && io.MousePos.x < c_max.x && io.MousePos.y >= c_min.y &&
+									io.MousePos.y < c_max.y);
 
-					uint8_t then_id = rule.then[c_id];
+					uint8_t then_id = (c_id >= 0 && c_id < static_cast<int>(rule.then.size())) ? rule.then[c_id] : 255;
 
 					if (then_id != 255) {
-						const auto& reference_mat = MaterialManager::get_material(then_id);
-						label = reference_mat.name.substr(0, 1);
-						btn_col = ImVec4(reference_mat.color[0] / 255.f, reference_mat.color[1] / 255.f,
-										 reference_mat.color[2] / 255.f, 1.0f);
+						const auto& ref_mat = MaterialManager::get_material(then_id);
+						dl->AddRectFilled(c_min, c_max,
+										  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255));
 					} else {
-						if (rule.when[c_id].size() == 1) {
-							const auto& reference_mat = MaterialManager::get_material(rule.when[c_id][0]);
-							label = reference_mat.name.substr(0, 1);
-							btn_col =
-								ImVec4(reference_mat.color[0] / 255.f * 0.4f, reference_mat.color[1] / 255.f * 0.4f,
-									   reference_mat.color[2] / 255.f * 0.4f, 1.0f);
-						} else if (rule.when[c_id].size() > 1) {
-							label = std::to_string(rule.when[c_id].size());
-							float r_sum = 0, g_sum = 0, b_sum = 0;
-							for (uint8_t id : rule.when[c_id]) {
-								const auto& reference_mat = MaterialManager::get_material(id);
-								r_sum += reference_mat.color[0] / 255.f;
-								g_sum += reference_mat.color[1] / 255.f;
-								b_sum += reference_mat.color[2] / 255.f;
+						// Unchanged (-)
+						if (dx == 0 && dy == 0) {
+							dl->AddRectFilled(
+								c_min, c_max,
+								IM_COL32(mat.color[0] * 0.35f, mat.color[1] * 0.35f, mat.color[2] * 0.35f, 255));
+							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										IM_COL32(200, 200, 200, 140), 1.0f);
+						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size()) &&
+								   rule.when[c_id].size() == 1) {
+							const auto& ref_mat = MaterialManager::get_material(rule.when[c_id][0]);
+							dl->AddRectFilled(c_min, c_max,
+											  IM_COL32(ref_mat.color[0] * 0.35f, ref_mat.color[1] * 0.35f,
+													   ref_mat.color[2] * 0.35f, 255));
+							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										IM_COL32(200, 200, 200, 140), 1.0f);
+						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size()) &&
+								   rule.when[c_id].size() > 1) {
+							size_t num_mats = rule.when[c_id].size();
+							float stripe_w = (c_max.x - c_min.x) / static_cast<float>(num_mats);
+							for (size_t s = 0; s < num_mats; ++s) {
+								const auto& ref_mat = MaterialManager::get_material(rule.when[c_id][s]);
+								dl->AddRectFilled(ImVec2(c_min.x + s * stripe_w, c_min.y),
+												  ImVec2(c_min.x + (s + 1) * stripe_w, c_max.y),
+												  IM_COL32(ref_mat.color[0] * 0.35f, ref_mat.color[1] * 0.35f,
+														   ref_mat.color[2] * 0.35f, 255));
 							}
-							float n = static_cast<float>(rule.when[c_id].size());
-							btn_col = ImVec4(r_sum / n * 0.4f, g_sum / n * 0.4f, b_sum / n * 0.4f, 1.0f);
+							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										IM_COL32(200, 200, 200, 140), 1.0f);
+						} else {
+							dl->AddRectFilled(c_min, c_max, IM_COL32(24, 26, 30, 255));
+							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
+										IM_COL32(100, 105, 115, 140), 1.0f);
 						}
 					}
 
 					const std::string popup_id =
 						"select_material_then_" + std::to_string(r_id) + "_" + std::to_string(c_id);
 
-					ImGui::PushStyleColor(ImGuiCol_Button, btn_col);
-					bool btn_clicked = ImGui::Button(label.c_str(), ImVec2(25, 25));
-					bool is_hovered = ImGui::IsItemHovered();
-					bool is_right_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Right) && is_hovered;
-					bool is_middle_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Middle) && is_hovered;
-					ImGui::PopStyleColor();
-
-					if (!reference.is_inherited) {
+					if (!reference.is_inherited && c_id >= 0 && c_id < static_cast<int>(rule.then.size())) {
 						if (is_middle_clicked) {
 							g_copied_rule_cell.type = CopiedRuleCell::Type::Then;
 							g_copied_rule_cell.then_val = rule.then[c_id];
 							g_copied_rule_cell.has_copied = true;
-						} else if (is_right_clicked || (is_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Right))) {
+						} else if (is_right_clicked || (in_cell && ImGui::IsMouseDown(ImGuiMouseButton_Right))) {
 							if (rule.then[c_id] != 255) {
-								UndoManager::push_snapshot("Clear Then Cell");
+								if (!s_is_dragging_clear) {
+									UndoManager::push_snapshot("Clear Then Cell");
+									s_is_dragging_clear = true;
+								}
 								rule.then[c_id] = 255;
 								rebuild_needed = true;
 								unsaved_changes = true;
 							}
 						} else if (io.KeyShift &&
-								   (btn_clicked || (is_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Left)))) {
-							if (g_copied_rule_cell.has_copied) {
+								   (btn_clicked || (in_cell && ImGui::IsMouseDown(ImGuiMouseButton_Left)))) {
+							if (g_copied_rule_cell.can_paste_as_then()) {
 								uint8_t target_then = g_copied_rule_cell.get_as_then();
 								if (rule.then[c_id] != target_then) {
-									UndoManager::push_snapshot("Paste Then Cell");
+									if (!s_is_dragging_paint) {
+										UndoManager::push_snapshot("Paint Then Cell");
+										s_is_dragging_paint = true;
+									}
 									rule.then[c_id] = target_then;
 									rebuild_needed = true;
 									unsaved_changes = true;
@@ -3099,15 +3420,9 @@ void UI::render_material_editor() {
 						}
 					}
 
-					if (is_hovered) {
-						std::string tip =
-							(then_id == 255) ? "Unchanged (-)" : MaterialManager::get_material(rule.then[c_id]).name;
-						tip += "\n(Left-click menu, Shift-click/drag paint, Middle-click copy, Right-click clear)";
-						ImGui::SetTooltip("%s", tip.c_str());
-					}
-
 					if (ImGui::BeginPopup(popup_id.c_str())) {
-						if (UI::selectable_with_color("Unchanged (-)", btn_col, then_id == 255)) {
+						ImVec4 neutral_col = ImGui::GetStyle().Colors[ImGuiCol_FrameBg];
+						if (UI::selectable_with_color("Unchanged (-)", neutral_col, then_id == 255)) {
 							UndoManager::push_snapshot("Set Then Unchanged");
 							rule.then[c_id] = 255;
 							g_copied_rule_cell.type = CopiedRuleCell::Type::Then;
@@ -3134,12 +3449,26 @@ void UI::render_material_editor() {
 						ImGui::EndPopup();
 					}
 
-					if (x < 4)
+					dl->AddRect(c_min, c_max, IM_COL32(45, 48, 56, 220));
+
+					if (is_hovered) {
+						dl->AddRect(c_min, c_max, IM_COL32(255, 255, 255, 240), 0.0f, 0, 1.5f);
+						std::string tip =
+							(then_id == 255) ? "Unchanged (-)" : MaterialManager::get_material(then_id).name;
+						tip += "\n(Left-click menu, Shift-click/drag paint, Middle-click copy, Right-click clear)";
+						ImGui::SetTooltip("%s", tip.c_str());
+					}
+
+					if (dx < rule.max_dx) {
 						ImGui::SameLine();
+					}
 					ImGui::PopID();
 				}
 			}
-			ImGui::EndGroup();
+			ImGui::PopStyleVar();
+			ImGui::EndGroup();	// Then Group
+
+			ImGui::EndGroup();	// Right side group);
 
 			if (reference.is_inherited) {
 				ImGui::EndDisabled();
@@ -3153,6 +3482,13 @@ void UI::render_material_editor() {
 			ImGui::PopID();
 		}
 		ImGui::EndChild();
+
+		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			s_is_dragging_paint = false;
+		}
+		if (!ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+			s_is_dragging_clear = false;
+		}
 
 		if (rebuild_needed) {
 			MaterialManager::update_material_rules(selected_id, mat);
@@ -7202,6 +7538,22 @@ void UI::render_advanced_options() {
 			}
 			ImGui::EndPopup();
 		}
+
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+
+		ImGui::Text("Rule Neighborhoods");
+		bool allow_large = ConfigManager::get_config().allow_large_neighborhoods;
+		if (ImGui::Checkbox("Allow Large Rule Neighborhoods (>100 cells)", &allow_large)) {
+			ConfigManager::get_config().allow_large_neighborhoods = allow_large;
+			ConfigManager::save();
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Allows rule neighborhoods to exceed 100 cells.\n"
+							  "Warning: Very large neighborhoods can significantly impact simulation performance.");
+		}
+
 		ImGui::EndTabItem();
 	}
 }
@@ -7528,7 +7880,7 @@ void UI::render_shortcuts() {
 }
 
 void UI::render_theme_editor() {
-	if (ImGui::BeginTabItem("Theme Editor")) {
+	if (ImGui::BeginTabItem("Theme")) {
 		ImGui::Spacing();
 
 		auto& cfg = ConfigManager::get_config();
@@ -7760,6 +8112,11 @@ void UI::render_modals() {
 		open_empty_rule_warning_popup = false;
 	}
 
+	if (open_large_neighborhood_warning_popup) {
+		ImGui::OpenPopup("Performance Warning##LargeNeighborhood");
+		open_large_neighborhood_warning_popup = false;
+	}
+
 	if (open_switch_popup) {
 		ImGui::OpenPopup("Unsaved Changes Switch");
 		open_switch_popup = false;
@@ -7893,11 +8250,11 @@ void UI::render_modals() {
 			auto& mats = MaterialManager::get_materials();
 			for (auto& m : mats) {
 				if (m.id == 0) {
+					UndoManager::push_snapshot("Add Rule");
 					RuleDefinition new_rule;
-					new_rule.when[12] = {m.id};
-					new_rule.then.fill(255);
-					new_rule.chance = 100.0f;
+					new_rule.init_default(m.id);
 					m.rules.push_back(new_rule);
+					m.rule_order.push_back({false, m.rules.size() - 1});
 					MaterialManager::rebuild_compiled_rules();
 					unsaved_changes = true;
 					break;
@@ -7907,6 +8264,55 @@ void UI::render_modals() {
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Cancel", ImVec2(120, 30))) {
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
+	}
+
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+	if (ImGui::BeginPopupModal("Performance Warning##LargeNeighborhood", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::Text("Warning: Expanding to Large Rule Neighborhood (>100 cells)");
+		ImGui::Spacing();
+		ImGui::TextWrapped(
+			"You are expanding the rule neighborhood beyond 100 cells.\n\n"
+			"Very large neighborhoods significantly increase the computational area checked per cell, "
+			"which can noticeably impact simulation performance.\n\n"
+			"Would you like to enable 'Allow Large Rule Neighborhoods' in Advanced Settings and expand this rule?");
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+
+		if (ImGui::Button("Enable & Expand", ImVec2(150, 30))) {
+			ConfigManager::get_config().allow_large_neighborhoods = true;
+			ConfigManager::save();
+			if (s_pending_expand_rule_idx >= 0) {
+				auto& mats = MaterialManager::get_materials();
+				for (auto& m : mats) {
+					if (m.id == s_pending_expand_mat_id) {
+						if (s_pending_expand_rule_idx < static_cast<int>(m.rules.size())) {
+							UndoManager::push_snapshot("Expand Rule Neighborhood");
+							auto& rule = m.rules[s_pending_expand_rule_idx];
+							if (s_pending_expand_side == ExpandSide::Top)
+								rule.expand_top();
+							else if (s_pending_expand_side == ExpandSide::Bottom)
+								rule.expand_bottom();
+							else if (s_pending_expand_side == ExpandSide::Left)
+								rule.expand_left();
+							else if (s_pending_expand_side == ExpandSide::Right)
+								rule.expand_right();
+							MaterialManager::rebuild_compiled_rules();
+							unsaved_changes = true;
+						}
+						break;
+					}
+				}
+			}
+			s_pending_expand_rule_idx = -1;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(100, 30))) {
+			s_pending_expand_rule_idx = -1;
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::EndPopup();

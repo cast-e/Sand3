@@ -158,6 +158,7 @@ private:
 	static bool open_create_set_popup;
 	static bool open_delete_set_popup;
 	static bool open_empty_rule_warning_popup;
+	static bool open_large_neighborhood_warning_popup;
 
 	static bool duplicate_set_checkbox;
 	static bool exit_save_as_new_set;

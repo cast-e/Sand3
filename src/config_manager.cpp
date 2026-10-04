@@ -131,6 +131,8 @@ void ConfigManager::load() {
 						config.thread_count = std::stoi(val);
 					else if (key == "prevent_downclock")
 						config.prevent_downclock = (val == "true" || val == "1");
+					else if (key == "allow_large_neighborhoods")
+						config.allow_large_neighborhoods = (val == "true" || val == "1");
 				} catch (...) {}
 			} else if (section == "UI") {
 				try {
@@ -292,6 +294,9 @@ void ConfigManager::save() {
 		adv_lines.push_back("thread_count = " + std::to_string(config.thread_count));
 	if (config.prevent_downclock != default_config.prevent_downclock)
 		adv_lines.push_back(std::string("prevent_downclock = ") + (config.prevent_downclock ? "true" : "false"));
+	if (config.allow_large_neighborhoods != default_config.allow_large_neighborhoods)
+		adv_lines.push_back(std::string("allow_large_neighborhoods = ") +
+							(config.allow_large_neighborhoods ? "true" : "false"));
 
 	if (!adv_lines.empty()) {
 		out << "[Advanced]\n";

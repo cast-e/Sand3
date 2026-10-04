@@ -14,13 +14,29 @@ struct GpuPushConstants {
 	uint32_t sim_height;
 	uint32_t reverse_x;
 	uint32_t reverse_y;
+	uint32_t step_x;
+	uint32_t step_y;
+};
+
+struct GpuCondition {
+	int32_t dx;
+	int32_t dy;
+	uint32_t allowed_mask[8];
+	uint32_t pad[2];
+};
+
+struct GpuAction {
+	int32_t dx;
+	int32_t dy;
+	uint32_t target_material;
+	uint32_t pad;
 };
 
 struct GpuRuleVariant {
-	uint32_t when_bits[200];
-	uint32_t then_val[25];
-	uint32_t when_wildcard;
-	uint32_t pad[6];
+	uint32_t cond_start;
+	uint32_t cond_count;
+	uint32_t act_start;
+	uint32_t act_count;
 };
 
 struct GpuRule {
@@ -41,10 +57,12 @@ struct GpuRulesHeader {
 	GpuMaterial materials[256];
 	uint32_t total_rules;
 	uint32_t total_variants;
-	uint32_t pad0;
-	uint32_t pad1;
+	uint32_t total_conditions;
+	uint32_t total_actions;
 	GpuRule rules[2048];
 	GpuRuleVariant variants[4096];
+	GpuCondition conditions[32768];
+	GpuAction actions[16384];
 };
 
 class Vulkan {
