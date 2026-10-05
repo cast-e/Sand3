@@ -173,7 +173,6 @@ githubRouter.get('/readme', async (_req, res): Promise<void> => {
 githubRouter.get('/instructions', (req, res) => {
   res.json({
     linux: {
-      prerequisites: 'Vulkan drivers (Mesa / NVIDIA / AMD), ALSA or PulseAudio',
       steps: [
         'Download and extract `sand3-v*-linux.zip`',
         'Open terminal in the extracted directory',
@@ -182,7 +181,7 @@ githubRouter.get('/instructions', (req, res) => {
       ]
     },
     windows: {
-      prerequisites: 'Windows 10/11 64-bit, Vulkan-compatible GPU drivers',
+      prerequisites: 'Windows 10/11 64-bit',
       steps: [
         'Download and extract `sand3-v*-win64.zip`',
         'Open the extracted folder',

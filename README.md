@@ -29,7 +29,7 @@ Fast cellular automaton with fully customizable materials and rules.
 - **Per-Set Customization**: Custom material shortcuts, recommended canvas dimensions, and metadata configured per set (`set_config.ini`).
 - **Fully Customizable Controls & Themes**: Customize all keybindings, graphics options, UI scaling, and ~55 theme color tokens with delta-only `.ini` saving.
 - **Step-by-Step Simulation**: Single-step execution for fine-grained rule inspection and debugging.
-- **Multiplatform Standalone Binaries**: Clean standalone binaries for Linux and Windows (native GUI application with no console window).
+- **Multiplatform Standalone Binaries**: Clean standalone binaries for Linux and Windows (native GUI application).
 
 ## Configuration
 
@@ -37,79 +37,99 @@ All keybinds, graphics settings, canvas dimensions, simulation backend, and UI t
 
 See [CONFIG.md](CONFIG.md) for the complete reference of `config.ini` and `set_config.ini`'s settings and default values/bindings.
 
-## Building
+## Building From Source
 
 ### Prerequisites
 
-Install a C++20 compatible compiler (GCC, Clang, or MinGW-w64) and CMake 3.25+.
+| Platform | Required Tools | Notes |
+| :--- | :--- | :--- |
+| **Common** | Git, CMake 3.25+ | Ensure CMake and Git are in your `PATH`. |
+| **Linux** | GCC 12+ (or Clang 16+) with C++20 | `sudo apt install build-essential cmake ninja-build git` |
+| **Windows** | MinGW-w64 (GCC 12+) and Ninja | Recommended: [MSYS2](https://www.msys2.org/) UCRT64 (`pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-ninja`). Add `C:\msys64\ucrt64\bin` to your system `PATH`. |
 
-Make sure to clone or update all submodules:
+Clone the repository recursively with all submodules:
+
+```bash
+git clone --recursive https://github.com/cast-e/Sand3.git
+cd Sand3
+```
+
+If you previously cloned without `--recursive`, fetch submodules manually:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-### Linux Building
-
-#### Native compilation using GCC
-
-To build as a Release (default):
-
-```bash
-cmake -B build --preset linux-gcc
-cmake --build build
-```
-
-To build as a Debug:
-
-```bash
-cmake -B build --preset linux-gcc-debug
-cmake --build build
-```
-
-The resulting executable is placed in `./bin/linux/sand3`.
-
-### Windows Building
-
-#### Cross-compilation from Linux using MinGW-w64
-
-To build as a Release (default):
-
-```bash
-cmake -B build --preset windows-mingw
-cmake --build build
-```
-
-To build as a Debug:
-
-```bash
-cmake -B build --preset windows-mingw-debug
-cmake --build build
-```
-
-### Windows Building
-
-Windows building is currently not supported.
-
-## Running
+---
 
 ### Linux
 
-Run from the `./bin/linux` folder:
+#### Native Compilation (GCC)
 
 ```bash
-cd ./bin/linux
-./sand3
+# Release build (recommended)
+cmake --preset linux-gcc
+cmake --build --preset linux-gcc
+
+# Debug build
+cmake --preset linux-gcc-debug
+cmake --build --preset linux-gcc-debug
 ```
+
+Output executable: `./bin/linux/sand3`
+Build directory: `./build-linux` (contains `./build-linux/compile_commands.json`)
+
+---
 
 ### Windows
 
-Run from the `./bin/win64` folder:
+#### Native Compilation (MinGW-w64 + Ninja)
+
+Open PowerShell or Command Prompt with MSYS2/MinGW in your `PATH`:
 
 ```powershell
-cd .\bin\win64
-.\sand3.exe
+# Release build (recommended)
+cmake --preset windows-mingw
+cmake --build --preset windows-mingw
+
+# Debug build
+cmake --preset windows-mingw-debug
+cmake --build --preset windows-mingw-debug
 ```
+
+Output executable: `.\bin\win64\sand3.exe` (standalone executable).
+Build directory: `.\build-win64` (contains `.\build-win64\compile_commands.json`)
+
+#### Cross-compilation from Linux
+
+You can also cross-compile Windows binaries from Linux using `x86_64-w64-mingw32-gcc`:
+
+```bash
+cmake --preset windows-mingw
+cmake --build --preset windows-mingw
+```
+
+---
+
+### IDE & Language Server Support (clangd / VS Code)
+
+Linux and Windows builds cleanly coexist in their respective directories (`build-linux` and `build-win64`). VS Code and the clangd language server automatically detect the active `compile_commands.json` based on the selected CMake preset via `${command:cmake.buildDirectory}` without requiring symlinks or root copies.
+
+---
+
+## Running From Source
+
+- **Linux**:
+  ```bash
+  cd ./bin/linux
+  ./sand3
+  ```
+
+- **Windows**:
+  ```powershell
+  cd .\bin\win64
+  .\sand3.exe
+  ```
 
 ## Dependencies
 

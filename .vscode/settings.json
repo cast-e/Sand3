@@ -1,0 +1,9 @@
+{
+  "clangd.arguments": [
+    "--compile-commands-dir=${command:cmake.buildDirectory}",
+    "--query-driver=C:/msys64/ucrt64/bin/*,/usr/bin/gcc*,/usr/bin/g++*,*x86_64-w64-mingw32*"
+  ],
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.default.compileCommands": "${command:cmake.buildDirectory}/compile_commands.json",
+  "cmake.useCMakePresets": "always"
+}

@@ -9,3 +9,4 @@ linux
 
 todo.txt
 .env*
+compile_commands.json

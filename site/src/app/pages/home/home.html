@@ -120,51 +120,6 @@
       </section>
 
       <section class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <h3>
-            <img src="/icons/application_osx_terminal.png" class="silk-icon" alt="Run" />
-            Quickstart & Running Instructions
-          </h3>
-          <div class="tab-toggles">
-            <button class="btn btn-sm" [class.btn-primary]="activeTab() === 'linux'" (click)="activeTab.set('linux')">
-              <img src="/icons/tux.png" class="silk-icon" alt="Linux" /> Linux
-            </button>
-            <button class="btn btn-sm" [class.btn-primary]="activeTab() === 'windows'"
-              (click)="activeTab.set('windows')">
-              <img src="/icons/application.png" class="silk-icon" alt="Windows" /> Windows
-            </button>
-          </div>
-        </div>
-        <div class="card-body">
-          @if (activeTab() === 'linux') {
-          <h4>Running on Linux</h4>
-          <p class="text-muted">
-            Sand3 runs as a standalone binary with zero external runtime package dependencies. Requires a Vulkan-capable
-            GPU driver (Mesa, NVIDIA, or AMD).
-          </p>
-          <pre><code># 1. Download and extract the archive:
-unzip sand3-*-linux.zip
-cd sand3-*-linux
-
-# 2. Grant executable permission and run:
-chmod +x sand3
-./sand3</code></pre>
-          } @else {
-          <h4>Running on Windows</h4>
-          <p class="text-muted">
-            Prerequisites: 64-bit Windows 10 or 11 with Vulkan-compatible graphics drivers. Runs as a clean native GUI
-            application with no persistent command prompt window.
-          </p>
-          <pre><code># 1. Extract the downloaded sand3-*-win64.zip archive
-cd sand3-*-win64
-
-# 2. Run the standalone executable (double-click or via terminal):
-.\sand3.exe</code></pre>
-          }
-        </div>
-      </section>
-
-      <section class="card mb-4">
         <div class="card-header">
           <h3>
             <img src="/icons/book_open.png" class="silk-icon" alt="Guide" />
@@ -196,16 +151,10 @@ cd sand3-*-win64
       </section>
 
       <section class="card mb-4">
-        <div class="card-header">
+        <div class="card-header d-flex justify-content-between align-items-center">
           <h3>
             <img src="/icons/cog.png" class="silk-icon" alt="Build" />
             Building from Source
-          </h3>
-        </div>
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <h3>
-            <img src="/icons/application_osx_terminal.png" class="silk-icon" alt="Run" />
-            Quickstart & Running Instructions
           </h3>
           <div class="tab-toggles">
             <button class="btn btn-sm" [class.btn-primary]="activeTab() === 'linux'" (click)="activeTab.set('linux')">
@@ -219,44 +168,80 @@ cd sand3-*-win64
         </div>
         <div class="card-body">
           <p class="text-muted">
-            Requires a C++20 compiler (GCC 12+, Clang 16+) and CMake 3.25+. All major third-party
-            dependencies (SDL3, ImGui, Volk, fmt, nlohmann_json, miniz, libcurl) are bundled or linked. Just remember to
-            clone recursively for all the dependencies!
+            Requires a C++20 compiler and CMake 3.25+. All major third-party dependencies (SDL3, ImGui, Volk, fmt,
+            nlohmann_json, miniz, libcurl) are bundled as submodules or static libraries.
+          </p>
+
+          <p class="text-muted small">
+            <strong>Clone with all submodules:</strong>
           </p>
           <pre><code>git clone --recursive https://github.com/cast-e/Sand3.git
 cd Sand3</code></pre>
+          <p class="text-muted small">
+            If you already cloned without <code>--recursive</code>, fetch submodules manually:
+          </p>
+          <pre><code>git submodule update --init --recursive</code></pre>
           <br>
           @if (activeTab() === 'linux') {
-          <h4>Building on Linux</h4>
+          <h4>Linux Prerequisites</h4>
           <p class="text-muted">
-            Release build (default)
+            Install <strong>GCC 12+</strong> (or Clang 16+), <strong>CMake 3.25+</strong>, and <strong>Ninja</strong>:
           </p>
-          <pre><code>cmake -B build --preset linux-gcc
-cmake --build build
-</code></pre>
+          <pre><code># Debian/Ubuntu based
+sudo apt install build-essential cmake ninja-build git</code></pre>
+          <pre><code># Arch-based
+sudo pacman -S base-devel cmake ninja git</code></pre>
+          <br>
+          <h4>Building on Linux (GCC)</h4>
+          <p class="text-muted">
+            Release build (recommended)
+          </p>
+          <pre><code>cmake --preset linux-gcc
+cmake --build --preset linux-gcc</code></pre>
           <p class="text-muted">
             Debug build
           </p>
-          <pre><code>cmake -B build --preset linux-gcc-debug
-cmake --build build
-</code></pre>
+          <pre><code>cmake --preset linux-gcc-debug
+cmake --build --preset linux-gcc-debug</code></pre>
+          <br>
+          <h4>Running on Linux</h4>
+          <pre><code>cd ./bin/linux
+./sand3</code></pre>
+
+          <h4>Cross-compilation to Windows (MinGW-w64)</h4>
           <p class="text-muted">
-            Cross-compile to Windows Release build (default)
+            Requires <code>mingw-w64</code> installed on your Linux host:
           </p>
-          <pre><code>cmake -B build --preset windows-mingw
-cmake --build build
-</code></pre>
-          <p class="text-muted">
-            Cross-compile to Windows Debug build
-          </p>
-          <pre><code>cmake -B build --preset windows-mingw-debug
-cmake --build build
-</code></pre>
+          <pre><code>cmake --preset windows-mingw
+cmake --build --preset windows-mingw</code></pre>
           } @else {
-          <h4>Building on Windows</h4>
+          <h4>Windows Prerequisites</h4>
           <p class="text-muted">
-            Windows building is currently not supported.
+            Install <strong>MinGW-w64 (GCC 12+)</strong> and <strong>Ninja</strong>, recommended via
+            <a href="https://www.msys2.org/" target="_blank" rel="noopener">MSYS2</a> UCRT64:
           </p>
+          <pre><code>pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-ninja</code></pre>
+          <p class="text-muted small">
+            Ensure <code>C:\msys64\ucrt64\bin</code> is added to your system <code>PATH</code>.
+          </p>
+          <h4>Building on Windows (MinGW-w64 + Ninja)</h4>
+          <p class="text-muted">
+            Release build (recommended)
+          </p>
+          <pre><code>cmake --preset windows-mingw
+cmake --build --preset windows-mingw</code></pre>
+          <p class="text-muted">
+            Debug build
+          </p>
+          <pre><code>cmake --preset windows-mingw-debug
+cmake --build --preset windows-mingw-debug</code></pre>
+          <br>
+          <h4>Running on Windows</h4>
+          <p class="text-muted">
+            Produces a clean standalone executable:
+          </p>
+          <pre><code>cd .\bin\win64
+.\sand3.exe</code></pre>
           }
         </div>
       </section>

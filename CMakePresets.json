@@ -4,6 +4,7 @@
     {
       "name": "windows-mingw",
       "displayName": "Windows (MinGW-w64)",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-win64",
       "toolchainFile": "${sourceDir}/cmake/mingw-w64-x86_64.cmake",
       "cacheVariables": {
@@ -13,6 +14,7 @@
     {
       "name": "windows-mingw-debug",
       "displayName": "Windows (MinGW-w64) Debug",
+      "generator": "Ninja",
       "binaryDir": "${sourceDir}/build-win64-debug",
       "toolchainFile": "${sourceDir}/cmake/mingw-w64-x86_64.cmake",
       "cacheVariables": {
@@ -34,6 +36,24 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-mingw",
+      "configurePreset": "windows-mingw"
+    },
+    {
+      "name": "windows-mingw-debug",
+      "configurePreset": "windows-mingw-debug"
+    },
+    {
+      "name": "linux-gcc",
+      "configurePreset": "linux-gcc"
+    },
+    {
+      "name": "linux-gcc-debug",
+      "configurePreset": "linux-gcc-debug"
     }
   ]
 }
