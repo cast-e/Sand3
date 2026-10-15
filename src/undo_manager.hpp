@@ -6,11 +6,13 @@
 #include <string>
 #include <vector>
 
+#include "grid.hpp"
 #include "material_manager.hpp"
 #include "ui.hpp"
 
 struct UndoSnapshot {
 	std::vector<uint8_t> grid_materials;
+	std::vector<Cell> grid_cells;
 	std::vector<MaterialDefinition> materials;
 	int selected_id = -1;
 	std::string action_name;
@@ -39,4 +41,5 @@ private:
 	static std::deque<UndoSnapshot> history;
 	static int current_index;
 	static std::vector<uint8_t> pending_grid_state;
+	static std::vector<Cell> pending_grid_cells;
 };

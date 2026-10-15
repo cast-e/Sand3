@@ -34,20 +34,40 @@
 static ImVec4 default_colors[ImGuiCol_COUNT];
 static bool default_colors_initialized = false;
 
+void UI::apply_theme_style(ImGuiStyle& style, const UIConfig& cfg) {
+	style.WindowRounding = cfg.window_rounding;
+	style.ChildRounding = cfg.child_rounding;
+	style.FrameRounding = cfg.frame_rounding;
+	style.PopupRounding = cfg.popup_rounding;
+	style.ScrollbarRounding = cfg.scrollbar_rounding;
+	style.GrabRounding = cfg.grab_rounding;
+	style.TabRounding = cfg.tab_rounding;
+
+	style.WindowBorderSize = cfg.window_border_size;
+	style.ChildBorderSize = cfg.child_border_size;
+	style.PopupBorderSize = cfg.popup_border_size;
+	style.FrameBorderSize = cfg.frame_border_size;
+	style.TabBorderSize = cfg.tab_border_size;
+
+	style.WindowPadding = ImVec2(cfg.window_padding_x, cfg.window_padding_y);
+	style.FramePadding = ImVec2(cfg.frame_padding_x, cfg.frame_padding_y);
+	style.ItemSpacing = ImVec2(cfg.item_spacing_x, cfg.item_spacing_y);
+	style.ItemInnerSpacing = ImVec2(cfg.item_inner_spacing_x, cfg.item_inner_spacing_y);
+	style.CellPadding = ImVec2(cfg.cell_padding_x, cfg.cell_padding_y);
+	style.IndentSpacing = cfg.indent_spacing;
+	style.ScrollbarSize = cfg.scrollbar_size;
+	style.GrabMinSize = cfg.grab_min_size;
+}
+
+float UI::get_spacing(float offset) {
+	const auto& cfg = ConfigManager::get_config();
+	return std::max(0.0f, cfg.ui.base_spacing + offset);
+}
+
 static void init_style() {
 	const auto& cfg = ConfigManager::get_config();
 	ImGuiStyle& style = ImGui::GetStyle();
-	style.WindowRounding = cfg.ui.window_rounding;
-	style.ChildRounding = cfg.ui.frame_rounding;
-	style.FrameRounding = cfg.ui.frame_rounding;
-	style.PopupRounding = cfg.ui.frame_rounding;
-	style.GrabRounding = cfg.ui.frame_rounding;
-	style.TabRounding = cfg.ui.frame_rounding;
-
-	style.ItemSpacing = ImVec2(8, 6);
-	style.ItemInnerSpacing = ImVec2(6, 6);
-	style.WindowPadding = ImVec2(12, 12);
-	style.FramePadding = ImVec2(8, 5);
+	UI::apply_theme_style(style, cfg.ui);
 
 	ImVec4* colors = style.Colors;
 	colors[ImGuiCol_Text] = ImVec4(0.95f, 0.96f, 0.98f, 1.00f);
@@ -147,6 +167,17 @@ void UI::reset_theme_colors() {
 struct GridRect {
 	int x, y, w, h;
 };
+
+static int s_active_eq_rule_id = -1;
+static int s_active_eq_cell_id = -1;
+static int s_active_eq_attr_idx = 0;
+static ImGuiID s_active_eq_popup_imgui_id = 0;
+static std::string s_active_eq_popup_id;
+static ImRect s_active_popup_rect;
+static int s_active_raw_edit_attr = -1;
+static bool s_keep_eq_popup_open = false;
+static std::unordered_map<int, ImRect> s_rule_when_rect;
+static std::unordered_map<int, ImRect> s_rule_then_rect;
 
 struct ScreenRect {
 	float x1, y1, x2, y2;
@@ -449,7 +480,11 @@ static void paint_brush_at(int start_x, int start_y, int brush_size, uint8_t mat
 	if (shape == BrushShape::Square || brush_size <= 1) {
 		parallel_for_rows(min_y, max_y, [min_x, max_x, mat_id](int y) {
 			for (int x = min_x; x < max_x; ++x) {
-				Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+				if (UI::brush_overwrite_attributes) {
+					Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+				} else {
+					Grid::set_cell_material_only(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+				}
 			}
 		});
 	} else {
@@ -468,7 +503,11 @@ static void paint_brush_at(int start_x, int start_y, int brush_size, uint8_t mat
 				rx_min = std::clamp(rx_min, min_x, max_x);
 				rx_max = std::clamp(rx_max, min_x, max_x);
 				for (int x = rx_min; x < rx_max; ++x) {
-					Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+					if (UI::brush_overwrite_attributes) {
+						Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+					} else {
+						Grid::set_cell_material_only(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+					}
 				}
 			}
 		});
@@ -486,22 +525,106 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 		int x0 = std::clamp(span.x0, 0, static_cast<int>(Grid::get_width()));
 		int x1 = std::clamp(span.x1, 0, static_cast<int>(Grid::get_width()));
 		for (int x = x0; x < x1; ++x) {
-			Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+			if (UI::brush_overwrite_attributes) {
+				Grid::set_cell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+			} else {
+				Grid::set_cell_material_only(static_cast<uint32_t>(x), static_cast<uint32_t>(y), mat_id);
+			}
 		}
 	}
 }
 
-static void flood_fill(uint32_t start_x, uint32_t start_y, uint8_t fill_mat) {
-	if (start_x >= Grid::get_width() || start_y >= Grid::get_height())
+static void paint_attribute_brush_at(int start_x, int start_y, int brush_size, uint8_t attr_idx, float val,
+									 bool set_exact, BrushShape shape) {
+	int min_x = std::clamp(start_x, 0, static_cast<int>(Grid::get_width()));
+	int max_x = std::clamp(start_x + brush_size, 0, static_cast<int>(Grid::get_width()));
+	int min_y = std::clamp(start_y, 0, static_cast<int>(Grid::get_height()));
+	int max_y = std::clamp(start_y + brush_size, 0, static_cast<int>(Grid::get_height()));
+
+	if (min_x >= max_x || min_y >= max_y)
+		return;
+
+	if (shape == BrushShape::Square || brush_size <= 1) {
+		parallel_for_rows(min_y, max_y, [min_x, max_x, attr_idx, val, set_exact](int y) {
+			for (int x = min_x; x < max_x; ++x) {
+				Grid::adjust_cell_attr(static_cast<uint32_t>(x), static_cast<uint32_t>(y), attr_idx, val, set_exact);
+			}
+		});
+	} else {
+		float cx = static_cast<float>(start_x) + static_cast<float>(brush_size) * 0.5f;
+		float cy = static_cast<float>(start_y) + static_cast<float>(brush_size) * 0.5f;
+		float r = static_cast<float>(brush_size) * 0.5f;
+		float r_sq = r * r;
+
+		parallel_for_rows(min_y, max_y, [min_x, max_x, cx, cy, r_sq, attr_idx, val, set_exact](int y) {
+			float dy = (static_cast<float>(y) + 0.5f) - cy;
+			float dy_sq = dy * dy;
+			if (dy_sq <= r_sq) {
+				float dx_max = std::sqrt(r_sq - dy_sq);
+				int rx_min = static_cast<int>(std::ceil(cx - dx_max - 0.5f));
+				int rx_max = static_cast<int>(std::floor(cx + dx_max - 0.5f)) + 1;
+				rx_min = std::clamp(rx_min, min_x, max_x);
+				rx_max = std::clamp(rx_max, min_x, max_x);
+				for (int x = rx_min; x < rx_max; ++x) {
+					Grid::adjust_cell_attr(static_cast<uint32_t>(x), static_cast<uint32_t>(y), attr_idx, val,
+										   set_exact);
+				}
+			}
+		});
+	}
+}
+
+static void paint_attribute_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8_t attr_idx, float val,
+								 bool set_exact, BrushShape shape) {
+	std::vector<LineSpan> spans = compute_line_spans(start_grid, end_grid, brush_size, shape);
+	for (const auto& span : spans) {
+		if (span.x0 >= span.x1)
+			continue;
+		int y = span.y;
+		if (y < 0 || y >= static_cast<int>(Grid::get_height()))
+			continue;
+		int x0 = std::clamp(span.x0, 0, static_cast<int>(Grid::get_width()));
+		int x1 = std::clamp(span.x1, 0, static_cast<int>(Grid::get_width()));
+		for (int x = x0; x < x1; ++x) {
+			Grid::adjust_cell_attr(static_cast<uint32_t>(x), static_cast<uint32_t>(y), attr_idx, val, set_exact);
+		}
+	}
+}
+
+void UI::flood_fill(uint32_t start_x, uint32_t start_y, uint8_t fill_mat) {
+	uint32_t width = Grid::get_width();
+	uint32_t height = Grid::get_height();
+	if (start_x >= width || start_y >= height)
 		return;
 	uint8_t target_mat = Grid::get_cell(start_x, start_y);
-	if (target_mat == fill_mat)
+	if (target_mat == fill_mat && !UI::brush_overwrite_attributes)
 		return;
+
+	static std::vector<uint32_t> s_visited;
+	static uint32_t s_fill_gen = 0;
+
+	if (s_visited.size() != static_cast<size_t>(width) * height) {
+		s_visited.assign(static_cast<size_t>(width) * height, 0);
+		s_fill_gen = 0;
+	}
+	s_fill_gen++;
+	if (s_fill_gen == 0) {
+		s_visited.assign(static_cast<size_t>(width) * height, 0);
+		s_fill_gen = 1;
+	}
+
+	uint32_t start_idx = start_y * width + start_x;
+	s_visited[start_idx] = s_fill_gen;
 
 	std::vector<std::pair<uint32_t, uint32_t>> queue;
 	queue.reserve(4096);
 	queue.push_back({start_x, start_y});
-	Grid::set_cell(start_x, start_y, fill_mat);
+
+	if (UI::brush_overwrite_attributes) {
+		Grid::set_cell(start_x, start_y, fill_mat);
+	} else {
+		Grid::set_cell_material_only(start_x, start_y, fill_mat);
+	}
 
 	size_t head = 0;
 	while (head < queue.size()) {
@@ -514,12 +637,73 @@ static void flood_fill(uint32_t start_x, uint32_t start_y, uint8_t fill_mat) {
 			int nx = static_cast<int>(x) + dx[i];
 			int ny = static_cast<int>(y) + dy[i];
 
-			if (nx >= 0 && nx < static_cast<int>(Grid::get_width()) && ny >= 0 &&
-				ny < static_cast<int>(Grid::get_height())) {
+			if (nx >= 0 && nx < static_cast<int>(width) && ny >= 0 && ny < static_cast<int>(height)) {
 				uint32_t unx = static_cast<uint32_t>(nx);
 				uint32_t uny = static_cast<uint32_t>(ny);
-				if (Grid::get_cell(unx, uny) == target_mat) {
-					Grid::set_cell(unx, uny, fill_mat);
+				uint32_t nidx = uny * width + unx;
+
+				if (s_visited[nidx] != s_fill_gen && Grid::get_cell(unx, uny) == target_mat) {
+					s_visited[nidx] = s_fill_gen;
+					if (UI::brush_overwrite_attributes) {
+						Grid::set_cell(unx, uny, fill_mat);
+					} else {
+						Grid::set_cell_material_only(unx, uny, fill_mat);
+					}
+					queue.push_back({unx, uny});
+				}
+			}
+		}
+	}
+}
+
+void UI::flood_fill_attribute(uint32_t start_x, uint32_t start_y, uint8_t attr_idx, float val, bool set_exact) {
+	uint32_t width = Grid::get_width();
+	uint32_t height = Grid::get_height();
+	if (start_x >= width || start_y >= height)
+		return;
+	uint8_t target_mat = Grid::get_cell(start_x, start_y);
+
+	static std::vector<uint32_t> s_visited_attr;
+	static uint32_t s_fill_attr_gen = 0;
+
+	if (s_visited_attr.size() != static_cast<size_t>(width) * height) {
+		s_visited_attr.assign(static_cast<size_t>(width) * height, 0);
+		s_fill_attr_gen = 0;
+	}
+	s_fill_attr_gen++;
+	if (s_fill_attr_gen == 0) {
+		s_visited_attr.assign(static_cast<size_t>(width) * height, 0);
+		s_fill_attr_gen = 1;
+	}
+
+	uint32_t start_idx = start_y * width + start_x;
+	s_visited_attr[start_idx] = s_fill_attr_gen;
+
+	std::vector<std::pair<uint32_t, uint32_t>> queue;
+	queue.reserve(4096);
+	queue.push_back({start_x, start_y});
+
+	Grid::adjust_cell_attr(start_x, start_y, attr_idx, val, set_exact);
+
+	size_t head = 0;
+	while (head < queue.size()) {
+		auto [x, y] = queue[head++];
+
+		const int dx[4] = {-1, 1, 0, 0};
+		const int dy[4] = {0, 0, -1, 1};
+
+		for (int i = 0; i < 4; ++i) {
+			int nx = static_cast<int>(x) + dx[i];
+			int ny = static_cast<int>(y) + dy[i];
+
+			if (nx >= 0 && nx < static_cast<int>(width) && ny >= 0 && ny < static_cast<int>(height)) {
+				uint32_t unx = static_cast<uint32_t>(nx);
+				uint32_t uny = static_cast<uint32_t>(ny);
+				uint32_t nidx = uny * width + unx;
+
+				if (s_visited_attr[nidx] != s_fill_attr_gen && Grid::get_cell(unx, uny) == target_mat) {
+					s_visited_attr[nidx] = s_fill_attr_gen;
+					Grid::adjust_cell_attr(unx, uny, attr_idx, val, set_exact);
 					queue.push_back({unx, uny});
 				}
 			}
@@ -543,6 +727,7 @@ bool UI::open_switch_popup = false;
 bool UI::open_create_set_popup = false;
 bool UI::open_delete_set_popup = false;
 bool UI::open_empty_rule_warning_popup = false;
+static uint8_t s_pending_empty_inherit_id = 255;
 bool UI::open_large_neighborhood_warning_popup = false;
 
 enum class ExpandSide { Top, Bottom, Left, Right };
@@ -560,8 +745,8 @@ bool UI::stepping_sequence_active = false;
 bool UI::show_exit_popup = false;
 
 bool UI::unsaved_changes = false;
-std::string UI::pending_set_switch = "";
-std::string UI::pending_save_load = "";
+std::string UI::pending_set_switch;
+std::string UI::pending_save_load;
 bool UI::ui_compact = false;
 
 float UI::zoom = 1.0f;
@@ -572,6 +757,10 @@ float UI::target_pan_x = 0.0f;
 float UI::target_pan_y = 0.0f;
 
 ToolMode UI::current_tool = ToolMode::Brush;
+int UI::attr_tool_target_index = 0;
+int UI::attr_tool_mode = 0;
+float UI::attr_tool_value = 10.0f;
+bool UI::brush_overwrite_attributes = true;
 SelectionState UI::selection_state = SelectionState::None;
 ResizeHandle UI::active_resize_handle = ResizeHandle::None;
 SelectionBox UI::selection_box = {};
@@ -606,10 +795,6 @@ void UI::init() {
 	io.Fonts->AddFontFromMemoryTTF(const_cast<uint8_t*>(roboto_ttf), roboto_ttf_len, font_sz, &font_cfg);
 
 	init_style();
-
-	if (cfg.ui.ui_scale != 1.0f && cfg.ui.ui_scale >= 0.5f && cfg.ui.ui_scale <= 3.0f) {
-		ImGui::GetStyle().ScaleAllSizes(cfg.ui.ui_scale);
-	}
 
 	ImGui_ImplSDL3_InitForSDLRenderer(Window::get_window(), Window::get_renderer());
 	ImGui_ImplSDLRenderer3_Init(Window::get_renderer());
@@ -685,10 +870,13 @@ void UI::render() {
 		float sidebar_x = (cfg.ui.sidebar_x <= 2) ? 0.0f : static_cast<float>(cfg.ui.sidebar_x);
 		float target_h = std::max(100.0f, screen_h - sidebar_y);
 
+		float max_sb_w = std::max(1200.0f, screen_w * 0.85f);
 		ImGui::SetNextWindowPos(ImVec2(sidebar_x, sidebar_y), ImGuiCond_Always);
 		ImGui::SetNextWindowSize(ImVec2(static_cast<float>(cfg.ui.sidebar_width), target_h), ImGuiCond_Always);
-		ImGui::SetNextWindowSizeConstraints(ImVec2(260.0f, target_h), ImVec2(800.0f, target_h));
-		if (ImGui::Begin("Sand3 - Simulation Editor", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove)) {
+		ImGui::SetNextWindowSizeConstraints(ImVec2(260.0f, target_h), ImVec2(max_sb_w, target_h));
+		if (ImGui::Begin("##simulation_editor", nullptr,
+						 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar |
+							 ImGuiWindowFlags_NoResize)) {
 			ImVec2 pos = ImGui::GetWindowPos();
 			ImVec2 sz = ImGui::GetWindowSize();
 			cfg.ui.sidebar_x = static_cast<int>(pos.x);
@@ -711,9 +899,9 @@ void UI::render() {
 		}
 
 		float bar_x = sidebar_x + static_cast<float>(cfg.ui.sidebar_width);
-		float hit_w = 10.0f;
+		float hit_w = 4.0f;
 
-		ImGui::SetNextWindowPos(ImVec2(bar_x - hit_w * 0.5f, sidebar_y));
+		ImGui::SetNextWindowPos(ImVec2(bar_x - 3.0f, sidebar_y));
 		ImGui::SetNextWindowSize(ImVec2(hit_w, target_h));
 		ImGui::SetNextWindowBgAlpha(0.0f);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -721,7 +909,8 @@ void UI::render() {
 		constexpr ImGuiWindowFlags kSplitterFlags =
 			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove |
 			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings |
-			ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoTitleBar;
+			ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoTitleBar |
+			ImGuiWindowFlags_NoResize;
 		if (ImGui::Begin("##SidebarResizeOverlay", nullptr, kSplitterFlags)) {
 			ImGui::InvisibleButton("##SidebarWidthResizeSplitter", ImVec2(hit_w, target_h));
 			bool bar_hovered = ImGui::IsItemHovered();
@@ -737,7 +926,7 @@ void UI::render() {
 				ConfigManager::save();
 			}
 			if (bar_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-				cfg.ui.sidebar_width = 380;
+				cfg.ui.sidebar_width = 520;
 				ConfigManager::save();
 			}
 
@@ -760,18 +949,24 @@ void UI::render() {
 	}
 
 	render_mouse_overlay();
+	render_floating_toolbar();
 
 	render_modals();
 
 	ImGuiContext& g = *GImGui;
 	if (g.HoveredIdIsDisabled) {
-		ImGui::SetMouseCursor(ImGuiMouseCursor_NotAllowed);
+		if (s_active_eq_cell_id < 0) {
+			ImGui::SetMouseCursor(ImGuiMouseCursor_NotAllowed);
+		}
 	} else if (g.HoveredId != 0 && ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow) {
 		ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 	}
 }
 
 void UI::set_tool_mode(ToolMode mode) {
+	if (mode == ToolMode::Attribute && SetManager::get_current_metadata().attributes.empty()) {
+		return;
+	}
 	if (current_tool == mode)
 		return;
 	if (current_tool == ToolMode::Select) {
@@ -781,7 +976,10 @@ void UI::set_tool_mode(ToolMode mode) {
 	selection_state = SelectionState::None;
 	s_line_brush_active = false;
 	current_tool = mode;
-	UndoManager::push_snapshot("Switched to " + std::string(current_tool == ToolMode::Brush ? "Brush" : "Select"));
+	std::string tool_name = (current_tool == ToolMode::Brush)	 ? "Brush"
+							: (current_tool == ToolMode::Select) ? "Select"
+																 : "Attribute Tool";
+	UndoManager::push_snapshot("Switched to " + tool_name);
 }
 
 void UI::deselect() {
@@ -869,7 +1067,11 @@ void UI::fill_selection(uint8_t id) {
 	int bh = selection_box.height();
 	for (int y = 0; y < bh; ++y) {
 		for (int x = 0; x < bw; ++x) {
-			Grid::set_cell(min_x + x, min_y + y, id);
+			if (UI::brush_overwrite_attributes) {
+				Grid::set_cell(min_x + x, min_y + y, id);
+			} else {
+				Grid::set_cell_material_only(min_x + x, min_y + y, id);
+			}
 		}
 	}
 	UndoManager::push_snapshot("Filled Selection");
@@ -1133,7 +1335,9 @@ bool UI::button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& si
 	float default_btn_h = (cfg.ui.button_size > 0) ? static_cast<float>(cfg.ui.button_size) : 30.0f;
 	float req_h = (size_arg.y > 0.0f) ? size_arg.y : default_btn_h;
 	float base_icon_sz = (cfg.ui.icon_size > 0) ? static_cast<float>(cfg.ui.icon_size) : 16.0f;
-	float icon_sz = icon ? std::min(base_icon_sz, std::max(8.0f, req_h - 4.0f)) : 0.0f;
+	float icon_sz =
+		icon ? std::min(base_icon_sz, std::max(8.0f, (req_h >= base_icon_sz + 2.0f) ? base_icon_sz : (req_h - 2.0f)))
+			 : 0.0f;
 	const float spacing = (icon && text_size.x > 0.0f) ? 6.0f : 0.0f;
 	const float total_content_w = (icon ? icon_sz : 0.0f) + spacing + text_size.x;
 	const float total_content_h = std::max(icon_sz, text_size.y);
@@ -1257,180 +1461,586 @@ bool UI::selectable_with_color(const char* label, const ImVec4& color, bool sele
 	return pressed;
 }
 
-void UI::render_selection_controls() {
-	const auto& cfg = ConfigManager::get_config();
-	bool is_brush = (current_tool == ToolMode::Brush);
-	bool is_select = (current_tool == ToolMode::Select);
-
-	float avail_w = ImGui::GetContentRegionAvail().x;
-	float spacing_x = ImGui::GetStyle().ItemSpacing.x;
-	float btn = (cfg.ui.button_size > 0) ? static_cast<float>(cfg.ui.button_size) : 28.0f;
-
-	const ImVec4& btn_active_col = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
-	ImVec4 btn_active_hover =
-		ImVec4(std::min(1.0f, btn_active_col.x * 1.15f + 0.05f), std::min(1.0f, btn_active_col.y * 1.15f + 0.05f),
-			   std::min(1.0f, btn_active_col.z * 1.15f + 0.05f), btn_active_col.w);
-
-	if (is_brush) {
-		ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
+bool UI::custom_checkbox(const char* label, bool* val, IconID icon_id, const char* tooltip, const ImVec2& size_arg) {
+	if (*val) {
+		const ImVec4& active_col = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+		ImVec4 hover_col = ImVec4(std::min(1.0f, active_col.x * 1.30f), std::min(1.0f, active_col.y * 1.30f),
+								  std::min(1.0f, active_col.z * 1.30f), 1.0f);
+		ImVec4 act_col = ImVec4(active_col.x * 0.85f, active_col.y * 0.85f, active_col.z * 0.85f, 1.0f);
+		ImGui::PushStyleColor(ImGuiCol_Button, active_col);
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hover_col);
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive, act_col);
+	} else {
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.25f, 0.28f, 0.50f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.35f, 0.35f, 0.38f, 0.8f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.20f, 0.20f, 0.22f, 1.0f));
 	}
-	if (button_with_icon("##BrushTool", IconManager::get(IconID::Brush), ImVec2(btn, btn))) {
+
+	SDL_Texture* tex = (icon_id != IconID::Count) ? IconManager::get(icon_id) : nullptr;
+	bool clicked = button_with_icon(label, tex, size_arg);
+	ImGui::PopStyleColor(3);
+
+	if (clicked) {
+		*val = !*val;
+	}
+	if (tooltip && tooltip[0] != '\0' && ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("%s", tooltip);
+	}
+	return clicked;
+}
+
+bool UI::gradient_editor(const char* label, ColorGradient& gradient, float min_val, float max_val, float width) {
+	if (max_val <= min_val) {
+		max_val = min_val + 1.0f;
+	}
+	float range_span = max_val - min_val;
+
+	if (gradient.stops.empty()) {
+		gradient.stops = {{min_val, {0.0f, 0.0f, 0.0f, 1.0f}}, {max_val, {1.0f, 1.0f, 1.0f, 1.0f}}};
+		gradient.selected_stop = 0;
+	} else {
+		// If stops are still in 0-1 range and attribute range is different, scale them to [min_val, max_val]
+		bool all_01 = true;
+		for (const auto& s : gradient.stops) {
+			if (s.pos < 0.0f || s.pos > 1.0f) {
+				all_01 = false;
+				break;
+			}
+		}
+		if (all_01 && range_span > 1.5f) {
+			for (auto& s : gradient.stops) {
+				s.pos = min_val + s.pos * range_span;
+			}
+			gradient.sort_stops();
+		}
+	}
+
+	bool changed = false;
+	ImGui::PushID(label);
+
+	float avail_w = (width > 0.0f) ? width : ImGui::GetContentRegionAvail().x;
+	if (avail_w < 120.0f)
+		avail_w = 120.0f;
+
+	const float swatch_w = 26.0f;
+	const float spacing = 6.0f;
+	const float bar_h = 30.0f;
+	const float bar_w = std::max(60.0f, avail_w - swatch_w - spacing);
+
+	ImVec2 bar_p0 = ImGui::GetCursorScreenPos();
+	ImVec2 bar_p1(bar_p0.x + bar_w, bar_p0.y + bar_h);
+
+	ImGui::InvisibleButton("grad_bar", ImVec2(bar_w, bar_h));
+	bool is_hovered = ImGui::IsItemHovered();
+	ImGuiIO& io = ImGui::GetIO();
+	ImDrawList* draw_list = ImGui::GetWindowDrawList();
+
+	if (gradient.selected_stop < 0 || gradient.selected_stop >= static_cast<int>(gradient.stops.size())) {
+		gradient.selected_stop = 0;
+	}
+
+	static int s_drag_stop_idx = -1;
+	static ImGuiID s_active_grad_id = 0;
+	ImGuiID current_grad_id = ImGui::GetID("grad_bar");
+
+	const float handle_w = 8.0f;
+	const float handle_h = 16.0f;
+
+	auto pos_to_x = [&](float p) -> float {
+		float u = std::clamp((p - min_val) / range_span, 0.0f, 1.0f);
+		return bar_p0.x + u * bar_w;
+	};
+
+	auto x_to_pos = [&](float mx) -> float {
+		float u = std::clamp((mx - bar_p0.x) / bar_w, 0.0f, 1.0f);
+		return min_val + u * range_span;
+	};
+
+	// Mouse interaction on the bar
+	if (is_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+		int clicked_stop = -1;
+		float mouse_x = io.MousePos.x;
+		for (int i = 0; i < static_cast<int>(gradient.stops.size()); ++i) {
+			float sx = pos_to_x(gradient.stops[i].pos);
+			if (std::abs(mouse_x - sx) <= (handle_w + 2.0f)) {
+				clicked_stop = i;
+				break;
+			}
+		}
+
+		if (clicked_stop >= 0) {
+			gradient.selected_stop = clicked_stop;
+			s_drag_stop_idx = clicked_stop;
+			s_active_grad_id = current_grad_id;
+		} else {
+			// Clicked empty area on the bar -> add new stop sampled from current gradient
+			float new_pos = x_to_pos(mouse_x);
+			auto sampled = gradient.sample(new_pos);
+			int new_idx = gradient.add_stop(new_pos, sampled);
+			gradient.selected_stop = new_idx;
+			s_drag_stop_idx = new_idx;
+			s_active_grad_id = current_grad_id;
+			changed = true;
+		}
+	}
+
+	// Right-click on a pin handle to delete it
+	if (is_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && gradient.stops.size() > 1) {
+		float mouse_x = io.MousePos.x;
+		for (int i = 0; i < static_cast<int>(gradient.stops.size()); ++i) {
+			float sx = pos_to_x(gradient.stops[i].pos);
+			if (std::abs(mouse_x - sx) <= (handle_w + 2.0f)) {
+				gradient.remove_stop(i);
+				changed = true;
+				break;
+			}
+		}
+	}
+
+	// Dragging an existing stop
+	if (s_active_grad_id == current_grad_id && s_drag_stop_idx >= 0) {
+		if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+			float new_pos = x_to_pos(io.MousePos.x);
+			if (s_drag_stop_idx < static_cast<int>(gradient.stops.size())) {
+				if (gradient.stops[s_drag_stop_idx].pos != new_pos) {
+					gradient.stops[s_drag_stop_idx].pos = new_pos;
+					gradient.sort_stops();
+					s_drag_stop_idx = gradient.selected_stop;
+					changed = true;
+				}
+			}
+		} else {
+			s_drag_stop_idx = -1;
+			s_active_grad_id = 0;
+		}
+	}
+
+	// --- RENDER GRADIENT BAR ---
+	draw_list->PushClipRect(bar_p0, bar_p1, true);
+
+	// 1. Checkerboard background for alpha visibility
+	const float check_sz = 6.0f;
+	for (float y = bar_p0.y; y < bar_p1.y; y += check_sz) {
+		for (float x = bar_p0.x; x < bar_p1.x; x += check_sz) {
+			int xi = static_cast<int>((x - bar_p0.x) / check_sz);
+			int yi = static_cast<int>((y - bar_p0.y) / check_sz);
+			ImU32 bg_col = ((xi + yi) % 2 == 0) ? IM_COL32(90, 90, 90, 255) : IM_COL32(50, 50, 50, 255);
+			draw_list->AddRectFilled(
+				ImVec2(x, y), ImVec2(std::min(x + check_sz, bar_p1.x), std::min(y + check_sz, bar_p1.y)), bg_col);
+		}
+	}
+
+	auto to_imu32 = [](const std::array<float, 4>& c) -> ImU32 {
+		return IM_COL32(static_cast<int>(std::clamp(c[0], 0.0f, 1.0f) * 255.0f),
+						static_cast<int>(std::clamp(c[1], 0.0f, 1.0f) * 255.0f),
+						static_cast<int>(std::clamp(c[2], 0.0f, 1.0f) * 255.0f),
+						static_cast<int>(std::clamp(c[3], 0.0f, 1.0f) * 255.0f));
+	};
+
+	// 2. Leftmost fill
+	if (gradient.stops.front().pos > min_val) {
+		float x0 = bar_p0.x;
+		float x1 = pos_to_x(gradient.stops.front().pos);
+		ImU32 col = to_imu32(gradient.stops.front().color);
+		draw_list->AddRectFilled(ImVec2(x0, bar_p0.y), ImVec2(x1, bar_p1.y), col);
+	}
+
+	// 3. Multi-color linear gradient segments
+	for (size_t i = 0; i + 1 < gradient.stops.size(); ++i) {
+		float x0 = pos_to_x(gradient.stops[i].pos);
+		float x1 = pos_to_x(gradient.stops[i + 1].pos);
+		ImU32 col0 = to_imu32(gradient.stops[i].color);
+		ImU32 col1 = to_imu32(gradient.stops[i + 1].color);
+		draw_list->AddRectFilledMultiColor(ImVec2(x0, bar_p0.y), ImVec2(x1, bar_p1.y), col0, col1, col1, col0);
+	}
+
+	// 4. Rightmost fill
+	if (gradient.stops.back().pos < max_val) {
+		float x0 = pos_to_x(gradient.stops.back().pos);
+		float x1 = bar_p1.x;
+		ImU32 col = to_imu32(gradient.stops.back().color);
+		draw_list->AddRectFilled(ImVec2(x0, bar_p0.y), ImVec2(x1, bar_p1.y), col);
+	}
+
+	// 5. Pin handles
+	for (int i = 0; i < static_cast<int>(gradient.stops.size()); ++i) {
+		float px = pos_to_x(gradient.stops[i].pos);
+		bool is_sel = (i == gradient.selected_stop);
+
+		// Guide line with dark shadow so it is always visible on any background
+		draw_list->AddLine(ImVec2(px - 1.0f, bar_p0.y), ImVec2(px - 1.0f, bar_p1.y - handle_h), IM_COL32(0, 0, 0, 160),
+						   1.0f);
+		draw_list->AddLine(ImVec2(px + 1.0f, bar_p0.y), ImVec2(px + 1.0f, bar_p1.y - handle_h), IM_COL32(0, 0, 0, 160),
+						   1.0f);
+		draw_list->AddLine(ImVec2(px, bar_p0.y), ImVec2(px, bar_p1.y - handle_h),
+						   is_sel ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 200, 200, 200), 1.0f);
+
+		// Handle box
+		ImVec2 h_min(px - handle_w * 0.5f, bar_p1.y - handle_h);
+		ImVec2 h_max(px + handle_w * 0.5f, bar_p1.y - 1.0f);
+
+		// Handle fill
+		draw_list->AddRectFilled(h_min, h_max, to_imu32(gradient.stops[i].color));
+
+		// Outer black border so stop is always clearly visible even if handle is pure white
+		draw_list->AddRect(ImVec2(h_min.x - 1.0f, h_min.y - 1.0f), ImVec2(h_max.x + 1.0f, h_max.y + 1.0f),
+						   IM_COL32(0, 0, 0, 255), 1.0f, 0, 1.0f);
+
+		if (is_sel) {
+			// Red Godot-style highlight border
+			draw_list->AddRect(h_min, h_max, IM_COL32(255, 50, 40, 255), 1.0f, 0, 2.0f);
+			// Inner dark contrast stroke ensuring white fill never washes out the border
+			draw_list->AddRect(ImVec2(h_min.x + 1.0f, h_min.y + 1.0f), ImVec2(h_max.x - 1.0f, h_max.y - 1.0f),
+							   IM_COL32(0, 0, 0, 180), 0.0f, 0, 1.0f);
+		} else {
+			draw_list->AddRect(h_min, h_max, IM_COL32(60, 60, 60, 255), 1.0f, 0, 1.0f);
+		}
+	}
+
+	// Outline border
+	draw_list->AddRect(bar_p0, bar_p1, IM_COL32(70, 70, 70, 255), 0.0f, 0, 1.0f);
+	draw_list->PopClipRect();
+
+	// --- SELECTED STOP COLOR EDIT (Single Colored Square) ---
+	ImGui::SameLine(0.0f, spacing);
+	auto& sel_stop = gradient.stops[gradient.selected_stop];
+	ImGui::SetNextItemWidth(swatch_w);
+	if (ImGui::ColorEdit4("##stop_color", sel_stop.color.data(),
+						  ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf |
+							  ImGuiColorEditFlags_NoInputs)) {
+		changed = true;
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Edit selected stop RGBA color and alpha");
+	}
+
+	// --- SELECTED STOP CONTROLS ---
+	ImGui::Spacing();
+	ImGui::Text("Position:");
+	ImGui::SameLine(0.0f, 4.0f);
+	float del_btn_w = 26.0f;
+	float pos_w = std::max(60.0f, avail_w - 75.0f - del_btn_w);
+	ImGui::SetNextItemWidth(pos_w);
+	float pos_val = sel_stop.pos;
+	float drag_step = range_span * 0.005f;
+	const char* fmt = (range_span >= 50.0f) ? "%.0f" : (range_span >= 5.0f ? "%.1f" : "%.2f");
+	if (ImGui::DragFloat("##stop_pos", &pos_val, drag_step, min_val, max_val, fmt)) {
+		sel_stop.pos = std::clamp(pos_val, min_val, max_val);
+		gradient.sort_stops();
+		changed = true;
+	}
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Position of selected stop [%.1f - %.1f]", min_val, max_val);
+	}
+
+	ImGui::SameLine(0.0f, 6.0f);
+	bool can_delete = gradient.stops.size() > 1;
+	if (!can_delete) {
+		ImGui::BeginDisabled();
+	}
+	if (button_with_icon("##del_stop", IconManager::get(IconID::Delete), ImVec2(24.0f, 22.0f))) {
+		gradient.remove_stop(gradient.selected_stop);
+		changed = true;
+	}
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+		ImGui::SetTooltip(can_delete ? "Delete selected stop (or right-click stop)" : "Cannot delete last stop");
+	}
+	if (!can_delete) {
+		ImGui::EndDisabled();
+	}
+
+	ImGui::PopID();
+	return changed;
+}
+
+void UI::render_floating_toolbar() {
+	static bool s_options_expanded = false;
+
+	ImGuiViewport* vp = ImGui::GetMainViewport();
+	float screen_w = vp->WorkSize.x;
+	float screen_h = vp->WorkSize.y;
+	ImVec2 pivot(1.0f, 0.0f);
+	ImVec2 target_pos(vp->WorkPos.x + screen_w - 12.0f, vp->WorkPos.y + 12.0f);
+
+	ImGui::SetNextWindowPos(target_pos, ImGuiCond_Always, pivot);
+	ImGuiWindowFlags flags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize |
+							 ImGuiWindowFlags_NoCollapse;
+
+	const auto& cfg = ConfigManager::get_config();
+	float btn_sz = (cfg.ui.button_size > 0) ? static_cast<float>(cfg.ui.button_size) : 32.0f;
+	const auto& set_meta = SetManager::get_current_metadata();
+	bool has_attrs = !set_meta.attributes.empty();
+
+	if (current_tool == ToolMode::Attribute && !has_attrs) {
 		set_tool_mode(ToolMode::Brush);
 	}
-	if (is_brush) {
-		ImGui::PopStyleColor(2);
-	}
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip("Drawing brush tool (%s)\nDraw cells on canvas",
-						  ShortcutManager::get_key_string(ShortcutAction::ToolBrush).c_str());
 
-	ImGui::SameLine();
-	if (is_select) {
-		ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
-	}
-	if (button_with_icon("##SelectTool", IconManager::get(IconID::Select), ImVec2(btn, btn))) {
-		set_tool_mode(ToolMode::Select);
-	}
-	if (is_select) {
-		ImGui::PopStyleColor(2);
-	}
-	if (ImGui::IsItemHovered())
-		ImGui::SetTooltip(
-			"Box selection and transform tool (%s / %s)\nSelect rectangular regions to move, copy, cut, or rotate",
-			ShortcutManager::get_key_string(ShortcutAction::ToolSelect).c_str(),
-			ShortcutManager::get_key_string(ShortcutAction::Copy).c_str());
+	const auto& style = ImGui::GetStyle();
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, style.WindowRounding);
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, style.WindowPadding);
 
-	if (current_tool == ToolMode::Brush) {
-		ImGui::Spacing();
-		ImGui::Text("Brush Settings:");
-		ImGui::SliderInt("Brush Size", &mouse_size, 1, static_cast<int>(Grid::get_width() * 0.5f));
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Adjust brush width (Scroll wheel)");
+	if (ImGui::Begin("Sand3 - Toolbar", nullptr, flags)) {
+		bool is_brush = (current_tool == ToolMode::Brush);
+		bool is_select = (current_tool == ToolMode::Select);
+		bool is_attr = (current_tool == ToolMode::Attribute);
+
+		const ImVec4& btn_active_col = ImGui::GetStyle().Colors[ImGuiCol_ButtonActive];
+		ImVec4 btn_active_hover =
+			ImVec4(std::min(1.0f, btn_active_col.x * 1.15f + 0.05f), std::min(1.0f, btn_active_col.y * 1.15f + 0.05f),
+				   std::min(1.0f, btn_active_col.z * 1.15f + 0.05f), btn_active_col.w);
+
+		// Brush Button
+		if (is_brush) {
+			ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
 		}
-
-		const char* shape_names[] = {"Square", "Circle"};
-		int current_shape = static_cast<int>(brush_shape);
-		if (ImGui::Combo("Brush Shape", &current_shape, shape_names, IM_ARRAYSIZE(shape_names))) {
-			brush_shape = static_cast<BrushShape>(current_shape);
+		if (button_with_icon("##BrushTool", IconManager::get(IconID::Brush), ImVec2(btn_sz, btn_sz))) {
+			set_tool_mode(ToolMode::Brush);
+		}
+		if (is_brush) {
+			ImGui::PopStyleColor(2);
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Select brush shape (Square or Circle, toggle with %s)",
-							  ShortcutManager::get_key_string(ShortcutAction::BrushShape).c_str());
+			ImGui::SetTooltip("Drawing brush tool (%s)\nDraw cells on canvas",
+							  ShortcutManager::get_key_string(ShortcutAction::ToolBrush).c_str());
 		}
-	} else if (current_tool == ToolMode::Select) {
-		ImGui::Spacing();
-		ImGui::Text("Selection Settings:");
-		bool has_selection = (selection_state == SelectionState::Selected);
-		bool has_clipboard = !clipboard.empty();
-		bool can_rotate = (has_selection || selection_state == SelectionState::Moving ||
-						   (selection_state == SelectionState::Pasting && !clipboard.empty()));
 
-		ImVec2 btn_sz(cfg.ui.button_size, cfg.ui.button_size);
+		ImGui::SameLine(0.0f, get_spacing(0.0f));
 
-		if (!has_selection)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##CopySel", IconManager::get(IconID::Copy), btn_sz)) {
-			copy_selection();
+		// Selection Button
+		if (is_select) {
+			ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
 		}
-		if (!has_selection)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Copy selection (%s)", ShortcutManager::get_key_string(ShortcutAction::Copy).c_str());
-
-		ImGui::SameLine();
-		if (!has_selection)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##CutSel", IconManager::get(IconID::Cut), btn_sz)) {
-			cut_selection();
+		if (button_with_icon("##SelectTool", IconManager::get(IconID::Select), ImVec2(btn_sz, btn_sz))) {
+			set_tool_mode(ToolMode::Select);
 		}
-		if (!has_selection)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Cut selected cells to clipboard (%s)",
-							  ShortcutManager::get_key_string(ShortcutAction::Cut).c_str());
-
-		ImGui::SameLine();
-		if (!has_clipboard)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##PasteSel", IconManager::get(IconID::Paste), btn_sz)) {
-			paste_clipboard();
+		if (is_select) {
+			ImGui::PopStyleColor(2);
 		}
-		if (!has_clipboard)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Paste clipboard at cursor (%s)",
-							  ShortcutManager::get_key_string(ShortcutAction::Paste).c_str());
-
-		ImGui::SameLine();
-		if (!has_selection)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##DeleteSel", IconManager::get(IconID::Delete), btn_sz)) {
-			fill_selection(0);
-			deselect();
-		}
-		if (!has_selection)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Delete selected cells (%s)",
-							  ShortcutManager::get_key_string(ShortcutAction::Delete).c_str());
-
-		if (!has_selection)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##FillSel", IconManager::get(IconID::Fill), btn_sz)) {
-			fill_selection(selected_id);
-		}
-		if (!has_selection)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Fill selected cells with current material (%s)",
-							  ShortcutManager::get_key_string(ShortcutAction::Fill).c_str());
-
-		ImGui::SameLine();
-		if (!has_selection)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##DeselectSel", IconManager::get(IconID::Cross), btn_sz)) {
-			deselect();
-		}
-		if (!has_selection)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Clear active selection (%s / Right Click)",
-							  ShortcutManager::get_key_string(ShortcutAction::CancelOrQuit).c_str());
-
-		ImGui::SameLine();
-		if (!can_rotate)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##RotateCWSel", IconManager::get(IconID::RotateCW), btn_sz)) {
-			rotate_selection(true);
-		}
-		if (!can_rotate)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Rotate selection 90° clockwise (%s)",
-							  ShortcutManager::get_key_string(ShortcutAction::RotateCW).c_str());
-
-		ImGui::SameLine();
-		if (!can_rotate)
-			ImGui::BeginDisabled();
-		if (button_with_icon("##RotateCCWSel", IconManager::get(IconID::RotateCCW), btn_sz)) {
-			rotate_selection(false);
-		}
-		if (!can_rotate)
-			ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Rotate selection 90° counter-clockwise (%s)",
-							  ShortcutManager::get_key_string(ShortcutAction::RotateCCW).c_str());
-
-		ImGui::Spacing();
-		ImGui::Checkbox("Transparent", &transparent_mode);
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"When enabled, air/empty cells in clipboard or moved selection will not overwrite existing cells (%s).",
-				ShortcutManager::get_key_string(ShortcutAction::ToggleTransparent).c_str());
+			ImGui::SetTooltip("Box selection and transform tool (%s)\nSelect rectangular regions",
+							  ShortcutManager::get_key_string(ShortcutAction::ToolSelect).c_str());
 		}
+
+		ImGui::SameLine(0.0f, get_spacing(0.0f));
+
+		// Attribute Button (Disabled if set has no attributes!)
+		if (!has_attrs) {
+			ImGui::BeginDisabled();
+		}
+		if (is_attr) {
+			ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
+		}
+		if (button_with_icon("##AttrTool", IconManager::get(IconID::Edit), ImVec2(btn_sz, btn_sz))) {
+			set_tool_mode(ToolMode::Attribute);
+		}
+		if (is_attr) {
+			ImGui::PopStyleColor(2);
+		}
+		if (!has_attrs) {
+			ImGui::EndDisabled();
+		}
+		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+			if (!has_attrs) {
+				ImGui::SetTooltip("Attribute brush tool (Disabled: current set has no attributes)");
+			} else {
+				ImGui::SetTooltip("Attribute brush tool (%s)\nApply continuous physics attributes on canvas",
+								  ShortcutManager::get_key_string(ShortcutAction::ToolAttribute).c_str());
+			}
+		}
+
+		ImGui::SameLine(0.0f, get_spacing(0.0f));
+
+		// Expandable Menu Button for Tool Options
+		bool was_options_expanded = s_options_expanded;
+		if (was_options_expanded) {
+			ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
+			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
+		}
+		if (button_with_icon("##ToolOptions", IconManager::get(s_options_expanded ? IconID::Update : IconID::ArrowDown),
+							 ImVec2(btn_sz, btn_sz))) {
+			s_options_expanded = !s_options_expanded;
+		}
+		if (was_options_expanded) {
+			ImGui::PopStyleColor(2);
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("%s tool options drawer", s_options_expanded ? "Collapse" : "Expand");
+		}
+
+		// Expandable Tool Options Drawer
+		if (s_options_expanded) {
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			if (current_tool == ToolMode::Brush) {
+				ImGui::TextDisabled("Brush Settings");
+				ImGui::SetNextItemWidth(130.0f);
+				if (ImGui::InputInt("Size##_brush_sz", &mouse_size, 1, 5)) {
+					mouse_size = std::clamp(mouse_size, 1, static_cast<int>(Grid::get_width() * 0.5f));
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Brush diameter in cells (Mouse Scroll)");
+				}
+
+				const char* shape_names[] = {"Square", "Circle"};
+				int current_shape = static_cast<int>(brush_shape);
+				ImGui::SetNextItemWidth(130.0f);
+				if (ImGui::Combo("Shape##_brush_shape", &current_shape, shape_names, IM_ARRAYSIZE(shape_names))) {
+					brush_shape = static_cast<BrushShape>(current_shape);
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Toggle shape (%s)",
+									  ShortcutManager::get_key_string(ShortcutAction::BrushShape).c_str());
+				}
+
+				custom_checkbox(
+					"Overwrite##_ow_brush", &brush_overwrite_attributes, IconID::Cog,
+					"When unchecked, painting or filling changes the cell material without resetting its attributes.");
+			} else if (current_tool == ToolMode::Select) {
+				ImGui::TextDisabled("Selection Settings");
+				bool has_selection = (selection_state == SelectionState::Selected);
+				bool has_clipboard = !clipboard.empty();
+				bool can_rotate = (has_selection || selection_state == SelectionState::Moving ||
+								   (selection_state == SelectionState::Pasting && !clipboard.empty()));
+
+				ImVec2 act_btn_sz(28.0f, 28.0f);
+
+				// Row 1 of actions
+				if (!has_selection)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##CopySel", IconManager::get(IconID::Copy), act_btn_sz))
+					copy_selection();
+				if (!has_selection)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Copy (%s)", ShortcutManager::get_key_string(ShortcutAction::Copy).c_str());
+
+				ImGui::SameLine(0.0f, get_spacing(-2.0f));
+				if (!has_selection)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##CutSel", IconManager::get(IconID::Cut), act_btn_sz))
+					cut_selection();
+				if (!has_selection)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Cut (%s)", ShortcutManager::get_key_string(ShortcutAction::Cut).c_str());
+
+				ImGui::SameLine(0.0f, get_spacing(-2.0f));
+				if (!has_clipboard)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##PasteSel", IconManager::get(IconID::Paste), act_btn_sz))
+					paste_clipboard();
+				if (!has_clipboard)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Paste (%s)", ShortcutManager::get_key_string(ShortcutAction::Paste).c_str());
+
+				ImGui::SameLine(0.0f, get_spacing(-2.0f));
+				if (!has_selection)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##DeleteSel", IconManager::get(IconID::Delete), act_btn_sz)) {
+					fill_selection(0);
+					deselect();
+				}
+				if (!has_selection)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Delete (%s)", ShortcutManager::get_key_string(ShortcutAction::Delete).c_str());
+
+				// Row 2 of actions
+				if (!has_selection)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##FillSel", IconManager::get(IconID::Fill), act_btn_sz))
+					fill_selection(selected_id);
+				if (!has_selection)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Fill (%s)", ShortcutManager::get_key_string(ShortcutAction::Fill).c_str());
+
+				ImGui::SameLine(0.0f, get_spacing(-2.0f));
+				if (!has_selection)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##TransparentSel", IconManager::get(IconID::Select), act_btn_sz))
+					transparent_mode = !transparent_mode;
+				if (!has_selection)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("When enabled, air/empty cells in clipboard or moved selection will not "
+									  "overwrite existing cells. (%s)",
+									  ShortcutManager::get_key_string(ShortcutAction::ToggleTransparent).c_str());
+
+				ImGui::SameLine(0.0f, get_spacing(-2.0f));
+				if (!can_rotate)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##RotateCWSel", IconManager::get(IconID::RotateCW), act_btn_sz))
+					rotate_selection(true);
+				if (!can_rotate)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Rotate CW (%s)",
+									  ShortcutManager::get_key_string(ShortcutAction::RotateCW).c_str());
+
+				ImGui::SameLine(0.0f, get_spacing(-2.0f));
+				if (!can_rotate)
+					ImGui::BeginDisabled();
+				if (button_with_icon("##RotateCCWSel", IconManager::get(IconID::RotateCCW), act_btn_sz))
+					rotate_selection(false);
+				if (!can_rotate)
+					ImGui::EndDisabled();
+				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+					ImGui::SetTooltip("Rotate CCW (%s)",
+									  ShortcutManager::get_key_string(ShortcutAction::RotateCCW).c_str());
+			} else if (current_tool == ToolMode::Attribute) {
+				ImGui::TextDisabled("Attribute Brush Settings");
+				ImGui::SetNextItemWidth(130.0f);
+				if (ImGui::InputInt("Size##_attr_sz", &mouse_size, 1, 5)) {
+					mouse_size = std::clamp(mouse_size, 1, static_cast<int>(Grid::get_width() * 0.5f));
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Brush diameter in cells (Mouse Scroll)");
+				}
+
+				const char* shape_names[] = {"Square", "Circle"};
+				int current_shape = static_cast<int>(brush_shape);
+				ImGui::SetNextItemWidth(130.0f);
+				if (ImGui::Combo("Shape##_attr_shape", &current_shape, shape_names, IM_ARRAYSIZE(shape_names))) {
+					brush_shape = static_cast<BrushShape>(current_shape);
+				}
+
+				std::string current_attr_name = (attr_tool_target_index >= 0 &&
+												 attr_tool_target_index < static_cast<int>(set_meta.attributes.size()))
+													? set_meta.attributes[attr_tool_target_index].name
+													: "Select Attribute";
+				ImGui::SetNextItemWidth(150.0f);
+				if (ImGui::BeginCombo("Attr##_target_attr", current_attr_name.c_str())) {
+					for (size_t a = 0; a < set_meta.attributes.size(); ++a) {
+						if (ImGui::Selectable(set_meta.attributes[a].name.c_str(),
+											  attr_tool_target_index == static_cast<int>(a))) {
+							attr_tool_target_index = static_cast<int>(a);
+						}
+					}
+					ImGui::EndCombo();
+				}
+
+				const char* tool_modes[] = {"Add / Subtract", "Set Exact Value"};
+				ImGui::SetNextItemWidth(150.0f);
+				ImGui::Combo("Mode##_attr_mode", &attr_tool_mode, tool_modes, IM_ARRAYSIZE(tool_modes));
+
+				ImGui::SetNextItemWidth(150.0f);
+				ImGui::InputFloat(attr_tool_mode == 0 ? "Delta##_val" : "Value##_val", &attr_tool_value, 1.0f, 10.0f,
+								  "%.2f");
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Shortcut keys: [ to decrease, ] to increase");
+				}
+			}
+		}
+
+		ImGui::End();
 	}
+	ImGui::PopStyleVar(2);
 }
 
 void UI::render_mouse_overlay() {
@@ -1626,9 +2236,7 @@ void UI::render_mouse_overlay() {
 
 	if (is_shift_down && is_alt_down) {
 		ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-	} else if (is_shift_down) {
-		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
-	} else if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+	} else if (is_shift_down || ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
 		ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
 	}
 
@@ -1649,9 +2257,18 @@ void UI::render_mouse_overlay() {
 		cb = static_cast<uint8_t>(std::min(255.0f, b + (255.0f - b) * 0.75f + 40.0f));
 	}
 
-	ImU32 fill_color = IM_COL32(r, g, b, 70);
-	ImU32 line_color = IM_COL32(cr, cg, cb, 255);
-	ImU32 inner_line_color = IM_COL32(r, g, b, 240);
+	ImU32 fill_color;
+	ImU32 line_color;
+	ImU32 inner_line_color;
+	if (current_tool == ToolMode::Attribute) {
+		fill_color = IM_COL32(255, 175, 50, 70);
+		line_color = IM_COL32(255, 210, 80, 255);
+		inner_line_color = IM_COL32(255, 140, 20, 240);
+	} else {
+		fill_color = IM_COL32(r, g, b, 70);
+		line_color = IM_COL32(cr, cg, cb, 255);
+		inner_line_color = IM_COL32(r, g, b, 240);
+	}
 
 	if (is_shift_down && is_alt_down) {
 		float cross_size = 14.0f;
@@ -1819,6 +2436,73 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		set_tool_mode(ToolMode::Brush);
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ToolSelect)) {
 		set_tool_mode(ToolMode::Select);
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ToolAttribute)) {
+		const auto& set_meta = SetManager::get_current_metadata();
+		if (!set_meta.attributes.empty()) {
+			set_tool_mode(ToolMode::Attribute);
+		}
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::IncreaseAttrValue, true)) {
+		if (current_tool == ToolMode::Attribute) {
+			const auto& set_meta = SetManager::get_current_metadata();
+			float step = 1.0f;
+			if (attr_tool_target_index >= 0 && attr_tool_target_index < static_cast<int>(set_meta.attributes.size())) {
+				const auto& attr_def = set_meta.attributes[attr_tool_target_index];
+				if (attr_def.type == AttributeType::Float && (attr_def.max_val - attr_def.min_val <= 2.0)) {
+					step = 0.05f;
+				} else if (attr_def.type == AttributeType::Float && (attr_def.max_val - attr_def.min_val <= 10.0)) {
+					step = 0.5f;
+				}
+			}
+			if (io.KeyShift)
+				step *= 5.0f;
+			attr_tool_value += step;
+			if (attr_tool_mode == 1 && attr_tool_target_index >= 0 &&
+				attr_tool_target_index < static_cast<int>(set_meta.attributes.size())) {
+				const auto& attr_def = set_meta.attributes[attr_tool_target_index];
+				attr_tool_value = std::clamp(attr_tool_value, static_cast<float>(attr_def.min_val),
+											 static_cast<float>(attr_def.max_val));
+			}
+			ToastManager::info(fmt::format("Attribute Value: {:.2f}", attr_tool_value));
+		}
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::DecreaseAttrValue, true)) {
+		if (current_tool == ToolMode::Attribute) {
+			const auto& set_meta = SetManager::get_current_metadata();
+			float step = 1.0f;
+			if (attr_tool_target_index >= 0 && attr_tool_target_index < static_cast<int>(set_meta.attributes.size())) {
+				const auto& attr_def = set_meta.attributes[attr_tool_target_index];
+				if (attr_def.type == AttributeType::Float && (attr_def.max_val - attr_def.min_val <= 2.0)) {
+					step = 0.05f;
+				} else if (attr_def.type == AttributeType::Float && (attr_def.max_val - attr_def.min_val <= 10.0)) {
+					step = 0.5f;
+				}
+			}
+			if (io.KeyShift)
+				step *= 5.0f;
+			attr_tool_value -= step;
+			if (attr_tool_mode == 1 && attr_tool_target_index >= 0 &&
+				attr_tool_target_index < static_cast<int>(set_meta.attributes.size())) {
+				const auto& attr_def = set_meta.attributes[attr_tool_target_index];
+				attr_tool_value = std::clamp(attr_tool_value, static_cast<float>(attr_def.min_val),
+											 static_cast<float>(attr_def.max_val));
+			}
+			ToastManager::info(fmt::format("Attribute Value: {:.2f}", attr_tool_value));
+		}
+	} else if (ShortcutManager::is_action_pressed(ShortcutAction::CycleDisplayMode)) {
+		const auto& set_meta = SetManager::get_current_metadata();
+		if (!set_meta.attributes.empty()) {
+			int cur_hm = Grid::get_heatmap_mode();
+			int total_attrs = static_cast<int>(set_meta.attributes.size());
+			int next_hm = cur_hm + 1;
+			if (next_hm >= total_attrs) {
+				next_hm = -1;
+			}
+			Grid::set_heatmap_mode(next_hm);
+			if (next_hm == -1) {
+				ToastManager::info("Display Mode: Normal Colors");
+			} else {
+				ToastManager::info(fmt::format("Display Mode: Heatmap ({})", set_meta.attributes[next_hm].name));
+			}
+		}
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::Delete)) {
 		if (selection_state == SelectionState::Selected) {
 			fill_selection(0);
@@ -1886,7 +2570,6 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		return;
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::ToggleTransparent)) {
 		transparent_mode = !transparent_mode;
-		ToastManager::info(std::string("Selection transparency: ") + (transparent_mode ? "ON" : "OFF"));
 		return;
 	}
 
@@ -1920,13 +2603,11 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
 		return;
 	} else if (ShortcutManager::is_action_pressed(ShortcutAction::CancelOrQuit)) {
-		if (selection_state == SelectionState::Moving) {
+		if (selection_state == SelectionState::Moving || selection_state == SelectionState::Selected ||
+			selection_state == SelectionState::Selecting || selection_state == SelectionState::Resizing) {
 			deselect();
 		} else if (selection_state == SelectionState::Pasting) {
 			selection_state = SelectionState::None;
-		} else if (selection_state == SelectionState::Selected || selection_state == SelectionState::Selecting ||
-				   selection_state == SelectionState::Resizing) {
-			deselect();
 		} else {
 			show_exit_popup = true;
 		}
@@ -2214,6 +2895,70 @@ void UI::handle_canvas_interaction() {
 		return;
 	}
 
+	if (current_tool == ToolMode::Attribute) {
+		bool is_shift = io.KeyShift;
+		bool is_alt = io.KeyAlt;
+		bool left_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+		bool right_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+		bool left_released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+		bool right_released = ImGui::IsMouseReleased(ImGuiMouseButton_Right);
+		bool left_down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+		bool right_down = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+
+		if (left_clicked || right_clicked) {
+			UndoManager::set_pending_grid_snapshot();
+			if (is_shift && !is_alt) {
+				ImGuiMouseButton btn = left_clicked ? ImGuiMouseButton_Left : ImGuiMouseButton_Right;
+				s_line_brush_start_grid = screen_to_grid_pos(io.MouseClickedPos[btn]);
+				s_line_brush_active = true;
+			}
+		}
+
+		uint8_t target_attr = static_cast<uint8_t>(std::clamp(attr_tool_target_index, 0, 2));
+		bool set_exact = (attr_tool_mode == 1);
+		const auto& attrs = SetManager::get_current_metadata().attributes;
+		float def_val = (target_attr < attrs.size()) ? static_cast<float>(attrs[target_attr].default_val) : 0.0f;
+
+		if (is_shift && is_alt && (left_clicked || right_clicked)) {
+			s_line_brush_active = false;
+			uint32_t target_x = static_cast<uint32_t>(grid_pos.x);
+			uint32_t target_y = static_cast<uint32_t>(grid_pos.y);
+			float val = left_clicked ? attr_tool_value : (set_exact ? def_val : -attr_tool_value);
+			flood_fill_attribute(target_x, target_y, target_attr, val, set_exact);
+			UndoManager::commit_grid_snapshot_if_changed("Flood Fill Attribute");
+		} else if (is_shift && !is_alt && (left_released || right_released)) {
+			float val = left_released ? attr_tool_value : (set_exact ? def_val : -attr_tool_value);
+			ImGuiMouseButton btn = left_released ? ImGuiMouseButton_Left : ImGuiMouseButton_Right;
+			ImVec2 start_grid =
+				s_line_brush_active ? s_line_brush_start_grid : screen_to_grid_pos(io.MouseClickedPos[btn]);
+			paint_attribute_line(start_grid, grid_pos, mouse_size, target_attr, val, set_exact, brush_shape);
+			UndoManager::commit_grid_snapshot_if_changed("Draw Attribute Line");
+			s_line_brush_active = false;
+		} else if (!is_shift && !is_alt) {
+			s_line_brush_active = false;
+			if (left_down || right_down) {
+				float val = left_down ? attr_tool_value : (set_exact ? def_val : -attr_tool_value);
+				if (s_is_canvas_dragging) {
+					paint_attribute_line(s_prev_canvas_grid, grid_pos, mouse_size, target_attr, val, set_exact,
+										 brush_shape);
+				} else {
+					GridRect brush = calculate_brush_bounds(grid_pos, mouse_size);
+					paint_attribute_brush_at(brush.x, brush.y, brush.w, target_attr, val, set_exact, brush_shape);
+					s_is_canvas_dragging = true;
+				}
+				s_prev_canvas_grid = grid_pos;
+				ImGui::ResetMouseDragDelta();
+			} else {
+				s_is_canvas_dragging = false;
+			}
+
+			if (left_released || right_released) {
+				UndoManager::commit_grid_snapshot_if_changed("Paint Attribute");
+			}
+		}
+		return;
+	}
+
 	bool is_shift = io.KeyShift;
 	bool is_alt = io.KeyAlt;
 	bool left_clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
@@ -2286,21 +3031,78 @@ void UI::on_step_completed() {
 
 void UI::render_header(ImGuiIO& io) {
 	const auto& cfg = ConfigManager::get_config();
+	bool first_stat = true;
 	if (cfg.ui.show_fps) {
-		ImGui::Text("FPS: %.1f (%.3f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
+		ImGui::Text("FPS: %.1f", io.Framerate);
+		first_stat = false;
 	}
+
 	if (cfg.ui.show_active_cells) {
-		ImGui::Text("Active cells: %u", Grid::get_changed_cells());
+		if (!first_stat)
+			ImGui::SameLine(0.0f, 10.0f);
+		ImGui::Text("Cells: %u", Grid::get_changed_cells());
+		first_stat = false;
 	}
+
 	if (cfg.ui.show_simulation_status) {
+		if (!first_stat)
+			ImGui::SameLine(0.0f, 10.0f);
 		if (update) {
 			ImGui::TextColored(ImVec4(0.25f, 0.90f, 0.45f, 1.0f), "Status: UNPAUSED");
 		} else {
 			ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.35f, 1.0f), "Status: PAUSED");
 		}
 	}
-	ImGui::Separator();
-	render_selection_controls();
+
+	const auto& set_meta = SetManager::get_current_metadata();
+	if (!set_meta.attributes.empty()) {
+		int cur_hm = Grid::get_heatmap_mode();
+		std::string preview = (cur_hm < 0 || cur_hm >= static_cast<int>(set_meta.attributes.size()))
+								  ? "Normal Colors"
+								  : ("Heatmap: " + set_meta.attributes[cur_hm].name);
+		float avail_w = ImGui::GetContentRegionAvail().x;
+		float combo_w = (cur_hm >= 0) ? std::min(130.0f, avail_w * 0.40f) : std::min(160.0f, avail_w * 0.50f);
+		ImGui::SetNextItemWidth(combo_w);
+		if (ImGui::BeginCombo("##heatmap_combo", preview.c_str())) {
+			if (ImGui::Selectable("Normal Colors", cur_hm == -1)) {
+				Grid::set_heatmap_mode(-1);
+			}
+			for (size_t a = 0; a < set_meta.attributes.size(); ++a) {
+				std::string item_name = "Heatmap: " + set_meta.attributes[a].name;
+				if (ImGui::Selectable(item_name.c_str(), cur_hm == static_cast<int>(a))) {
+					Grid::set_heatmap_mode(static_cast<int>(a));
+				}
+			}
+			ImGui::EndCombo();
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip("Switch display mode (%s)",
+							  ShortcutManager::get_key_string(ShortcutAction::CycleDisplayMode).c_str());
+		}
+	}
+
+	std::string info_str = "Material: ---";
+	if (!io.WantCaptureMouse) {
+		ImVec2 gpos = screen_to_grid_pos(io.MousePos);
+		int gx = static_cast<int>(gpos.x);
+		int gy = static_cast<int>(gpos.y);
+		if (gx >= 0 && gx < static_cast<int>(Grid::get_width()) && gy >= 0 &&
+			gy < static_cast<int>(Grid::get_height())) {
+			const Cell& c = Grid::get_cell_full_const(gx, gy);
+			const auto& mdef = MaterialManager::get_material(c.material);
+			info_str = mdef.name;
+			for (size_t a = 0; a < set_meta.attributes.size(); ++a) {
+				float val = c.get_attr_f(a);
+				if (set_meta.attributes[a].type == AttributeType::Int) {
+					info_str +=
+						fmt::format(" | {}: {}", set_meta.attributes[a].name, static_cast<int64_t>(std::round(val)));
+				} else {
+					info_str += fmt::format(" | {}: {:.2f}", set_meta.attributes[a].name, val);
+				}
+			}
+		}
+	}
+	ImGui::TextDisabled("%s", info_str.c_str());
 	ImGui::Separator();
 }
 
@@ -2357,8 +3159,6 @@ void UI::render_sim_content() {
 	}
 
 	ImGui::Separator();
-	render_selection_controls();
-	ImGui::Separator();
 
 	std::vector<MaterialDefinition>& materials = MaterialManager::get_materials();
 
@@ -2397,7 +3197,11 @@ void UI::render_sim_content() {
 struct CopiedRuleCell {
 	enum class Type { When, Then } type = Type::When;
 	std::vector<uint8_t> when_val;
+	std::vector<AttributeCondition> when_attrs;
 	uint8_t then_val = 255;
+	ThenCellAction then_action;
+	int src_dx = 0;
+	int src_dy = 0;
 	bool has_copied = false;
 
 	bool can_paste_as_then() const {
@@ -2524,6 +3328,170 @@ std::string UI::get_effective_material_shortcut(uint8_t id) {
 	return "";
 }
 
+struct ExprBadgeRef {
+	int dx;
+	int dy;
+	bool is_relative;
+	size_t start_pos;
+	size_t length;
+};
+
+static std::vector<ExprBadgeRef> extract_cell_badges(const std::string& expr) {
+	std::vector<ExprBadgeRef> badges;
+	size_t i = 0;
+	size_t n = expr.size();
+	while (i < n) {
+		char c = expr[i];
+		if (c == '~' && i + 1 < n && expr[i + 1] == '[') {
+			size_t close = expr.find(']', i + 1);
+			if (close != std::string::npos) {
+				std::string inner = expr.substr(i + 2, close - i - 2);
+				size_t comma = inner.find(',');
+				if (comma != std::string::npos) {
+					try {
+						int dx = std::stoi(inner.substr(0, comma));
+						int dy = std::stoi(inner.substr(comma + 1));
+						badges.push_back({dx, dy, true, i, close - i + 1});
+						i = close + 1;
+						continue;
+					} catch (...) {}
+				}
+			}
+		}
+		if (c == '[') {
+			size_t close = expr.find(']', i);
+			if (close != std::string::npos) {
+				std::string inner = expr.substr(i + 1, close - i - 1);
+				size_t comma = inner.find(',');
+				if (comma != std::string::npos) {
+					try {
+						int dx = std::stoi(inner.substr(0, comma));
+						int dy = std::stoi(inner.substr(comma + 1));
+						badges.push_back({dx, dy, false, i, close - i + 1});
+						i = close + 1;
+						continue;
+					} catch (...) {}
+				}
+			}
+		}
+		if (c == '(') {
+			size_t close = expr.find(')', i);
+			if (close != std::string::npos) {
+				std::string inner = expr.substr(i + 1, close - i - 1);
+				size_t comma = inner.find(',');
+				if (comma != std::string::npos) {
+					bool only_nums = true;
+					for (char ic : inner) {
+						if (!std::isdigit(static_cast<unsigned char>(ic)) && ic != '+' && ic != '-' && ic != ' ' &&
+							ic != '\t' && ic != ',') {
+							only_nums = false;
+							break;
+						}
+					}
+					if (only_nums) {
+						try {
+							int dx = std::stoi(inner.substr(0, comma));
+							int dy = std::stoi(inner.substr(comma + 1));
+							badges.push_back({dx, dy, false, i, close - i + 1});
+							i = close + 1;
+							continue;
+						} catch (...) {}
+					}
+				}
+			}
+		}
+		i++;
+	}
+	return badges;
+}
+
+struct ExprSegment {
+	bool is_badge;
+	std::string text;
+	ExprBadgeRef badge;
+};
+
+static std::vector<ExprSegment> split_expr_segments(const std::string& expr) {
+	std::vector<ExprSegment> segs;
+	auto badges = extract_cell_badges(expr);
+	size_t cursor = 0;
+	for (const auto& b : badges) {
+		if (b.start_pos > cursor) {
+			segs.push_back({false, expr.substr(cursor, b.start_pos - cursor), {}});
+		}
+		segs.push_back({true, expr.substr(b.start_pos, b.length), b});
+		cursor = b.start_pos + b.length;
+	}
+	if (cursor < expr.size()) {
+		segs.push_back({false, expr.substr(cursor), {}});
+	}
+	return segs;
+}
+
+static void toggle_badge_relative(std::string& expr, const ExprBadgeRef& badge, int cell_dx = 0, int cell_dy = 0) {
+	if (badge.start_pos >= expr.size())
+		return;
+	std::string replacement;
+	if (badge.is_relative) {
+		int abs_x = cell_dx + badge.dx;
+		int abs_y = cell_dy + badge.dy;
+		replacement = fmt::format("[{},{}]", abs_x, abs_y);
+	} else {
+		int rel_x = badge.dx - cell_dx;
+		int rel_y = badge.dy - cell_dy;
+		replacement = fmt::format("~[{},{}]", rel_x, rel_y);
+	}
+	expr.replace(badge.start_pos, badge.length, replacement);
+}
+
+static void remove_badge(std::string& expr, const ExprBadgeRef& badge) {
+	if (badge.start_pos >= expr.size())
+		return;
+	size_t start = badge.start_pos;
+	size_t len = badge.length;
+
+	size_t after = start + len;
+	while (after < expr.size() && std::isspace(static_cast<unsigned char>(expr[after])))
+		after++;
+	if (after < expr.size() && (expr[after] == '+' || expr[after] == '-' || expr[after] == '*' || expr[after] == '/')) {
+		after++;
+		while (after < expr.size() && std::isspace(static_cast<unsigned char>(expr[after])))
+			after++;
+		len = after - start;
+	} else {
+		size_t before = start;
+		while (before > 0 && std::isspace(static_cast<unsigned char>(expr[before - 1])))
+			before--;
+		if (before > 0 && (expr[before - 1] == '+' || expr[before - 1] == '-' || expr[before - 1] == '*' ||
+						   expr[before - 1] == '/')) {
+			before--;
+			while (before > 0 && std::isspace(static_cast<unsigned char>(expr[before - 1])))
+				before--;
+			len = (start + len) - before;
+			start = before;
+		}
+	}
+	expr.erase(start, len);
+}
+
+static void append_cell_to_equation(std::string& expr, int dx, int dy) {
+	std::string cell_str = fmt::format("[{},{}]", dx, dy);
+	std::string trimmed = expr;
+	while (!trimmed.empty() && std::isspace(static_cast<unsigned char>(trimmed.back())))
+		trimmed.pop_back();
+
+	if (!trimmed.empty()) {
+		char last_c = trimmed.back();
+		if (last_c != '+' && last_c != '-' && last_c != '*' && last_c != '/' && last_c != '%' && last_c != '^' &&
+			last_c != '(' && last_c != ',') {
+			expr += " + ";
+		} else if (last_c != '(' && last_c != ' ') {
+			expr += " ";
+		}
+	}
+	expr += cell_str;
+}
+
 void UI::render_material_editor() {
 	std::vector<MaterialDefinition>& materials = MaterialManager::get_materials();
 	auto& cfg = ConfigManager::get_config();
@@ -2630,6 +3598,13 @@ void UI::render_material_editor() {
 				}
 				new_mat.name = unique_name;
 				new_mat.color = {255, 255, 255};
+				const auto& cur_set_meta = SetManager::get_current_metadata();
+				for (size_t a = 0; a < 3 && a < cur_set_meta.attributes.size(); ++a) {
+					new_mat.default_attributes[a] = cur_set_meta.attributes[a].default_val;
+					float a_min = static_cast<float>(cur_set_meta.attributes[a].min_val);
+					float a_max = static_cast<float>(cur_set_meta.attributes[a].max_val);
+					new_mat.attr_color_modifiers[a].gradient = ColorGradient::create_default(a_min, a_max);
+				}
 				const uint8_t id = MaterialManager::add_material(new_mat);
 				selected_id = id;
 				unsaved_changes = true;
@@ -2707,63 +3682,150 @@ void UI::render_material_editor() {
 		}
 		auto& mat = const_cast<MaterialDefinition&>(MaterialManager::get_material(selected_id));
 
-		ImGui::Text("Editing: %s", mat.name.c_str());
-
-		char name_buf[128];
-		strncpy(name_buf, mat.name.c_str(), sizeof(name_buf));
-		name_buf[sizeof(name_buf) - 1] = '\0';
-		if (ImGui::InputText("Name", name_buf, sizeof(name_buf))) {
-			std::string new_name = name_buf;
-			new_name = sanitize_name(new_name);
-			if (MaterialManager::is_valid_name(new_name) && new_name != mat.name) {
-				UndoManager::push_snapshot("Rename Material");
-				MaterialManager::update_material_name(selected_id, new_name);
-				unsaved_changes = true;
+		if (ImGui::CollapsingHeader("Basic Properties", ImGuiTreeNodeFlags_DefaultOpen)) {
+			char name_buf[128];
+			strncpy(name_buf, mat.name.c_str(), sizeof(name_buf));
+			name_buf[sizeof(name_buf) - 1] = '\0';
+			if (ImGui::InputText("Name", name_buf, sizeof(name_buf))) {
+				std::string new_name = name_buf;
+				new_name = sanitize_name(new_name);
+				if (MaterialManager::is_valid_name(new_name) && new_name != mat.name) {
+					UndoManager::push_snapshot("Rename Material");
+					MaterialManager::update_material_name(selected_id, new_name);
+					unsaved_changes = true;
+				}
 			}
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Rename the material configuration.");
-		}
-
-		float col[3] = {mat.color[0] / 255.f, mat.color[1] / 255.f, mat.color[2] / 255.f};
-		if (ImGui::ColorEdit3("Color", col)) {
-			UndoManager::push_snapshot("Edit Material Color");
-			mat.color[0] = static_cast<uint8_t>(col[0] * 255.f);
-			mat.color[1] = static_cast<uint8_t>(col[1] * 255.f);
-			mat.color[2] = static_cast<uint8_t>(col[2] * 255.f);
-			unsaved_changes = true;
-			MaterialManager::update_material_color(selected_id, mat);
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Pick color for this material in the simulator.");
-		}
-
-		std::string current_parent =
-			(mat.inherits_from == 255) ? "None" : MaterialManager::get_material(mat.inherits_from).name;
-		if (ImGui::BeginCombo("Inherit From", current_parent.c_str())) {
-			if (ImGui::Selectable("None", mat.inherits_from == 255)) {
-				UndoManager::push_snapshot("Set Inheritance");
-				MaterialManager::set_material_inheritance(selected_id, 255);
-				rebuild_needed = true;
-				unsaved_changes = true;
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Rename the material configuration.");
 			}
-			for (const auto& other_mat : materials) {
-				if (other_mat.id != selected_id && other_mat.name != mat.name) {
-					bool is_selected = (mat.inherits_from == other_mat.id);
-					ImVec4 o_col(other_mat.color[0] / 255.f, other_mat.color[1] / 255.f, other_mat.color[2] / 255.f,
-								 1.0f);
-					if (UI::selectable_with_color(other_mat.name.c_str(), o_col, is_selected)) {
-						UndoManager::push_snapshot("Set Inheritance");
-						MaterialManager::set_material_inheritance(selected_id, other_mat.id);
-						rebuild_needed = true;
-						unsaved_changes = true;
+
+			float col[3] = {static_cast<float>(mat.color[0]) / 255.f, static_cast<float>(mat.color[1]) / 255.f,
+							static_cast<float>(mat.color[2]) / 255.f};
+			if (ImGui::ColorEdit3("Color", col)) {
+				UndoManager::push_snapshot("Edit Material Color");
+				mat.color[0] = static_cast<uint8_t>(col[0] * 255.f);
+				mat.color[1] = static_cast<uint8_t>(col[1] * 255.f);
+				mat.color[2] = static_cast<uint8_t>(col[2] * 255.f);
+				unsaved_changes = true;
+				MaterialManager::update_material_color(selected_id, mat);
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Pick color for this material in the simulator.");
+			}
+
+			std::string current_parent =
+				(mat.inherits_from == 255) ? "None" : MaterialManager::get_material(mat.inherits_from).name;
+			if (ImGui::BeginCombo("Inherit From", current_parent.c_str())) {
+				if (ImGui::Selectable("None", mat.inherits_from == 255)) {
+					UndoManager::push_snapshot("Set Inheritance");
+					MaterialManager::set_material_inheritance(selected_id, 255);
+					rebuild_needed = true;
+					unsaved_changes = true;
+				}
+				for (const auto& other_mat : materials) {
+					if (other_mat.id != selected_id && other_mat.name != mat.name) {
+						bool is_selected = (mat.inherits_from == other_mat.id);
+						ImVec4 o_col(other_mat.color[0] / 255.f, other_mat.color[1] / 255.f, other_mat.color[2] / 255.f,
+									 1.0f);
+						if (UI::selectable_with_color(other_mat.name.c_str(), o_col, is_selected)) {
+							if (mat.inherits_from != other_mat.id) {
+								bool target_has_rules = false;
+								uint8_t curr = other_mat.id;
+								while (curr != 255) {
+									const auto& p = MaterialManager::get_material(curr);
+									if (p.id != curr)
+										break;
+									if (!p.rules.empty()) {
+										target_has_rules = true;
+										break;
+									}
+									curr = p.inherits_from;
+								}
+								if (selected_id == 0 && target_has_rules) {
+									s_pending_empty_inherit_id = other_mat.id;
+									open_empty_rule_warning_popup = true;
+								} else {
+									UndoManager::push_snapshot("Set Inheritance");
+									MaterialManager::set_material_inheritance(selected_id, other_mat.id);
+									rebuild_needed = true;
+									unsaved_changes = true;
+								}
+							}
+						}
+					}
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Dynamically inherits rules from the selected parent material.");
+			}
+
+			const auto& cur_set_meta = SetManager::get_current_metadata();
+			if (!cur_set_meta.attributes.empty()) {
+				ImGui::Spacing();
+				ImGui::Text("Default Attributes:");
+				for (size_t a_idx = 0; a_idx < cur_set_meta.attributes.size(); ++a_idx) {
+					const auto& attr = cur_set_meta.attributes[a_idx];
+					std::string label = attr.name + "##def_attr_" + std::to_string(a_idx);
+					if (attr.type == AttributeType::Float) {
+						float val = static_cast<float>(mat.default_attributes[a_idx]);
+						if (ImGui::InputFloat(label.c_str(), &val, 1.0f, 10.0f, "%.2f")) {
+							UndoManager::push_snapshot("Edit Default Attribute");
+							val = std::clamp(val, static_cast<float>(attr.min_val), static_cast<float>(attr.max_val));
+							mat.default_attributes[a_idx] = val;
+							unsaved_changes = true;
+						}
+					} else {
+						int val = static_cast<int>(mat.default_attributes[a_idx]);
+						if (ImGui::InputInt(label.c_str(), &val, 1, 10)) {
+							UndoManager::push_snapshot("Edit Default Attribute");
+							val = std::clamp(val, static_cast<int>(attr.min_val), static_cast<int>(attr.max_val));
+							mat.default_attributes[a_idx] = val;
+							unsaved_changes = true;
+						}
+					}
+					if (ImGui::IsItemHovered()) {
+						std::string tt = fmt::format("Default {} for newly placed {} cells ({}..{})", attr.name,
+													 mat.name, attr.min_val, attr.max_val);
+						ImGui::SetTooltip("%s", tt.c_str());
 					}
 				}
 			}
-			ImGui::EndCombo();
 		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Dynamically inherits rules from the selected parent material.");
+
+		const auto& cur_set_meta = SetManager::get_current_metadata();
+		if (!cur_set_meta.attributes.empty()) {
+			ImGui::Separator();
+
+			if (ImGui::CollapsingHeader("Attribute Color Modifiers", ImGuiTreeNodeFlags_DefaultOpen)) {
+				for (size_t a_idx = 0; a_idx < cur_set_meta.attributes.size(); ++a_idx) {
+					const auto& attr = cur_set_meta.attributes[a_idx];
+					auto& cmod = mat.attr_color_modifiers[a_idx];
+					ImGui::PushID(static_cast<int>(a_idx + 8800));
+					bool enabled = cmod.enabled;
+					ImGui::Text("%s", attr.name.c_str());
+					ImGui::SameLine(0.0f, get_spacing(0.0f));
+					if (custom_checkbox(("##cmod_en_" + attr.name).c_str(), &enabled, IconID::ColorWheel,
+										"Enable continuous color modification based on this attribute")) {
+						UndoManager::push_snapshot("Toggle Color Modifier");
+						cmod.enabled = enabled;
+						rebuild_needed = true;
+						unsaved_changes = true;
+					}
+					if (enabled) {
+						ImGui::Indent(18.0f);
+						float a_min = static_cast<float>(attr.min_val);
+						float a_max = static_cast<float>(attr.max_val);
+						if (gradient_editor(("##cmod_grad_" + attr.name).c_str(), cmod.gradient, a_min, a_max)) {
+							UndoManager::push_snapshot("Edit Color Modifier Gradient");
+							rebuild_needed = true;
+							unsaved_changes = true;
+						}
+						ImGui::Unindent(18.0f);
+					}
+					ImGui::PopID();
+				}
+			}
 		}
 
 		ImGui::Separator();
@@ -2775,6 +3837,7 @@ void UI::render_material_editor() {
 
 		if (button_with_icon("Add Rule", IconManager::get(IconID::Add))) {
 			if (selected_id == 0 && mat.rules.empty()) {
+				s_pending_empty_inherit_id = 255;
 				open_empty_rule_warning_popup = true;
 			} else {
 				UndoManager::push_snapshot("Add Rule");
@@ -2800,20 +3863,73 @@ void UI::render_material_editor() {
 			int grid_h = rule.height();
 			int max_dim = std::max(grid_w, grid_h);
 			float avail_w = ImGui::GetContentRegionAvail().x;
-			float left_col_w = 160.0f;
-			float remaining_w = std::max(160.0f, avail_w - left_col_w - 40.0f);
-			float max_grid_w = (remaining_w - 60.0f) * 0.5f;
-			float avail_grid_space = std::clamp(max_grid_w, 80.0f, 180.0f);
-			float cell_sz = std::clamp(std::floor((avail_grid_space - (max_dim - 1) * 1.0f) / max_dim), 10.0f, 130.0f);
+			ImVec2 tiny_sz(20.0f, 20.0f);
+			float nav_btns_w = tiny_sz.x * 2.0f;
+			float total_margins = (nav_btns_w * 2.0f) + 50.0f;
+			float max_grid_w = std::max(100.0f, (avail_w - total_margins) * 0.5f);
+			float cell_sz = std::clamp(std::floor((max_grid_w - (max_dim - 1) * 1.0f) / max_dim), 24.0f, 56.0f);
 			float when_grid_px_w = grid_w * cell_sz + (grid_w - 1) * 1.0f;
 			float when_grid_px_h = grid_h * cell_sz + (grid_h - 1) * 1.0f;
-			float card_h = std::max(290.0f, when_grid_px_h + 120.0f);
 
-			ImGui::BeginChild(("##rule_card_" + std::to_string(r_id)).c_str(), ImVec2(0, card_h), true,
-							  ImGuiWindowFlags_NoScrollbar);
+			auto try_expand = [&](ExpandSide side) {
+				int new_w = grid_w;
+				int new_h = grid_h;
+				if (side == ExpandSide::Top || side == ExpandSide::Bottom)
+					new_h++;
+				else
+					new_w++;
+				int new_total = new_w * new_h;
+				if (new_total > static_cast<int>(DEFAULT_NEIGHBOR_MAX_CELLS) &&
+					!ConfigManager::get_config().allow_large_neighborhoods) {
+					s_pending_expand_side = side;
+					s_pending_expand_mat_id = selected_id;
+					s_pending_expand_rule_idx = reference.is_inherited ? -1 : static_cast<int>(reference.index);
+					open_large_neighborhood_warning_popup = true;
+					return;
+				}
+				UndoManager::push_snapshot("Expand Rule Neighborhood");
+				if (side == ExpandSide::Top)
+					rule.expand_top();
+				else if (side == ExpandSide::Bottom)
+					rule.expand_bottom();
+				else if (side == ExpandSide::Left)
+					rule.expand_left();
+				else if (side == ExpandSide::Right)
+					rule.expand_right();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			};
+
+			auto do_shrink = [&](ExpandSide side) {
+				UndoManager::push_snapshot("Shrink Rule Neighborhood");
+				if (side == ExpandSide::Top)
+					rule.shrink_top();
+				else if (side == ExpandSide::Bottom)
+					rule.shrink_bottom();
+				else if (side == ExpandSide::Left)
+					rule.shrink_left();
+				else if (side == ExpandSide::Right)
+					rule.shrink_right();
+				rebuild_needed = true;
+				unsaved_changes = true;
+			};
+
+			ImGui::BeginChild(("##rule_card_" + std::to_string(r_id)).c_str(), ImVec2(0, 0),
+							  ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
+
+			float btn_size = ImGui::GetFrameHeight();
 
 			ImGui::BeginGroup();
-			float btn_size = ImGui::GetFrameHeight();
+
+			if (custom_checkbox("##enable_rule", &rule.enabled, rule.enabled ? IconID::Accept : IconID::Pause,
+								"Toggle rule.", ImVec2(btn_size, btn_size))) {
+				UndoManager::push_snapshot("Toggle Enable Rule");
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+
 			if (r_id > 0) {
 				if (ImGui::ArrowButton("##up", ImGuiDir_Up)) {
 					UndoManager::push_snapshot("Reorder Rules");
@@ -2842,11 +3958,11 @@ void UI::render_material_editor() {
 			} else {
 				ImGui::Dummy(ImVec2(btn_size, btn_size));
 			}
-			ImGui::SameLine(0.0f, 10.0f);
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
 
 			if (button_with_icon("##CopyRule", IconManager::get(IconID::Copy), ImVec2(btn_size, btn_size))) {
 				UndoManager::push_snapshot("Copy Rule");
-				RuleDefinition duplicated_rule = rule;
+				const RuleDefinition& duplicated_rule = rule;
 				mat.rules.push_back(duplicated_rule);
 				RuleReference new_ref{false, mat.rules.size() - 1};
 				mat.rule_order.insert(mat.rule_order.begin() + r_id + 1, new_ref);
@@ -2899,7 +4015,8 @@ void UI::render_material_editor() {
 				ImGui::BeginDisabled(true);
 			}
 
-			ImGui::SetNextItemWidth(150.0f);
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+			ImGui::SetNextItemWidth(140.0f);
 			if (ImGui::InputFloat("##chance_input", &rule.chance, 1.0f, 10.0f, "%.03f%%")) {
 				UndoManager::push_snapshot("Edit Rule Chance");
 				if (rule.chance < 0.001f) {
@@ -2914,143 +4031,157 @@ void UI::render_material_editor() {
 				ImGui::SetTooltip("Controls rule probability.");
 			}
 
-			if (ImGui::Checkbox("X Symmetry", &rule.symmetry.flip_x)) {
-				UndoManager::push_snapshot("Edit Rule Symmetry");
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+
+			if (custom_checkbox("Keep##continue_next", &rule.continue_to_next, IconID::Branch,
+								"Continue evaluating next rules on match.", ImVec2(-1.0f, btn_size))) {
+				UndoManager::push_snapshot("Toggle Continue Rule");
 				rebuild_needed = true;
 				unsaved_changes = true;
 			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Allows the rule to match its left-right mirror image.");
-			}
-			if (ImGui::Checkbox("Y Symmetry", &rule.symmetry.flip_y)) {
-				UndoManager::push_snapshot("Edit Rule Symmetry");
+
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+
+			if (custom_checkbox("Multi##multi_apply", &rule.multi_apply, IconID::MultiApply,
+								"Allows matching all symmetrical variants of this rule to run in the same step.\n"
+								"Useful for spreading in multiple directions at the same time.",
+								ImVec2(-1.0f, btn_size))) {
+				UndoManager::push_snapshot("Toggle Multi-Apply Rule");
 				rebuild_needed = true;
 				unsaved_changes = true;
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Allows the rule to match its up-down mirror image.");
-			}
-			if (ImGui::Checkbox("Rotational Symmetry", &rule.symmetry.rotate)) {
-				UndoManager::push_snapshot("Edit Rule Symmetry");
-				rebuild_needed = true;
-				unsaved_changes = true;
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Allows the rule to match with 90 degree rotations of itself.");
 			}
 
 			ImGui::Spacing();
-			ImGui::TextDisabled("Transform Grid:");
-			if (button_with_icon("CW##rot_cw", IconManager::get(IconID::RotateCW), ImVec2(76.0f, 26.0f))) {
+
+			if (custom_checkbox("X Symmetry##x_sym", &rule.symmetry.flip_x, IconID::FlipHorizontal,
+								"Allows the rule to match its left-right mirror image.", ImVec2(-1.0f, btn_size))) {
+				UndoManager::push_snapshot("Edit Rule Symmetry");
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+			if (custom_checkbox("Y Symmetry##y_sym", &rule.symmetry.flip_y, IconID::FlipVertical,
+								"Allows the rule to match its up-down mirror image.", ImVec2(-1.0f, btn_size))) {
+				UndoManager::push_snapshot("Edit Rule Symmetry");
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+			if (custom_checkbox("Rotational Symmetry##rot_sym", &rule.symmetry.rotate, IconID::RotateCW,
+								"Allows the rule to match with 90 degree rotations of itself.",
+								ImVec2(-1.0f, btn_size))) {
+				UndoManager::push_snapshot("Edit Rule Symmetry");
+				rebuild_needed = true;
+				unsaved_changes = true;
+			}
+
+			ImGui::EndGroup();
+
+			float left_group_right = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + ImGui::GetScrollX();
+			float manip_grid_w = btn_size * 2.0f + 4.0f;
+			float content_max_x = ImGui::GetWindowContentRegionMax().x;
+			float target_x = content_max_x - manip_grid_w;
+			if (target_x > left_group_right + 8.0f) {
+				ImGui::SameLine(target_x, 0.0f);
+			} else {
+				ImGui::SameLine(0.0f, 8.0f);
+			}
+
+			ImGui::BeginGroup();
+
+			if (button_with_icon("##rcw", IconManager::get(IconID::RotateCW), ImVec2(btn_size, btn_size))) {
 				UndoManager::push_snapshot("Rotate Rule Grid");
 				rule.rotate_cw();
 				rebuild_needed = true;
 				unsaved_changes = true;
 			}
-			if (ImGui::IsItemHovered())
+			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("Rotate grid 90 degrees clockwise");
+			}
+
 			ImGui::SameLine(0.0f, 4.0f);
-			if (button_with_icon("CCW##rot_ccw", IconManager::get(IconID::RotateCCW), ImVec2(76.0f, 26.0f))) {
+			if (button_with_icon("##rccw", IconManager::get(IconID::RotateCCW), ImVec2(btn_size, btn_size))) {
 				UndoManager::push_snapshot("Rotate Rule Grid");
 				rule.rotate_ccw();
 				rebuild_needed = true;
 				unsaved_changes = true;
 			}
-			if (ImGui::IsItemHovered())
+			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("Rotate grid 90 degrees counter-clockwise");
+			}
 
-			if (button_with_icon("Flip X##flip_x", IconManager::get(IconID::FlipHorizontal), ImVec2(76.0f, 26.0f))) {
+			ImGui::Spacing();
+			if (button_with_icon("##fx", IconManager::get(IconID::FlipHorizontal), ImVec2(btn_size, btn_size))) {
 				UndoManager::push_snapshot("Flip Rule Grid");
 				rule.flip_x();
 				rebuild_needed = true;
 				unsaved_changes = true;
 			}
-			if (ImGui::IsItemHovered())
+			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("Flip grid horizontally (left-right)");
+			}
+
 			ImGui::SameLine(0.0f, 4.0f);
-			if (button_with_icon("Flip Y##flip_y", IconManager::get(IconID::FlipVertical), ImVec2(76.0f, 26.0f))) {
+			if (button_with_icon("##fy", IconManager::get(IconID::FlipVertical), ImVec2(btn_size, btn_size))) {
 				UndoManager::push_snapshot("Flip Rule Grid");
 				rule.flip_y();
 				rebuild_needed = true;
 				unsaved_changes = true;
 			}
-			if (ImGui::IsItemHovered())
+			if (ImGui::IsItemHovered()) {
 				ImGui::SetTooltip("Flip grid vertically (top-bottom)");
-
+			}
 			ImGui::EndGroup();
 
-			ImGui::SameLine(0.0f, 10.0f);
-
-			// Expand check lambda
-			auto try_expand = [&](ExpandSide side) {
-				int new_w = grid_w;
-				int new_h = grid_h;
-				if (side == ExpandSide::Top || side == ExpandSide::Bottom)
-					new_h++;
-				else
-					new_w++;
-				int new_total = new_w * new_h;
-				if (new_total > static_cast<int>(DEFAULT_NEIGHBOR_MAX_CELLS) &&
-					!ConfigManager::get_config().allow_large_neighborhoods) {
-					s_pending_expand_side = side;
-					s_pending_expand_mat_id = selected_id;
-					s_pending_expand_rule_idx = reference.is_inherited ? -1 : static_cast<int>(reference.index);
-					open_large_neighborhood_warning_popup = true;
-					return;
-				}
-				UndoManager::push_snapshot("Expand Rule Neighborhood");
-				if (side == ExpandSide::Top)
-					rule.expand_top();
-				else if (side == ExpandSide::Bottom)
-					rule.expand_bottom();
-				else if (side == ExpandSide::Left)
-					rule.expand_left();
-				else if (side == ExpandSide::Right)
-					rule.expand_right();
-				rebuild_needed = true;
-				unsaved_changes = true;
-			};
-
-			auto do_shrink = [&](ExpandSide side) {
-				UndoManager::push_snapshot("Shrink Rule Neighborhood");
-				if (side == ExpandSide::Top)
-					rule.shrink_top();
-				else if (side == ExpandSide::Bottom)
-					rule.shrink_bottom();
-				else if (side == ExpandSide::Left)
-					rule.shrink_left();
-				else if (side == ExpandSide::Right)
-					rule.shrink_right();
-				rebuild_needed = true;
-				unsaved_changes = true;
-			};
-
-			// Right side controls & grids
-			ImGui::BeginGroup();
-
-			// Size header & Reset 3x3
-			ImGui::Text("Size: %dx%d (%d cells)", grid_w, grid_h, grid_w * grid_h);
-			if (grid_w != 3 || grid_h != 3) {
-				ImGui::SameLine(0.0f, 6.0f);
-				if (button_with_icon("Reset 3x3", IconManager::get(IconID::Refresh), ImVec2(0.0f, 20.0f))) {
-					UndoManager::push_snapshot("Reset Rule Neighborhood");
-					rule.reset_to_3x3(selected_id);
-					rebuild_needed = true;
-					unsaved_changes = true;
-				}
-				if (ImGui::IsItemHovered())
-					ImGui::SetTooltip("Reset neighborhood to standard 3x3");
-			}
+			ImGui::Spacing();
+			ImGui::Separator();
 			ImGui::Spacing();
 
-			ImVec2 tiny_sz(20.0f, 20.0f);
 			ImDrawList* dl = ImGui::GetWindowDrawList();
 
-			// When Group
+			bool eq_click_consumed = false;
+			if (s_active_eq_cell_id >= 0 && s_active_eq_rule_id == r_id &&
+				ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !s_active_popup_rect.Contains(io.MousePos)) {
+				bool hit = false;
+				int hit_dx = 0, hit_dy = 0;
+				int cols = rule.max_dx - rule.min_dx + 1;
+				int rows = rule.max_dy - rule.min_dy + 1;
+				auto wit = s_rule_when_rect.find(r_id);
+				auto tit = s_rule_then_rect.find(r_id);
+				if (wit != s_rule_when_rect.end() && wit->second.Contains(io.MousePos)) {
+					float rx = io.MousePos.x - wit->second.Min.x;
+					float ry = io.MousePos.y - wit->second.Min.y;
+					int col = std::clamp(static_cast<int>(rx / (cell_sz + 1.0f)), 0, cols - 1);
+					int row = std::clamp(static_cast<int>(ry / (cell_sz + 1.0f)), 0, rows - 1);
+					hit_dx = rule.min_dx + col;
+					hit_dy = rule.min_dy + row;
+					hit = true;
+				} else if (tit != s_rule_then_rect.end() && tit->second.Contains(io.MousePos)) {
+					float rx = io.MousePos.x - tit->second.Min.x;
+					float ry = io.MousePos.y - tit->second.Min.y;
+					int col = std::clamp(static_cast<int>(rx / (cell_sz + 1.0f)), 0, cols - 1);
+					int row = std::clamp(static_cast<int>(ry / (cell_sz + 1.0f)), 0, rows - 1);
+					hit_dx = rule.min_dx + col;
+					hit_dy = rule.min_dy + row;
+					hit = true;
+				}
+				if (hit) {
+					eq_click_consumed = true;
+					s_keep_eq_popup_open = true;
+					if (s_active_eq_cell_id < static_cast<int>(rule.then_actions.size()) &&
+						s_active_eq_attr_idx >= 0 && s_active_eq_attr_idx < 3) {
+						auto& cur_ta = rule.then_actions[s_active_eq_cell_id];
+						UndoManager::push_snapshot("Add Cell to Equation");
+						append_cell_to_equation(cur_ta.attr_exprs[s_active_eq_attr_idx], hit_dx, hit_dy);
+						rebuild_needed = true;
+						unsaved_changes = true;
+					}
+				}
+			}
+
 			ImGui::BeginGroup();
 			ImGui::Text("When");
 
-			// Top + / - row centered over grid
 			float btn_pair_w = tiny_sz.x * 2.0f + 2.0f;
 			float left_col_btn_w = tiny_sz.x + 2.0f;
 			float top_pad_x = left_col_btn_w + std::max(0.0f, (when_grid_px_w - btn_pair_w) * 0.5f);
@@ -3075,7 +4206,6 @@ void UI::render_material_editor() {
 			if (top_shrink_disabled)
 				ImGui::EndDisabled();
 
-			// Middle row: [Left +/-] [When Grid Canvas] [Right +/-]
 			ImGui::BeginGroup();
 			float left_v_pad = std::max(0.0f, (when_grid_px_h - (tiny_sz.y * 2.0f + 2.0f)) * 0.5f);
 			if (left_v_pad > 0.0f)
@@ -3099,8 +4229,8 @@ void UI::render_material_editor() {
 
 			ImGui::SameLine(0.0f, 2.0f);
 
-			// When Grid Canvas
 			ImGui::BeginGroup();
+			ImVec2 when_cells_start = ImGui::GetCursorScreenPos();
 			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, 1.0f));
 			for (int dy = rule.min_dy; dy <= rule.max_dy; ++dy) {
 				for (int dx = rule.min_dx; dx <= rule.max_dx; ++dx) {
@@ -3118,9 +4248,8 @@ void UI::render_material_editor() {
 									io.MousePos.y < c_max.y);
 
 					if (dx == 0 && dy == 0) {
-						// Center cell: source material color
 						ImU32 col = IM_COL32(mat.color[0], mat.color[1], mat.color[2], 255);
-						dl->AddRectFilled(c_min, c_max, col);
+						dl->AddRectFilled(c_min, c_max, col, 3.0f);
 						float lum = 0.299f * mat.color[0] + 0.587f * mat.color[1] + 0.114f * mat.color[2];
 						ImU32 dot_col = (lum > 130.0f) ? IM_COL32(0, 0, 0, 180) : IM_COL32(255, 255, 255, 220);
 						dl->AddCircleFilled(ImVec2((c_min.x + c_max.x) * 0.5f, (c_min.y + c_max.y) * 0.5f),
@@ -3130,14 +4259,14 @@ void UI::render_material_editor() {
 												   ? rule.when[c_id]
 												   : std::vector<uint8_t>{};
 						if (when_ids.empty()) {
-							// Wildcard: dark canvas
-							dl->AddRectFilled(c_min, c_max, IM_COL32(26, 28, 33, 255));
-							dl->AddCircleFilled(ImVec2((c_min.x + c_max.x) * 0.5f, (c_min.y + c_max.y) * 0.5f), 1.2f,
-												IM_COL32(75, 80, 92, 140));
+							dl->AddRectFilled(c_min, c_max, IM_COL32(26, 28, 33, 255), 3.0f);
+							dl->AddCircleFilled(ImVec2((c_min.x + c_max.x) * 0.5f, (c_min.y + c_max.y) * 0.5f), 1.3f,
+												IM_COL32(85, 92, 105, 160));
 						} else if (when_ids.size() == 1) {
 							const auto& ref_mat = MaterialManager::get_material(when_ids[0]);
 							dl->AddRectFilled(c_min, c_max,
-											  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255));
+											  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255),
+											  3.0f);
 						} else {
 							size_t num_mats = when_ids.size();
 							float stripe_w = (c_max.x - c_min.x) / static_cast<float>(num_mats);
@@ -3145,33 +4274,69 @@ void UI::render_material_editor() {
 								const auto& ref_mat = MaterialManager::get_material(when_ids[s]);
 								dl->AddRectFilled(ImVec2(c_min.x + s * stripe_w, c_min.y),
 												  ImVec2(c_min.x + (s + 1) * stripe_w, c_max.y),
-												  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255));
+												  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255),
+												  (s == 0 || s == num_mats - 1) ? 3.0f : 0.0f);
 							}
 						}
 					}
 
 					std::string popup_id = "select_material_when_" + std::to_string(r_id) + "_" + std::to_string(c_id);
 
-					if (!reference.is_inherited && c_id >= 0 && c_id < static_cast<int>(rule.when.size())) {
+					bool is_eq_picking =
+						(s_active_eq_popup_imgui_id != 0 && s_active_eq_rule_id == r_id && s_active_eq_cell_id >= 0 &&
+						 s_active_eq_cell_id < static_cast<int>(rule.then_actions.size()) &&
+						 !s_active_popup_rect.Contains(io.MousePos));
+
+					if (is_eq_picking && in_cell) {
+						dl->AddRect(c_min, c_max, IM_COL32(56, 189, 248, 240), 3.0f, 0, 2.0f);
+						ImGui::SetTooltip("Click to add [%d, %d] to equation", dx, dy);
+					} else if (!eq_click_consumed && !reference.is_inherited && c_id >= 0 &&
+							   c_id < static_cast<int>(rule.when.size())) {
 						if (is_middle_clicked) {
-							// don't copy if there is more than one material selected in the when grid cell
 							if (dx == 0 && dy == 0) {
 								g_copied_rule_cell.type = CopiedRuleCell::Type::When;
 								g_copied_rule_cell.when_val = {mat.id};
+								g_copied_rule_cell.when_attrs =
+									(c_id >= 0 && c_id < static_cast<int>(rule.when_attrs.size()))
+										? rule.when_attrs[c_id]
+										: std::vector<AttributeCondition>{};
+								g_copied_rule_cell.src_dx = dx;
+								g_copied_rule_cell.src_dy = dy;
 								g_copied_rule_cell.has_copied = true;
-							} else if (rule.when[c_id].size() <= 1) {
+							} else {
 								g_copied_rule_cell.type = CopiedRuleCell::Type::When;
 								g_copied_rule_cell.when_val = rule.when[c_id];
+								g_copied_rule_cell.when_attrs =
+									(c_id >= 0 && c_id < static_cast<int>(rule.when_attrs.size()))
+										? rule.when_attrs[c_id]
+										: std::vector<AttributeCondition>{};
+								g_copied_rule_cell.src_dx = dx;
+								g_copied_rule_cell.src_dy = dy;
 								g_copied_rule_cell.has_copied = true;
 							}
 						} else if (is_right_clicked || (in_cell && ImGui::IsMouseDown(ImGuiMouseButton_Right))) {
 							if (dx != 0 || dy != 0) {
-								if (!rule.when[c_id].empty()) {
+								if (!rule.when[c_id].empty() || (c_id < static_cast<int>(rule.when_attrs.size()) &&
+																 !rule.when_attrs[c_id].empty())) {
 									if (!s_is_dragging_clear) {
 										UndoManager::push_snapshot("Clear Rule Cell");
 										s_is_dragging_clear = true;
 									}
 									rule.when[c_id].clear();
+									if (c_id < static_cast<int>(rule.when_attrs.size())) {
+										rule.when_attrs[c_id].clear();
+									}
+									rebuild_needed = true;
+									unsaved_changes = true;
+								}
+							} else {
+								if (c_id >= 0 && c_id < static_cast<int>(rule.when_attrs.size()) &&
+									!rule.when_attrs[c_id].empty()) {
+									if (!s_is_dragging_clear) {
+										UndoManager::push_snapshot("Clear Center Conditions");
+										s_is_dragging_clear = true;
+									}
+									rule.when_attrs[c_id].clear();
 									rebuild_needed = true;
 									unsaved_changes = true;
 								}
@@ -3181,63 +4346,242 @@ void UI::render_material_editor() {
 							if (dx != 0 || dy != 0) {
 								if (g_copied_rule_cell.can_paste_as_when()) {
 									auto target_when = g_copied_rule_cell.get_as_when();
-									if (rule.when[c_id] != target_when) {
+									if (rule.when[c_id] != target_when ||
+										(g_copied_rule_cell.type == CopiedRuleCell::Type::When &&
+										 (c_id >= static_cast<int>(rule.when_attrs.size())
+											  ? !g_copied_rule_cell.when_attrs.empty()
+											  : rule.when_attrs[c_id] != g_copied_rule_cell.when_attrs))) {
 										if (!s_is_dragging_paint) {
 											UndoManager::push_snapshot("Paint Rule Cell");
 											s_is_dragging_paint = true;
 										}
 										rule.when[c_id] = target_when;
+										if (g_copied_rule_cell.type == CopiedRuleCell::Type::When) {
+											if (c_id >= static_cast<int>(rule.when_attrs.size())) {
+												rule.when_attrs.resize(rule.total_cells());
+											}
+											rule.when_attrs[c_id] = g_copied_rule_cell.when_attrs;
+										}
 										rebuild_needed = true;
 										unsaved_changes = true;
 									}
 								}
 							}
 						} else if (btn_clicked && !io.KeyShift) {
-							if (dx != 0 || dy != 0) {
-								ImGui::OpenPopup(popup_id.c_str());
-							}
+							ImGui::OpenPopup(popup_id.c_str());
 						}
 					}
 
 					if (ImGui::BeginPopup(popup_id.c_str())) {
-						for (const auto& m : materials) {
-							bool checked = (c_id >= 0 && c_id < static_cast<int>(rule.when.size())) &&
-										   (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) !=
-											rule.when[c_id].end());
-							ImVec4 m_col = ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
-							if (UI::selectable_with_color((m.name + "##wcb_" + std::to_string(r_id) + "_" +
-														   std::to_string(c_id) + "_" + std::to_string(m.id))
-															  .c_str(),
-														  m_col, checked, ImGuiSelectableFlags_DontClosePopups,
-														  ImVec2(0, 0), true)) {
-								UndoManager::push_snapshot("Toggle Rule Checkbox");
-								if (!checked) {
-									if (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) ==
-										rule.when[c_id].end()) {
-										rule.when[c_id].push_back(m.id);
+						if (dx == 0 && dy == 0) {
+							ImGui::TextDisabled("Center Material: %s", mat.name.c_str());
+						} else {
+							for (const auto& m : materials) {
+								bool checked = (c_id >= 0 && c_id < static_cast<int>(rule.when.size())) &&
+											   (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) !=
+												rule.when[c_id].end());
+								ImVec4 m_col = ImVec4(m.color[0] / 255.f, m.color[1] / 255.f, m.color[2] / 255.f, 1.0f);
+								if (UI::selectable_with_color((m.name + "##wcb_" + std::to_string(r_id) + "_" +
+															   std::to_string(c_id) + "_" + std::to_string(m.id))
+																  .c_str(),
+															  m_col, checked, ImGuiSelectableFlags_DontClosePopups,
+															  ImVec2(0, 0), true)) {
+									UndoManager::push_snapshot("Toggle Rule Checkbox");
+									if (!checked) {
+										if (std::find(rule.when[c_id].begin(), rule.when[c_id].end(), m.id) ==
+											rule.when[c_id].end()) {
+											rule.when[c_id].push_back(m.id);
+										}
+									} else {
+										std::erase(rule.when[c_id], m.id);
 									}
-								} else {
-									std::erase(rule.when[c_id], m.id);
+									g_copied_rule_cell.type = CopiedRuleCell::Type::When;
+									g_copied_rule_cell.when_val = rule.when[c_id];
+									g_copied_rule_cell.when_attrs =
+										(c_id >= 0 && c_id < static_cast<int>(rule.when_attrs.size()))
+											? rule.when_attrs[c_id]
+											: std::vector<AttributeCondition>{};
+									g_copied_rule_cell.src_dx = dx;
+									g_copied_rule_cell.src_dy = dy;
+									g_copied_rule_cell.has_copied = true;
+									rebuild_needed = true;
+									unsaved_changes = true;
 								}
-								g_copied_rule_cell.type = CopiedRuleCell::Type::When;
-								g_copied_rule_cell.when_val = rule.when[c_id];
-								g_copied_rule_cell.has_copied = true;
+							}
+						}
+
+						const auto& meta = SetManager::get_current_metadata();
+						if (!meta.attributes.empty()) {
+							ImGui::Separator();
+							ImGui::Text("Attribute Conditions:");
+							if (c_id >= static_cast<int>(rule.when_attrs.size())) {
+								rule.when_attrs.resize(rule.total_cells());
+							}
+							auto& cell_conds = rule.when_attrs[c_id];
+							for (size_t cond_i = 0; cond_i < cell_conds.size(); ++cond_i) {
+								ImGui::PushID(static_cast<int>(cond_i + 3000));
+								auto& ac = cell_conds[cond_i];
+
+								std::string cur_attr_name = (ac.attr_index < meta.attributes.size())
+																? meta.attributes[ac.attr_index].name
+																: ("attr" + std::to_string(ac.attr_index));
+								ImGui::SetNextItemWidth(85.0f);
+								if (ImGui::BeginCombo("##attr_sel", cur_attr_name.c_str())) {
+									for (size_t a_idx = 0; a_idx < meta.attributes.size(); ++a_idx) {
+										if (ImGui::Selectable(meta.attributes[a_idx].name.c_str(),
+															  ac.attr_index == a_idx)) {
+											UndoManager::push_snapshot("Edit Attribute Condition");
+											ac.attr_index = static_cast<uint8_t>(a_idx);
+											rebuild_needed = true;
+											unsaved_changes = true;
+										}
+									}
+									ImGui::EndCombo();
+								}
+
+								ImGui::SameLine();
+								const char* ops[] = {"==", "!=", "<", "<=", ">", ">="};
+								CompareOp op_enums[] = {CompareOp::Equal,	CompareOp::NotEqual,
+														CompareOp::Less,	CompareOp::LessOrEqual,
+														CompareOp::Greater, CompareOp::GreaterOrEqual};
+								int cur_op_idx = 2;
+								for (int oi = 0; oi < 6; ++oi) {
+									if (ac.op == op_enums[oi]) {
+										cur_op_idx = oi;
+										break;
+									}
+								}
+								ImGui::SetNextItemWidth(55.0f);
+								if (ImGui::BeginCombo("##op_sel", ops[cur_op_idx])) {
+									for (int oi = 0; oi < 6; ++oi) {
+										if (ImGui::Selectable(ops[oi], cur_op_idx == oi)) {
+											UndoManager::push_snapshot("Edit Attribute Condition");
+											ac.op = op_enums[oi];
+											rebuild_needed = true;
+											unsaved_changes = true;
+										}
+									}
+									ImGui::EndCombo();
+								}
+
+								ImGui::SameLine();
+								if (dx == 0 && dy == 0) {
+									ac.target = CompareTarget::Constant;
+									ImGui::TextDisabled("Constant");
+								} else {
+									const char* targets[] = {"Center", "Constant"};
+									int cur_tgt = (ac.target == CompareTarget::Constant) ? 1 : 0;
+									ImGui::SetNextItemWidth(75.0f);
+									if (ImGui::BeginCombo("##tgt_sel", targets[cur_tgt])) {
+										if (ImGui::Selectable("Center", cur_tgt == 0)) {
+											UndoManager::push_snapshot("Edit Attribute Condition");
+											ac.target = CompareTarget::CenterCell;
+											rebuild_needed = true;
+											unsaved_changes = true;
+										}
+										if (ImGui::Selectable("Constant", cur_tgt == 1)) {
+											UndoManager::push_snapshot("Edit Attribute Condition");
+											ac.target = CompareTarget::Constant;
+											rebuild_needed = true;
+											unsaved_changes = true;
+										}
+										ImGui::EndCombo();
+									}
+								}
+
+								if (ac.target == CompareTarget::Constant) {
+									ImGui::SameLine();
+									bool is_float = (ac.attr_index < meta.attributes.size()) &&
+													(meta.attributes[ac.attr_index].type == AttributeType::Float);
+									double min_bound = (ac.attr_index < meta.attributes.size())
+														   ? meta.attributes[ac.attr_index].min_val
+														   : -1e9;
+									double max_bound = (ac.attr_index < meta.attributes.size())
+														   ? meta.attributes[ac.attr_index].max_val
+														   : 1e9;
+									ImGui::SetNextItemWidth(70.0f);
+									if (is_float) {
+										float fcval = static_cast<float>(ac.const_value);
+										if (ImGui::InputFloat("##cval", &fcval, 0.0f, 0.0f, "%.2f")) {
+											UndoManager::push_snapshot("Edit Attribute Condition");
+											fcval = std::clamp(fcval, static_cast<float>(min_bound),
+															   static_cast<float>(max_bound));
+											ac.const_value = fcval;
+											rebuild_needed = true;
+											unsaved_changes = true;
+										}
+									} else {
+										int cval = static_cast<int>(ac.const_value);
+										if (ImGui::InputInt("##cval", &cval, 0, 0)) {
+											UndoManager::push_snapshot("Edit Attribute Condition");
+											cval = std::clamp(cval, static_cast<int>(min_bound),
+															  static_cast<int>(max_bound));
+											ac.const_value = cval;
+											rebuild_needed = true;
+											unsaved_changes = true;
+										}
+									}
+								}
+
+								ImGui::SameLine();
+								ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+								if (button_with_icon("##DelCond", IconManager::get(IconID::Cross),
+													 ImVec2(20.0f, 20.0f))) {
+									UndoManager::push_snapshot("Delete Attribute Condition");
+									cell_conds.erase(cell_conds.begin() + cond_i);
+									rebuild_needed = true;
+									unsaved_changes = true;
+									ImGui::PopStyleColor();
+									ImGui::PopID();
+									break;
+								}
+								ImGui::PopStyleColor();
+								ImGui::PopID();
+							}
+
+							if (button_with_icon("Add Condition", IconManager::get(IconID::Add),
+												 ImVec2(120.0f, 22.0f))) {
+								UndoManager::push_snapshot("Add Attribute Condition");
+								AttributeCondition new_ac;
+								new_ac.attr_index = 0;
+								new_ac.op = CompareOp::Less;
+								new_ac.target =
+									(dx == 0 && dy == 0) ? CompareTarget::Constant : CompareTarget::CenterCell;
+								new_ac.const_value = 0;
+								cell_conds.push_back(new_ac);
 								rebuild_needed = true;
 								unsaved_changes = true;
 							}
 						}
+
 						ImGui::EndPopup();
 					}
 
-					dl->AddRect(c_min, c_max, IM_COL32(45, 48, 56, 220));
+					if (dx == 0 && dy == 0) {
+						dl->AddRect(c_min, c_max, IM_COL32(245, 185, 45, 230), 3.0f, 0, 1.6f);
+					} else {
+						dl->AddRect(c_min, c_max, IM_COL32(50, 54, 64, 220), 3.0f, 0, 1.0f);
+					}
+
+					bool has_when_attrs_badge = (c_id >= 0 && c_id < static_cast<int>(rule.when_attrs.size()) &&
+												 !rule.when_attrs[c_id].empty());
+					if (has_when_attrs_badge) {
+						float bsz = std::min(cell_sz * 0.42f, 13.0f);
+						ImVec2 badge_min(c_min.x + 1.0f, c_min.y + 1.0f);
+						ImVec2 badge_max(c_min.x + bsz, c_min.y + bsz);
+						dl->AddRectFilled(badge_min, badge_max, IM_COL32(30, 144, 255, 240), 2.5f);
+						ImVec2 txt_sz = ImGui::CalcTextSize("*");
+						ImVec2 txt_pos(badge_min.x + (bsz - txt_sz.x) * 0.5f, badge_min.y + (bsz - txt_sz.y) * 0.5f);
+						dl->AddText(txt_pos, IM_COL32(255, 255, 255, 255), "*");
+					}
 
 					if (is_hovered) {
-						dl->AddRect(c_min, c_max, IM_COL32(255, 255, 255, 240), 0.0f, 0, 1.5f);
+						dl->AddRect(c_min, c_max, IM_COL32(255, 255, 255, 240), 3.0f, 0, 1.5f);
 						std::string tip;
 						if (dx == 0 && dy == 0) {
-							tip = mat.name + " (Center)";
+							tip = mat.name;
 						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size()) && rule.when[c_id].empty()) {
-							tip = "Wildcard (*)";
+							tip = "Any (*)";
 						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size())) {
 							for (size_t i = 0; i < rule.when[c_id].size(); ++i) {
 								if (i > 0)
@@ -3245,7 +4589,25 @@ void UI::render_material_editor() {
 								tip += MaterialManager::get_material(rule.when[c_id][i]).name;
 							}
 						}
-						tip += "\n(Left-click menu, Shift-click/drag paint, Middle-click copy, Right-click clear)";
+						if (has_when_attrs_badge) {
+							const auto& meta = SetManager::get_current_metadata();
+							for (const auto& ac : rule.when_attrs[c_id]) {
+								std::string aname = (ac.attr_index < meta.attributes.size())
+														? meta.attributes[ac.attr_index].name
+														: ("attr" + std::to_string(ac.attr_index));
+								std::string op_str = (ac.op == CompareOp::Less)				? "<"
+													 : (ac.op == CompareOp::LessOrEqual)	? "<="
+													 : (ac.op == CompareOp::Greater)		? ">"
+													 : (ac.op == CompareOp::GreaterOrEqual) ? ">="
+													 : (ac.op == CompareOp::Equal)			? "=="
+													 : (ac.op == CompareOp::NotEqual)		? "!="
+																							: "?";
+								std::string tgt_str = (ac.target == CompareTarget::CenterCell)
+														  ? "Center"
+														  : std::to_string(ac.const_value);
+								tip += fmt::format("\n• {} {} {}", aname, op_str, tgt_str);
+							}
+						}
 						ImGui::SetTooltip("%s", tip.c_str());
 					}
 
@@ -3256,11 +4618,10 @@ void UI::render_material_editor() {
 				}
 			}
 			ImGui::PopStyleVar();
-			ImGui::EndGroup();	// When Grid Canvas
+			ImGui::EndGroup();
 
 			ImGui::SameLine(0.0f, 2.0f);
 
-			// Right column
 			ImGui::BeginGroup();
 			float right_v_pad = std::max(0.0f, (when_grid_px_h - (tiny_sz.y * 2.0f + 2.0f)) * 0.5f);
 			if (right_v_pad > 0.0f)
@@ -3282,7 +4643,6 @@ void UI::render_material_editor() {
 				ImGui::EndDisabled();
 			ImGui::EndGroup();
 
-			// Bottom + / - row centered under grid
 			float btm_pad_x = left_col_btn_w + std::max(0.0f, (when_grid_px_w - btn_pair_w) * 0.5f);
 			ImGui::Dummy(ImVec2(btm_pad_x, 0.0f));
 			ImGui::SameLine(0.0f, 0.0f);
@@ -3303,24 +4663,29 @@ void UI::render_material_editor() {
 			if (btm_shrink_disabled)
 				ImGui::EndDisabled();
 
-			ImGui::PopStyleVar(2);	// FramePadding, ItemSpacing
-			ImGui::EndGroup();		// When Group
+			ImGui::PopStyleVar(2);
+			ImGui::EndGroup();
 
-			// Centered arrow between grids
-			ImGui::SameLine(0.0f, 6.0f);
+			int grid_cols = rule.max_dx - rule.min_dx + 1;
+			int grid_rows = rule.max_dy - rule.min_dy + 1;
+			s_rule_when_rect[r_id] =
+				ImRect(when_cells_start, ImVec2(when_cells_start.x + grid_cols * cell_sz + (grid_cols - 1) * 1.0f,
+												when_cells_start.y + grid_rows * cell_sz + (grid_rows - 1) * 1.0f));
+
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
 			ImGui::BeginGroup();
 			float arrow_y_offset = (tiny_sz.y + 2.0f) + std::max(0.0f, (when_grid_px_h - 14.0f) * 0.5f);
 			ImGui::Dummy(ImVec2(0.0f, arrow_y_offset));
 			ImGui::TextDisabled("->");
 			ImGui::EndGroup();
 
-			ImGui::SameLine(0.0f, 6.0f);
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
 
-			// Then Group
 			ImGui::BeginGroup();
 			ImGui::Text("Then");
 			ImGui::Dummy(ImVec2(0.0f, tiny_sz.y + 2.0f));
 
+			ImVec2 then_cells_start = ImGui::GetCursorScreenPos();
 			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, 1.0f));
 			for (int dy = rule.min_dy; dy <= rule.max_dy; ++dy) {
 				for (int dx = rule.min_dx; dx <= rule.max_dx; ++dx) {
@@ -3342,25 +4707,19 @@ void UI::render_material_editor() {
 					if (then_id != 255) {
 						const auto& ref_mat = MaterialManager::get_material(then_id);
 						dl->AddRectFilled(c_min, c_max,
-										  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255));
+										  IM_COL32(ref_mat.color[0], ref_mat.color[1], ref_mat.color[2], 255), 3.0f);
 					} else {
-						// Unchanged (-)
 						if (dx == 0 && dy == 0) {
 							dl->AddRectFilled(
 								c_min, c_max,
-								IM_COL32(mat.color[0] * 0.35f, mat.color[1] * 0.35f, mat.color[2] * 0.35f, 255));
-							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										IM_COL32(200, 200, 200, 140), 1.0f);
+								IM_COL32(mat.color[0] * 0.35f, mat.color[1] * 0.35f, mat.color[2] * 0.35f, 255), 3.0f);
 						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size()) &&
 								   rule.when[c_id].size() == 1) {
 							const auto& ref_mat = MaterialManager::get_material(rule.when[c_id][0]);
 							dl->AddRectFilled(c_min, c_max,
 											  IM_COL32(ref_mat.color[0] * 0.35f, ref_mat.color[1] * 0.35f,
-													   ref_mat.color[2] * 0.35f, 255));
-							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										IM_COL32(200, 200, 200, 140), 1.0f);
+													   ref_mat.color[2] * 0.35f, 255),
+											  3.0f);
 						} else if (c_id >= 0 && c_id < static_cast<int>(rule.when.size()) &&
 								   rule.when[c_id].size() > 1) {
 							size_t num_mats = rule.when[c_id].size();
@@ -3370,34 +4729,67 @@ void UI::render_material_editor() {
 								dl->AddRectFilled(ImVec2(c_min.x + s * stripe_w, c_min.y),
 												  ImVec2(c_min.x + (s + 1) * stripe_w, c_max.y),
 												  IM_COL32(ref_mat.color[0] * 0.35f, ref_mat.color[1] * 0.35f,
-														   ref_mat.color[2] * 0.35f, 255));
+														   ref_mat.color[2] * 0.35f, 255),
+												  (s == 0 || s == num_mats - 1) ? 3.0f : 0.0f);
 							}
-							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										IM_COL32(200, 200, 200, 140), 1.0f);
 						} else {
-							dl->AddRectFilled(c_min, c_max, IM_COL32(24, 26, 30, 255));
-							dl->AddLine(ImVec2(c_min.x + cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										ImVec2(c_max.x - cell_sz * 0.25f, (c_min.y + c_max.y) * 0.5f),
-										IM_COL32(100, 105, 115, 140), 1.0f);
+							dl->AddRectFilled(c_min, c_max, IM_COL32(24, 26, 30, 255), 3.0f);
 						}
+						float cx = (c_min.x + c_max.x) * 0.5f;
+						float cy = (c_min.y + c_max.y) * 0.5f;
+						float half_w = cell_sz * 0.20f;
+						dl->AddLine(ImVec2(cx - half_w, cy), ImVec2(cx + half_w, cy), IM_COL32(215, 220, 230, 160),
+									1.5f);
+					}
+
+					if (dx == 0 && dy == 0) {
+						float cx = (c_min.x + c_max.x) * 0.5f;
+						float cy = (c_min.y + c_max.y) * 0.5f;
+						ImU32 pip_col = (then_id == 255) ? IM_COL32(245, 185, 45, 220) : IM_COL32(255, 255, 255, 200);
+						dl->AddCircleFilled(ImVec2(cx, cy), std::max(1.3f, cell_sz * 0.12f), pip_col);
 					}
 
 					const std::string popup_id =
 						"select_material_then_" + std::to_string(r_id) + "_" + std::to_string(c_id);
 
-					if (!reference.is_inherited && c_id >= 0 && c_id < static_cast<int>(rule.then.size())) {
+					bool is_eq_picking =
+						(s_active_eq_popup_imgui_id != 0 && s_active_eq_rule_id == r_id && s_active_eq_cell_id >= 0 &&
+						 s_active_eq_cell_id < static_cast<int>(rule.then_actions.size()) &&
+						 !s_active_popup_rect.Contains(io.MousePos));
+
+					if (is_eq_picking && in_cell) {
+						dl->AddRect(c_min, c_max, IM_COL32(56, 189, 248, 240), 3.0f, 0, 2.0f);
+						ImGui::SetTooltip("Click to add [%d, %d] to equation", dx, dy);
+					} else if (!eq_click_consumed && !reference.is_inherited && c_id >= 0 &&
+							   c_id < static_cast<int>(rule.then.size())) {
 						if (is_middle_clicked) {
 							g_copied_rule_cell.type = CopiedRuleCell::Type::Then;
 							g_copied_rule_cell.then_val = rule.then[c_id];
+							g_copied_rule_cell.then_action =
+								(c_id >= 0 && c_id < static_cast<int>(rule.then_actions.size()))
+									? rule.then_actions[c_id]
+									: ThenCellAction{};
+							g_copied_rule_cell.src_dx = dx;
+							g_copied_rule_cell.src_dy = dy;
 							g_copied_rule_cell.has_copied = true;
 						} else if (is_right_clicked || (in_cell && ImGui::IsMouseDown(ImGuiMouseButton_Right))) {
-							if (rule.then[c_id] != 255) {
+							bool has_custom_then = (rule.then[c_id] != 255);
+							if (c_id < static_cast<int>(rule.then_actions.size())) {
+								const auto& ta = rule.then_actions[c_id];
+								if (!ta.attr_exprs[0].empty() || !ta.attr_exprs[1].empty() ||
+									!ta.attr_exprs[2].empty()) {
+									has_custom_then = true;
+								}
+							}
+							if (has_custom_then) {
 								if (!s_is_dragging_clear) {
 									UndoManager::push_snapshot("Clear Then Cell");
 									s_is_dragging_clear = true;
 								}
 								rule.then[c_id] = 255;
+								if (c_id < static_cast<int>(rule.then_actions.size())) {
+									rule.then_actions[c_id] = ThenCellAction{};
+								}
 								rebuild_needed = true;
 								unsaved_changes = true;
 							}
@@ -3405,12 +4797,28 @@ void UI::render_material_editor() {
 								   (btn_clicked || (in_cell && ImGui::IsMouseDown(ImGuiMouseButton_Left)))) {
 							if (g_copied_rule_cell.can_paste_as_then()) {
 								uint8_t target_then = g_copied_rule_cell.get_as_then();
-								if (rule.then[c_id] != target_then) {
+								ThenCellAction shifted_action;
+								if (g_copied_rule_cell.type == CopiedRuleCell::Type::Then) {
+									shifted_action = g_copied_rule_cell.then_action;
+								}
+								bool paste_needed = (rule.then[c_id] != target_then);
+								if (g_copied_rule_cell.type == CopiedRuleCell::Type::Then &&
+									c_id < static_cast<int>(rule.then_actions.size()) &&
+									rule.then_actions[c_id] != shifted_action) {
+									paste_needed = true;
+								}
+								if (paste_needed) {
 									if (!s_is_dragging_paint) {
 										UndoManager::push_snapshot("Paint Then Cell");
 										s_is_dragging_paint = true;
 									}
 									rule.then[c_id] = target_then;
+									if (c_id >= static_cast<int>(rule.then_actions.size())) {
+										rule.then_actions.resize(rule.total_cells());
+									}
+									if (g_copied_rule_cell.type == CopiedRuleCell::Type::Then) {
+										rule.then_actions[c_id] = shifted_action;
+									}
 									rebuild_needed = true;
 									unsaved_changes = true;
 								}
@@ -3420,13 +4828,32 @@ void UI::render_material_editor() {
 						}
 					}
 
+					if (s_keep_eq_popup_open && s_active_eq_cell_id == c_id && s_active_eq_rule_id == r_id) {
+						ImGui::OpenPopup(popup_id.c_str());
+						s_keep_eq_popup_open = false;
+					}
+
 					if (ImGui::BeginPopup(popup_id.c_str())) {
+						s_active_eq_popup_imgui_id = ImGui::GetID(popup_id.c_str());
+						s_active_eq_popup_id = popup_id;
+						s_active_eq_rule_id = r_id;
+						s_active_eq_cell_id = c_id;
+						ImVec2 wpos = ImGui::GetWindowPos();
+						ImVec2 wsz = ImGui::GetWindowSize();
+						s_active_popup_rect = ImRect(wpos, ImVec2(wpos.x + wsz.x, wpos.y + wsz.y));
+						ImDrawList* popup_dl = ImGui::GetWindowDrawList();
+
 						ImVec4 neutral_col = ImGui::GetStyle().Colors[ImGuiCol_FrameBg];
 						if (UI::selectable_with_color("Unchanged (-)", neutral_col, then_id == 255)) {
 							UndoManager::push_snapshot("Set Then Unchanged");
 							rule.then[c_id] = 255;
 							g_copied_rule_cell.type = CopiedRuleCell::Type::Then;
 							g_copied_rule_cell.then_val = 255;
+							g_copied_rule_cell.then_action = (c_id < static_cast<int>(rule.then_actions.size()))
+																 ? rule.then_actions[c_id]
+																 : ThenCellAction{};
+							g_copied_rule_cell.src_dx = dx;
+							g_copied_rule_cell.src_dy = dy;
 							g_copied_rule_cell.has_copied = true;
 							rebuild_needed = true;
 							unsaved_changes = true;
@@ -3441,21 +4868,332 @@ void UI::render_material_editor() {
 								rule.then[c_id] = m.id;
 								g_copied_rule_cell.type = CopiedRuleCell::Type::Then;
 								g_copied_rule_cell.then_val = m.id;
+								g_copied_rule_cell.then_action = (c_id < static_cast<int>(rule.then_actions.size()))
+																	 ? rule.then_actions[c_id]
+																	 : ThenCellAction{};
+								g_copied_rule_cell.src_dx = dx;
+								g_copied_rule_cell.src_dy = dy;
 								g_copied_rule_cell.has_copied = true;
 								rebuild_needed = true;
 								unsaved_changes = true;
 							}
 						}
+
+						if (c_id >= static_cast<int>(rule.then_actions.size())) {
+							rule.then_actions.resize(rule.total_cells());
+						}
+						auto& cur_ta = rule.then_actions[c_id];
+
+						ImGui::Separator();
+						if (custom_checkbox(
+								"Update Cell##_then_cell_upd", &cur_ta.updated, IconID::Update,
+								"Controls whether this cell is marked updated when this rule applies.\nDefault is ON. "
+								"Turning OFF is useful for rules that always run (e.g. heat conduction) so they don't "
+								"block other rules on this cell in the same frame.")) {
+							UndoManager::push_snapshot("Toggle Then Cell Updated");
+							rebuild_needed = true;
+							unsaved_changes = true;
+						}
+
+						const auto& meta = SetManager::get_current_metadata();
+						if (!meta.attributes.empty()) {
+							ImGui::Separator();
+							ImGui::Text("Attribute Functions:");
+							for (size_t a_idx = 0; a_idx < meta.attributes.size(); ++a_idx) {
+								const auto& attr = meta.attributes[a_idx];
+								ImGui::PushID(static_cast<int>(a_idx + 4000));
+
+								bool is_active_attr = (s_active_eq_attr_idx == static_cast<int>(a_idx));
+								if (is_active_attr) {
+									ImGui::TextColored(ImVec4(0.40f, 0.85f, 1.0f, 1.0f), "%s =", attr.name.c_str());
+								} else {
+									ImGui::Text("%s =", attr.name.c_str());
+								}
+								if (ImGui::IsItemClicked()) {
+									s_active_eq_attr_idx = static_cast<int>(a_idx);
+								}
+								ImGui::SameLine();
+
+								bool is_raw_editing = (s_active_raw_edit_attr == static_cast<int>(a_idx));
+								char buf[256];
+								std::strncpy(buf, cur_ta.attr_exprs[a_idx].c_str(), sizeof(buf));
+								buf[sizeof(buf) - 1] = '\0';
+
+								if (is_raw_editing) {
+									ImGui::SetNextItemWidth(180.0f);
+									if (ImGui::InputTextWithHint("##expr_raw", "Click cells or enter formula", buf,
+																 sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+										UndoManager::push_snapshot("Edit Attribute Function");
+										cur_ta.attr_exprs[a_idx] = buf;
+										s_active_raw_edit_attr = -1;
+										rebuild_needed = true;
+										unsaved_changes = true;
+									}
+									if (cur_ta.attr_exprs[a_idx] != buf) {
+										UndoManager::push_snapshot("Edit Attribute Function");
+										cur_ta.attr_exprs[a_idx] = buf;
+										rebuild_needed = true;
+										unsaved_changes = true;
+									}
+									ImGui::SameLine();
+									if (ImGui::SmallButton("Done")) {
+										s_active_raw_edit_attr = -1;
+									}
+									if (ImGui::IsItemHovered()) {
+										ImGui::SetTooltip("Finish editing formula text");
+									}
+								} else {
+									float frame_w = 180.0f;
+									float frame_h = ImGui::GetFrameHeight();
+									ImVec2 frame_min = ImGui::GetCursorScreenPos();
+									ImVec2 frame_max = ImVec2(frame_min.x + frame_w, frame_min.y + frame_h);
+
+									ImGui::InvisibleButton("##expr_box", ImVec2(frame_w, frame_h));
+									bool box_hovered = ImGui::IsItemHovered();
+									bool box_double_clicked =
+										box_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+
+									if (box_double_clicked) {
+										s_active_eq_attr_idx = static_cast<int>(a_idx);
+										s_active_raw_edit_attr = static_cast<int>(a_idx);
+									}
+
+									ImU32 frame_bg =
+										ImGui::GetColorU32(box_hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
+									ImU32 border_col = is_active_attr ? IM_COL32(56, 189, 248, 180)
+																	  : ImGui::GetColorU32(ImGuiCol_Border);
+									popup_dl->AddRectFilled(frame_min, frame_max, frame_bg, 4.0f);
+									popup_dl->AddRect(frame_min, frame_max, border_col, 4.0f);
+
+									popup_dl->PushClipRect(ImVec2(frame_min.x + 2.0f, frame_min.y + 1.0f),
+														   ImVec2(frame_max.x - 2.0f, frame_max.y - 1.0f), true);
+
+									if (cur_ta.attr_exprs[a_idx].empty()) {
+										float text_y = frame_min.y + (frame_h - ImGui::GetTextLineHeight()) * 0.5f;
+										popup_dl->AddText(ImVec2(frame_min.x + 6.0f, text_y),
+														  ImGui::GetColorU32(ImGuiCol_TextDisabled),
+														  "— (Click cells or Edit)");
+									} else {
+										auto segs = split_expr_segments(cur_ta.attr_exprs[a_idx]);
+										float cur_x = frame_min.x + 6.0f;
+										float text_y = frame_min.y + (frame_h - ImGui::GetTextLineHeight()) * 0.5f;
+
+										for (const auto& seg : segs) {
+											if (!seg.is_badge) {
+												if (!seg.text.empty()) {
+													ImVec2 t_sz = ImGui::CalcTextSize(seg.text.c_str());
+													popup_dl->AddText(ImVec2(cur_x, text_y),
+																	  ImGui::GetColorU32(ImGuiCol_Text),
+																	  seg.text.c_str());
+													cur_x += t_sz.x;
+												}
+											} else {
+												const auto& b = seg.badge;
+												std::string badge_label = b.is_relative
+																			  ? fmt::format("~[{},{}]", b.dx, b.dy)
+																			  : fmt::format("[{},{}]", b.dx, b.dy);
+												ImVec2 b_sz = ImGui::CalcTextSize(badge_label.c_str());
+												float pill_w = b_sz.x + 8.0f;
+												float pill_h = frame_h - 6.0f;
+												ImVec2 pill_min = ImVec2(cur_x, frame_min.y + 3.0f);
+												ImVec2 pill_max = ImVec2(cur_x + pill_w, pill_min.y + pill_h);
+
+												bool pill_hovered =
+													(io.MousePos.x >= pill_min.x && io.MousePos.x < pill_max.x &&
+													 io.MousePos.y >= pill_min.y && io.MousePos.y < pill_max.y &&
+													 box_hovered);
+
+												if (pill_hovered) {
+													if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+														UndoManager::push_snapshot("Toggle Relative Cell Badge");
+														toggle_badge_relative(cur_ta.attr_exprs[a_idx], b, dx, dy);
+														rebuild_needed = true;
+														unsaved_changes = true;
+													} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+														if (io.KeyShift) {
+															UndoManager::push_snapshot("Remove Cell Badge");
+															remove_badge(cur_ta.attr_exprs[a_idx], b);
+															rebuild_needed = true;
+															unsaved_changes = true;
+														}
+													}
+
+													if (b.is_relative) {
+														int abs_x = dx + b.dx;
+														int abs_y = dy + b.dy;
+														ImGui::SetTooltip("Relative cell ~[%d, %d] (targets [%d, %d])\nRight-click: Make Absolute [%d, %d]\nShift+Click: Remove",
+																		  b.dx, b.dy, abs_x, abs_y, abs_x, abs_y);
+													} else {
+														int rel_x = b.dx - dx;
+														int rel_y = b.dy - dy;
+														ImGui::SetTooltip("Absolute cell [%d, %d]\nRight-click: Make Relative ~[%d, %d]\nShift+Click: Remove",
+																		  b.dx, b.dy, rel_x, rel_y);
+													}
+												}
+
+												ImU32 pill_bg = b.is_relative ? IM_COL32(18, 64, 76, 230)
+																			  : IM_COL32(45, 52, 65, 230);
+												if (pill_hovered) {
+													pill_bg = b.is_relative ? IM_COL32(28, 92, 108, 255)
+																			: IM_COL32(65, 75, 92, 255);
+												}
+												ImU32 pill_border = b.is_relative ? IM_COL32(56, 189, 248, 200)
+																				  : IM_COL32(100, 116, 139, 180);
+												ImU32 pill_text_col = b.is_relative ? IM_COL32(103, 232, 249, 255)
+																					: IM_COL32(241, 245, 249, 255);
+
+												popup_dl->AddRectFilled(pill_min, pill_max, pill_bg, 3.0f);
+												popup_dl->AddRect(pill_min, pill_max, pill_border, 3.0f);
+												popup_dl->AddText(
+													ImVec2(pill_min.x + 4.0f, pill_min.y + (pill_h - b_sz.y) * 0.5f),
+													pill_text_col, badge_label.c_str());
+
+												cur_x += pill_w + 2.0f;
+											}
+										}
+									}
+									popup_dl->PopClipRect();
+
+									ImGui::SameLine();
+									if (ImGui::SmallButton("Edit")) {
+										s_active_eq_attr_idx = static_cast<int>(a_idx);
+										s_active_raw_edit_attr = static_cast<int>(a_idx);
+									}
+									if (ImGui::IsItemHovered()) {
+										ImGui::SetTooltip("Edit formula text directly (or double-click the box)");
+									}
+								}
+
+								if (!cur_ta.attr_exprs[a_idx].empty()) {
+									std::vector<ExprOp> test_ops;
+									std::string err_msg;
+									bool is_valid = parse_and_compile_expr(
+										cur_ta.attr_exprs[a_idx], static_cast<uint8_t>(a_idx), test_ops, &err_msg);
+									ImGui::SameLine();
+									if (is_valid) {
+										SDL_Texture* ok_icon = IconManager::get(IconID::Accept);
+										if (ok_icon) {
+											ImGui::Image(reinterpret_cast<ImTextureID>(ok_icon), ImVec2(15.0f, 15.0f));
+										}
+										if (ImGui::IsItemHovered()) {
+											ImGui::SetTooltip("Valid expression (%zu ops)", test_ops.size());
+										}
+									} else {
+										SDL_Texture* err_icon = IconManager::get(IconID::Cross);
+										if (err_icon) {
+											ImGui::Image(reinterpret_cast<ImTextureID>(err_icon), ImVec2(15.0f, 15.0f));
+										}
+										if (ImGui::IsItemHovered()) {
+											ImGui::SetTooltip("Error: %s", err_msg.c_str());
+										}
+									}
+
+									ImGui::SameLine();
+									if (ImGui::SmallButton("Clear")) {
+										UndoManager::push_snapshot("Clear Attribute Function");
+										cur_ta.attr_exprs[a_idx].clear();
+										s_active_raw_edit_attr = -1;
+										rebuild_needed = true;
+										unsaved_changes = true;
+									}
+								}
+
+								ImGui::PopID();
+							}
+
+							ImGui::Spacing();
+							ImGui::TextDisabled("Click cells in grid to insert. Right-click badge for relative.");
+							ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(3.0f, 3.0f));
+							const char* math_ops[] = {"+", "-", "*", "/", "(", ")", ",", "min", "max", "clamp"};
+							for (const char* op : math_ops) {
+								if (ImGui::SmallButton(op)) {
+									if (s_active_eq_attr_idx >= 0 &&
+										s_active_eq_attr_idx < static_cast<int>(meta.attributes.size())) {
+										UndoManager::push_snapshot("Insert Math Operator");
+										auto& expr = cur_ta.attr_exprs[s_active_eq_attr_idx];
+										if (!expr.empty() && expr.back() != ' ' && expr.back() != '(' &&
+											std::string(op) != ")") {
+											expr += " ";
+										}
+										expr += op;
+										if (std::string(op) == "min" || std::string(op) == "max" ||
+											std::string(op) == "clamp") {
+											expr += "(";
+										} else if (std::string(op) != ")" && std::string(op) != ",") {
+											expr += " ";
+										}
+										rebuild_needed = true;
+										unsaved_changes = true;
+									}
+								}
+								ImGui::SameLine();
+							}
+							ImGui::NewLine();
+							ImGui::PopStyleVar();
+						}
+
 						ImGui::EndPopup();
+					} else {
+						if (s_active_eq_popup_id == popup_id && !eq_click_consumed && !s_keep_eq_popup_open) {
+							s_active_eq_popup_imgui_id = 0;
+							s_active_eq_popup_id.clear();
+							s_active_eq_rule_id = -1;
+							s_active_eq_cell_id = -1;
+							s_active_popup_rect = ImRect();
+						}
 					}
 
-					dl->AddRect(c_min, c_max, IM_COL32(45, 48, 56, 220));
+					if (dx == 0 && dy == 0) {
+						dl->AddRect(c_min, c_max, IM_COL32(245, 185, 45, 230), 3.0f, 0, 1.6f);
+					} else {
+						dl->AddRect(c_min, c_max, IM_COL32(50, 54, 64, 220), 3.0f, 0, 1.0f);
+					}
+
+					const ThenCellAction& cell_ta = (c_id >= 0 && c_id < static_cast<int>(rule.then_actions.size()))
+														? rule.then_actions[c_id]
+														: ThenCellAction{};
+					bool has_attr_badge = (!cell_ta.attr_exprs[0].empty() || !cell_ta.attr_exprs[1].empty() ||
+										   !cell_ta.attr_exprs[2].empty());
+
+					float bsz = std::min(cell_sz * 0.42f, 13.0f);
+
+					if (has_attr_badge) {
+						ImVec2 dmin(c_max.x - bsz - 1.0f, c_max.y - bsz - 1.0f);
+						ImVec2 dmax(c_max.x - 1.0f, c_max.y - 1.0f);
+						ImU32 badge_bg = IM_COL32(142, 68, 173, 245);
+						const char* badge_glyph = "f";
+						dl->AddRectFilled(dmin, dmax, badge_bg, 2.5f);
+						ImVec2 txt_sz = ImGui::CalcTextSize(badge_glyph);
+						ImVec2 txt_pos(dmin.x + (bsz - txt_sz.x) * 0.5f, dmin.y + (bsz - txt_sz.y) * 0.5f);
+						dl->AddText(txt_pos, IM_COL32(255, 255, 255, 255), badge_glyph);
+					}
+
+					if (!cell_ta.updated) {
+						ImVec2 dmin(c_min.x + 1.0f, c_min.y + 1.0f);
+						ImVec2 dmax(c_min.x + bsz + 1.0f, c_min.y + bsz + 1.0f);
+						ImU32 badge_bg = IM_COL32(230, 126, 34, 245);
+						const char* badge_glyph = "~";
+						dl->AddRectFilled(dmin, dmax, badge_bg, 2.5f);
+						ImVec2 txt_sz = ImGui::CalcTextSize(badge_glyph);
+						ImVec2 txt_pos(dmin.x + (bsz - txt_sz.x) * 0.5f, dmin.y + (bsz - txt_sz.y) * 0.5f);
+						dl->AddText(txt_pos, IM_COL32(255, 255, 255, 255), badge_glyph);
+					}
 
 					if (is_hovered) {
-						dl->AddRect(c_min, c_max, IM_COL32(255, 255, 255, 240), 0.0f, 0, 1.5f);
+						dl->AddRect(c_min, c_max, IM_COL32(255, 255, 255, 240), 3.0f, 0, 1.5f);
 						std::string tip =
 							(then_id == 255) ? "Unchanged (-)" : MaterialManager::get_material(then_id).name;
-						tip += "\n(Left-click menu, Shift-click/drag paint, Middle-click copy, Right-click clear)";
+						if (has_attr_badge) {
+							const auto& meta = SetManager::get_current_metadata();
+							for (size_t a = 0; a < meta.attributes.size(); ++a) {
+								if (!cell_ta.attr_exprs[a].empty()) {
+									tip += fmt::format("\n• {} = {}", meta.attributes[a].name, cell_ta.attr_exprs[a]);
+								}
+							}
+						}
+						if (!cell_ta.updated) {
+							tip += "\n• Update: Disabled (never blocks updates)";
+						}
 						ImGui::SetTooltip("%s", tip.c_str());
 					}
 
@@ -3466,9 +5204,11 @@ void UI::render_material_editor() {
 				}
 			}
 			ImGui::PopStyleVar();
-			ImGui::EndGroup();	// Then Group
+			ImGui::EndGroup();
 
-			ImGui::EndGroup();	// Right side group);
+			s_rule_then_rect[r_id] =
+				ImRect(then_cells_start, ImVec2(then_cells_start.x + grid_cols * cell_sz + (grid_cols - 1) * 1.0f,
+												then_cells_start.y + grid_rows * cell_sz + (grid_rows - 1) * 1.0f));
 
 			if (reference.is_inherited) {
 				ImGui::EndDisabled();
@@ -3492,6 +5232,7 @@ void UI::render_material_editor() {
 
 		if (rebuild_needed) {
 			MaterialManager::update_material_rules(selected_id, mat);
+			Grid::draw_material(selected_id);
 		}
 
 		ImGui::EndTabItem();
@@ -3505,23 +5246,23 @@ namespace {
 	char s_publish_author[64] = "";
 	char s_publish_desc[512] = "";
 	bool s_publishing = false;
-	std::string s_publish_status = "";
+	std::string s_publish_status;
 	bool s_pub_bundle_set = true;
-	std::string s_publish_target_set = "";
-	std::string s_publish_target_save = "";
-	std::string s_publish_target_stamp = "";
+	std::string s_publish_target_set;
+	std::string s_publish_target_save;
+	std::string s_publish_target_stamp;
 	int s_publish_target_w = 0;
 	int s_publish_target_h = 0;
-	std::string s_publish_forked_from_id = "";
+	std::string s_publish_forked_from_id;
 	int s_publish_forked_from_version = 0;
 	bool s_publish_is_private = false;
 
-	static bool s_show_versions_modal = false;
-	static WorkshopItemClient s_versions_item;
-	static std::vector<WorkshopItemVersion> s_current_item_versions;
-	static bool s_loading_versions = false;
-	static std::string s_versions_error = "";
-	static bool open_fork_set_popup = false;
+	bool s_show_versions_modal = false;
+	WorkshopItemClient s_versions_item;
+	std::vector<WorkshopItemVersion> s_current_item_versions;
+	bool s_loading_versions = false;
+	std::string s_versions_error;
+	bool open_fork_set_popup = false;
 
 	void open_versions_modal(const WorkshopItemClient& item) {
 		s_versions_item = item;
@@ -3644,18 +5385,14 @@ namespace {
 			SetMetadata s_meta = SetManager::load_set_metadata(s);
 			bool is_forked = false;
 			if (!s_meta.forked_from_id.empty()) {
-				if (s_meta.forked_from_id == set_name) {
-					is_forked = true;
-				} else if (!orig_meta.workshop_id.empty() && s_meta.forked_from_id == orig_meta.workshop_id) {
-					is_forked = true;
-				} else if (!orig_meta.forked_from_id.empty() && s_meta.forked_from_id == orig_meta.forked_from_id) {
+				if (s_meta.forked_from_id == set_name ||
+					(!orig_meta.workshop_id.empty() && s_meta.forked_from_id == orig_meta.workshop_id) ||
+					(!orig_meta.forked_from_id.empty() && s_meta.forked_from_id == orig_meta.forked_from_id)) {
 					is_forked = true;
 				}
 			}
-			if (!is_forked) {
-				if (s.rfind(set_name + "_fork", 0) == 0) {
-					is_forked = true;
-				}
+			if (!is_forked && s.rfind(set_name + "_fork", 0) == 0) {
+				is_forked = true;
 			}
 			if (is_forked) {
 				forked_sets.push_back(s);
@@ -3664,13 +5401,13 @@ namespace {
 		return forked_sets;
 	}
 
-	static bool s_show_migrate_modal = false;
-	static bool s_migrate_is_save = true;
-	static std::string s_migrate_filename;
-	static std::string s_migrate_item_name;
-	static std::string s_migrate_source_set;
-	static std::vector<std::string> s_migrate_forked_sets;
-	static int s_selected_migrate_set_idx = 0;
+	bool s_show_migrate_modal = false;
+	bool s_migrate_is_save = true;
+	std::string s_migrate_filename;
+	std::string s_migrate_item_name;
+	std::string s_migrate_source_set;
+	std::vector<std::string> s_migrate_forked_sets;
+	int s_selected_migrate_set_idx = 0;
 
 	void check_and_render_migrate_modal() {
 		if (s_show_migrate_modal) {
@@ -3738,12 +5475,15 @@ namespace {
 void UI::render_manage_sets() {
 	const std::string& current_set = SetManager::get_current_set();
 	SetMetadata meta = SetManager::get_current_metadata();
+	Config& cfg = ConfigManager::get_config();
+	ImGuiIO& io = ImGui::GetIO();
 
 	if (ImGui::BeginTabItem("Sets")) {
 		ImGui::Spacing();
 
 		ImGui::Text("Available Sets:");
-		ImGui::BeginChild("SetsListScroll", ImVec2(0, 150), true);
+		float list_h = static_cast<float>(cfg.ui.set_list_height > 0 ? cfg.ui.set_list_height : 200);
+		ImGui::BeginChild("SetsListScroll", ImVec2(0, list_h), true);
 		float avail_w = ImGui::GetContentRegionAvail().x;
 		const float btn_sz = ImGui::GetTextLineHeightWithSpacing();
 		const float btn_gap = 4.0f;
@@ -3873,6 +5613,41 @@ void UI::render_manage_sets() {
 		}
 		ImGui::EndChild();
 
+		float bar_h = 8.0f;
+		ImVec2 cur_pos = ImGui::GetCursorScreenPos();
+		ImRect h_bar_bb(cur_pos, ImVec2(cur_pos.x + avail_w, cur_pos.y + bar_h));
+		ImGui::InvisibleButton("##SetListResizeBar", ImVec2(-1, bar_h));
+		bool h_hovered = ImGui::IsItemHovered();
+		bool h_held = ImGui::IsItemActive();
+		if (h_hovered || h_held) {
+			ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+		}
+		if (h_held && io.MouseDelta.y != 0.0f) {
+			cfg.ui.set_list_height = std::clamp(cfg.ui.set_list_height + static_cast<int>(io.MouseDelta.y), 70, 600);
+		}
+		if (ImGui::IsItemDeactivated()) {
+			ConfigManager::save();
+		}
+		if (h_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+			cfg.ui.set_list_height = 200;
+			ConfigManager::save();
+		}
+		if (h_hovered) {
+			ImGui::SetTooltip("Drag to resize set list (Double-click to reset to 200px)");
+		}
+
+		ImDrawList* w_dl = ImGui::GetWindowDrawList();
+		float mid_y = std::round((h_bar_bb.Min.y + h_bar_bb.Max.y) * 0.5f);
+		ImU32 line_col = h_held		 ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+						 : h_hovered ? ImGui::GetColorU32(ImGuiCol_SeparatorActive)
+									 : ImGui::GetColorU32(ImGuiCol_Separator);
+		w_dl->AddLine(ImVec2(h_bar_bb.Min.x, mid_y), ImVec2(h_bar_bb.Max.x, mid_y), line_col, h_held ? 2.0f : 1.0f);
+		float mid_x = std::round((h_bar_bb.Min.x + h_bar_bb.Max.x) * 0.5f);
+		ImU32 handle_col = h_held	   ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+						   : h_hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
+									   : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+		w_dl->AddRectFilled(ImVec2(mid_x - 18.0f, mid_y - 2.5f), ImVec2(mid_x + 18.0f, mid_y + 2.5f), handle_col, 2.5f);
+
 		ImGui::Spacing();
 		if (button_with_icon("New", IconManager::get(IconID::Add), ImVec2(80, 25))) {
 			open_create_set_popup = true;
@@ -3982,6 +5757,151 @@ void UI::render_manage_sets() {
 		}
 
 		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::Spacing();
+		ImGui::Text("Cell Attributes (%zu / 3):", meta.attributes.size());
+		if (meta.attributes.empty()) {
+			ImGui::TextDisabled(
+				"No attributes defined. Attributes enable continuous physics (density, temperature, life).");
+		} else {
+			for (size_t a_idx = 0; a_idx < meta.attributes.size(); ++a_idx) {
+				ImGui::PushID(static_cast<int>(a_idx + 5000));
+				auto& attr = meta.attributes[a_idx];
+				ImGui::Text("Slot %zu:", a_idx);
+				ImGui::SameLine();
+
+				char a_name[32];
+				std::strncpy(a_name, attr.name.c_str(), sizeof(a_name));
+				a_name[sizeof(a_name) - 1] = '\0';
+				ImGui::SetNextItemWidth(90.0f);
+				if (ImGui::InputText("##attr_name", a_name, sizeof(a_name))) {
+					attr.name = a_name;
+					SetManager::update_current_metadata(meta);
+					unsaved_changes = true;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Attribute name (e.g. density, temperature, life)");
+
+				ImGui::SameLine();
+				const char* type_names[] = {"Int", "Float"};
+				int type_idx = (attr.type == AttributeType::Float) ? 1 : 0;
+				ImGui::SetNextItemWidth(65.0f);
+				if (ImGui::Combo("##attr_type", &type_idx, type_names, IM_ARRAYSIZE(type_names))) {
+					attr.type = (type_idx == 1) ? AttributeType::Float : AttributeType::Int;
+					SetManager::update_current_metadata(meta);
+					unsaved_changes = true;
+				}
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Attribute data type: Integer or Floating-point");
+
+				ImGui::SameLine();
+				ImGui::Text("Min:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(65.0f);
+				if (attr.type == AttributeType::Float) {
+					float f_min = static_cast<float>(attr.min_val);
+					if (ImGui::InputFloat("##attr_min", &f_min, 0.0f, 0.0f, "%.1f")) {
+						attr.min_val = f_min;
+						SetManager::update_current_metadata(meta);
+						unsaved_changes = true;
+					}
+				} else {
+					double d_min = attr.min_val;
+					if (ImGui::InputDouble("##attr_min", &d_min, 0.0, 0.0, "%.0f")) {
+						attr.min_val = d_min;
+						SetManager::update_current_metadata(meta);
+						unsaved_changes = true;
+					}
+				}
+
+				ImGui::SameLine();
+				ImGui::Text("Max:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(65.0f);
+				if (attr.type == AttributeType::Float) {
+					float f_max = static_cast<float>(attr.max_val);
+					if (ImGui::InputFloat("##attr_max", &f_max, 0.0f, 0.0f, "%.1f")) {
+						attr.max_val = f_max;
+						SetManager::update_current_metadata(meta);
+						unsaved_changes = true;
+					}
+				} else {
+					double d_max = attr.max_val;
+					if (ImGui::InputDouble("##attr_max", &d_max, 0.0, 0.0, "%.0f")) {
+						attr.max_val = d_max;
+						SetManager::update_current_metadata(meta);
+						unsaved_changes = true;
+					}
+				}
+
+				ImGui::SameLine();
+				ImGui::Text("Def:");
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(65.0f);
+				if (attr.type == AttributeType::Float) {
+					float f_def = static_cast<float>(attr.default_val);
+					if (ImGui::InputFloat("##attr_def", &f_def, 0.0f, 0.0f, "%.1f")) {
+						attr.default_val = f_def;
+						SetManager::update_current_metadata(meta);
+						unsaved_changes = true;
+					}
+				} else {
+					double d_def = attr.default_val;
+					if (ImGui::InputDouble("##attr_def", &d_def, 0.0, 0.0, "%.0f")) {
+						attr.default_val = d_def;
+						SetManager::update_current_metadata(meta);
+						unsaved_changes = true;
+					}
+				}
+
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
+				if (button_with_icon("##DelAttr", IconManager::get(IconID::Cross), ImVec2(22.0f, 22.0f))) {
+					meta.attributes.erase(meta.attributes.begin() + a_idx);
+					SetManager::update_current_metadata(meta);
+					unsaved_changes = true;
+					ImGui::PopStyleColor();
+					ImGui::PopID();
+					break;
+				}
+				ImGui::PopStyleColor();
+				if (ImGui::IsItemHovered())
+					ImGui::SetTooltip("Delete this attribute");
+
+				ImGui::PopID();
+			}
+		}
+
+		if (meta.attributes.size() < 3) {
+			if (button_with_icon("Add Attribute", IconManager::get(IconID::Add), ImVec2(120.0f, 24.0f))) {
+				AttributeDefinition new_attr;
+				new_attr.name = "attr" + std::to_string(meta.attributes.size());
+				new_attr.min_val = 0;
+				new_attr.max_val = 255;
+				new_attr.default_val = 0;
+				meta.attributes.push_back(new_attr);
+				SetManager::update_current_metadata(meta);
+				unsaved_changes = true;
+			}
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("Add a new cell attribute to this set (max 3)");
+		}
+
+		if (!meta.attributes.empty()) {
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+			ImGui::Text("Heatmap Gradient Palette:");
+			float hm_min = static_cast<float>(meta.attributes[0].min_val);
+			float hm_max = static_cast<float>(meta.attributes[0].max_val);
+			if (gradient_editor("##cfg_heatmap_grad", meta.heatmap_gradient, hm_min, hm_max)) {
+				SetManager::update_current_metadata(meta);
+				Vulkan::update_rules();
+				unsaved_changes = true;
+			}
+		}
+
+		ImGui::Spacing();
 		if (button_with_icon("Save Current Set", IconManager::get(IconID::Save), ImVec2(-1, 30))) {
 			SetManager::update_current_metadata(meta);
 			MaterialManager::save_all_materials(SETS_DIRECTORY + current_set);
@@ -3997,6 +5917,8 @@ void UI::render_manage_sets() {
 
 void UI::render_save_load() {
 	const std::string& current_set = SetManager::get_current_set();
+	Config& cfg = ConfigManager::get_config();
+	ImGuiIO& io = ImGui::GetIO();
 
 	if (ImGui::BeginTabItem("Saves and Stamps")) {
 		ImGui::Spacing();
@@ -4029,7 +5951,8 @@ void UI::render_save_load() {
 
 				auto save_files = SaveManager::get_save_files(current_set);
 
-				ImGui::BeginChild("SavesListScroll", ImVec2(0, 180), true);
+				float list_h = static_cast<float>(cfg.ui.save_list_height > 0 ? cfg.ui.save_list_height : 180);
+				ImGui::BeginChild("SavesListScroll", ImVec2(0, list_h), true);
 				float avail_w = ImGui::GetContentRegionAvail().x;
 				const float btn_sz = ImGui::GetTextLineHeightWithSpacing();
 				const float btn_gap = 4.0f;
@@ -4047,7 +5970,7 @@ void UI::render_save_load() {
 					bool is_transient = WorkshopCache::is_transient(save_full_path);
 					bool is_owner = is_logged_in && !sfile.author.empty() && (sfile.author == cur_user);
 
-					std::string tag = "";
+					std::string tag;
 					if (is_online) {
 						if (!sfile.workshop_id.empty()) {
 							check_item_existence(sfile.workshop_id, "save", sfile.filename, current_set, false);
@@ -4202,6 +6125,44 @@ void UI::render_save_load() {
 				}
 				ImGui::EndChild();
 
+				float bar_h = 8.0f;
+				ImVec2 cur_pos = ImGui::GetCursorScreenPos();
+				ImRect h_bar_bb(cur_pos, ImVec2(cur_pos.x + avail_w, cur_pos.y + bar_h));
+				ImGui::InvisibleButton("##SaveListResizeBar", ImVec2(-1, bar_h));
+				bool h_hovered = ImGui::IsItemHovered();
+				bool h_held = ImGui::IsItemActive();
+				if (h_hovered || h_held) {
+					ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+				}
+				if (h_held && io.MouseDelta.y != 0.0f) {
+					cfg.ui.save_list_height =
+						std::clamp(cfg.ui.save_list_height + static_cast<int>(io.MouseDelta.y), 70, 600);
+				}
+				if (ImGui::IsItemDeactivated()) {
+					ConfigManager::save();
+				}
+				if (h_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+					cfg.ui.save_list_height = 180;
+					ConfigManager::save();
+				}
+				if (h_hovered) {
+					ImGui::SetTooltip("Drag to resize save list (Double-click to reset to 180px)");
+				}
+
+				ImDrawList* w_dl = ImGui::GetWindowDrawList();
+				float mid_y = std::round((h_bar_bb.Min.y + h_bar_bb.Max.y) * 0.5f);
+				ImU32 line_col = h_held		 ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+								 : h_hovered ? ImGui::GetColorU32(ImGuiCol_SeparatorActive)
+											 : ImGui::GetColorU32(ImGuiCol_Separator);
+				w_dl->AddLine(ImVec2(h_bar_bb.Min.x, mid_y), ImVec2(h_bar_bb.Max.x, mid_y), line_col,
+							  h_held ? 2.0f : 1.0f);
+				float mid_x = std::round((h_bar_bb.Min.x + h_bar_bb.Max.x) * 0.5f);
+				ImU32 handle_col = h_held	   ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+								   : h_hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
+											   : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+				w_dl->AddRectFilled(ImVec2(mid_x - 18.0f, mid_y - 2.5f), ImVec2(mid_x + 18.0f, mid_y + 2.5f),
+									handle_col, 2.5f);
+
 				ImGui::Spacing();
 				if (selected_save_id >= 0 && selected_save_id < static_cast<int>(save_files.size())) {
 					if (button_with_icon("Load", IconManager::get(IconID::Folder), ImVec2(80, 25))) {
@@ -4290,7 +6251,8 @@ void UI::render_save_load() {
 
 				ImGui::Text("Available Stamps in sets/%s/saves/:", current_set.c_str());
 				auto stamp_files = SaveManager::get_stamp_files(current_set);
-				ImGui::BeginChild("StampsListScroll", ImVec2(0, 180), true);
+				float list_h = static_cast<float>(cfg.ui.stamp_list_height > 0 ? cfg.ui.stamp_list_height : 180);
+				ImGui::BeginChild("StampsListScroll", ImVec2(0, list_h), true);
 				float avail_w = ImGui::GetContentRegionAvail().x;
 				const float btn_sz = ImGui::GetTextLineHeightWithSpacing();
 				const float btn_gap = 4.0f;
@@ -4308,7 +6270,7 @@ void UI::render_save_load() {
 					bool is_transient = WorkshopCache::is_transient(stamp_full_path);
 					bool is_owner = is_logged_in && !stfile.author.empty() && (stfile.author == cur_user);
 
-					std::string tag = "";
+					std::string tag;
 					if (is_online) {
 						if (!stfile.workshop_id.empty()) {
 							check_item_existence(stfile.workshop_id, "stamp", stfile.filename, current_set, false);
@@ -4453,6 +6415,44 @@ void UI::render_save_load() {
 				}
 				ImGui::EndChild();
 
+				float bar_h = 8.0f;
+				ImVec2 cur_pos = ImGui::GetCursorScreenPos();
+				ImRect h_bar_bb(cur_pos, ImVec2(cur_pos.x + avail_w, cur_pos.y + bar_h));
+				ImGui::InvisibleButton("##StampListResizeBar", ImVec2(-1, bar_h));
+				bool h_hovered = ImGui::IsItemHovered();
+				bool h_held = ImGui::IsItemActive();
+				if (h_hovered || h_held) {
+					ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+				}
+				if (h_held && io.MouseDelta.y != 0.0f) {
+					cfg.ui.stamp_list_height =
+						std::clamp(cfg.ui.stamp_list_height + static_cast<int>(io.MouseDelta.y), 70, 600);
+				}
+				if (ImGui::IsItemDeactivated()) {
+					ConfigManager::save();
+				}
+				if (h_hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+					cfg.ui.stamp_list_height = 180;
+					ConfigManager::save();
+				}
+				if (h_hovered) {
+					ImGui::SetTooltip("Drag to resize stamp list (Double-click to reset to 180px)");
+				}
+
+				ImDrawList* w_dl = ImGui::GetWindowDrawList();
+				float mid_y = std::round((h_bar_bb.Min.y + h_bar_bb.Max.y) * 0.5f);
+				ImU32 line_col = h_held		 ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+								 : h_hovered ? ImGui::GetColorU32(ImGuiCol_SeparatorActive)
+											 : ImGui::GetColorU32(ImGuiCol_Separator);
+				w_dl->AddLine(ImVec2(h_bar_bb.Min.x, mid_y), ImVec2(h_bar_bb.Max.x, mid_y), line_col,
+							  h_held ? 2.0f : 1.0f);
+				float mid_x = std::round((h_bar_bb.Min.x + h_bar_bb.Max.x) * 0.5f);
+				ImU32 handle_col = h_held	   ? ImGui::GetColorU32(ImGuiCol_ButtonActive)
+								   : h_hovered ? ImGui::GetColorU32(ImGuiCol_ButtonHovered)
+											   : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+				w_dl->AddRectFilled(ImVec2(mid_x - 18.0f, mid_y - 2.5f), ImVec2(mid_x + 18.0f, mid_y + 2.5f),
+									handle_col, 2.5f);
+
 				ImGui::Spacing();
 				if (selected_stamp_id >= 0 && selected_stamp_id < static_cast<int>(stamp_files.size())) {
 					if (button_with_icon("Stamp", IconManager::get(IconID::Paste), ImVec2(100, 25))) {
@@ -4563,7 +6563,7 @@ namespace {
 	std::vector<WorkshopItemClient> s_workshop_items;
 	bool s_workshop_loading = false;
 	bool s_workshop_loaded_once = false;
-	std::string s_workshop_error = "";
+	std::string s_workshop_error;
 	bool s_workshop_my_items = false;
 	bool s_workshop_favorites = false;
 
@@ -4575,22 +6575,22 @@ namespace {
 	bool s_show_auth_modal = false;
 	char s_auth_username[64] = "";
 	char s_auth_password[64] = "";
-	std::string s_auth_status = "";
+	std::string s_auth_status;
 	bool s_auth_is_register = false;
 
 	std::unordered_map<std::string, SDL_Texture*> s_workshop_textures;
 	std::unordered_set<std::string> s_thumbnails_downloading;
-	static std::unordered_set<std::string> s_items_activating;
+	std::unordered_set<std::string> s_items_activating;
 
 	bool s_show_report_modal = false;
-	std::string s_report_item_id = "";
-	std::string s_report_item_title = "";
+	std::string s_report_item_id;
+	std::string s_report_item_title;
 	int s_report_reason_idx = 0;
 	char s_report_details[256] = "";
-	std::string s_report_status = "";
+	std::string s_report_status;
 
-	static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_item_last_checked;
-	static std::unordered_set<std::string> s_item_checking_in_flight;
+	std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_item_last_checked;
+	std::unordered_set<std::string> s_item_checking_in_flight;
 
 	void check_item_existence(const std::string& item_id, const std::string& type, const std::string& name_or_file,
 							  const std::string& set_context, bool force) {
@@ -4708,7 +6708,7 @@ namespace {
 		else if (s_workshop_sort_idx == 4)
 			sort_str = "downloads";
 
-		std::string author_str = "";
+		std::string author_str;
 		if (s_workshop_my_items && WorkshopClient::is_logged_in()) {
 			author_str = WorkshopClient::get_logged_in_username();
 		}
@@ -4768,7 +6768,7 @@ namespace {
 		std::array<uint8_t, 3> color = {255, 255, 255};
 	};
 
-	static std::vector<SimpleMaterialInfo> get_materials_for_set(const std::string& set_name) {
+	std::vector<SimpleMaterialInfo> get_materials_for_set(const std::string& set_name) {
 		std::vector<SimpleMaterialInfo> result;
 		if (set_name.empty() || set_name == SetManager::get_current_set()) {
 			for (const auto& m : MaterialManager::get_materials()) {
@@ -4972,7 +6972,7 @@ namespace {
 			}
 		}
 
-		std::string b64 = "";
+		std::string b64;
 		SDL_IOStream* io = SDL_IOFromDynamicMem();
 		if (io) {
 			if (SDL_SavePNG_IO(surf, io, false)) {
@@ -5039,7 +7039,7 @@ namespace {
 		return b64;
 	}
 
-	static std::string get_item_local_path(const WorkshopItemClient& item) {
+	std::string get_item_local_path(const WorkshopItemClient& item) {
 		if (item.type == "set") {
 			std::string dir = std::string(SETS_DIRECTORY) + item.title;
 			if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir) &&
@@ -5049,6 +7049,10 @@ namespace {
 		} else if (item.type == "save") {
 			std::string parent_name =
 				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
+			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
+			if (!std::filesystem::exists(parent_dir)) {
+				return "";
+			}
 			std::string path = std::string(SETS_DIRECTORY) + parent_name + "/saves/" + item.title + ".save";
 			if (std::filesystem::exists(path) && !WorkshopCache::is_transient(path)) {
 				return path;
@@ -5064,6 +7068,10 @@ namespace {
 		} else if (item.type == "stamp") {
 			std::string parent_name =
 				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
+			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
+			if (!std::filesystem::exists(parent_dir)) {
+				return "";
+			}
 			std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".stamp";
 			if (std::filesystem::exists(path) && !WorkshopCache::is_transient(path)) {
 				return path;
@@ -5080,7 +7088,7 @@ namespace {
 		return "";
 	}
 
-	static std::string get_item_cache_path(const WorkshopItemClient& item) {
+	std::string get_item_cache_path(const WorkshopItemClient& item) {
 		if (item.type == "set") {
 			std::string dir = std::string(SETS_DIRECTORY) + item.title;
 			if (std::filesystem::exists(dir) && WorkshopCache::is_transient(dir)) {
@@ -5093,15 +7101,18 @@ namespace {
 		} else if (item.type == "save") {
 			std::string parent_name =
 				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".save";
-			if (std::filesystem::exists(path) && WorkshopCache::is_transient(path)) {
-				return path;
-			}
-			for (const auto& sf : SaveManager::get_save_files(parent_name)) {
-				if (!sf.workshop_id.empty() && sf.workshop_id == item.id) {
-					std::string p = SaveManager::get_saves_directory(parent_name) + sf.filename;
-					if (std::filesystem::exists(p) && WorkshopCache::is_transient(p)) {
-						return p;
+			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
+			if (std::filesystem::exists(parent_dir)) {
+				std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".save";
+				if (std::filesystem::exists(path) && WorkshopCache::is_transient(path)) {
+					return path;
+				}
+				for (const auto& sf : SaveManager::get_save_files(parent_name)) {
+					if (!sf.workshop_id.empty() && sf.workshop_id == item.id) {
+						std::string p = SaveManager::get_saves_directory(parent_name) + sf.filename;
+						if (std::filesystem::exists(p) && WorkshopCache::is_transient(p)) {
+							return p;
+						}
 					}
 				}
 			}
@@ -5112,15 +7123,18 @@ namespace {
 		} else if (item.type == "stamp") {
 			std::string parent_name =
 				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".stamp";
-			if (std::filesystem::exists(path) && WorkshopCache::is_transient(path)) {
-				return path;
-			}
-			for (const auto& st : SaveManager::get_stamp_files(parent_name)) {
-				if (!st.workshop_id.empty() && st.workshop_id == item.id) {
-					std::string p = SaveManager::get_saves_directory(parent_name) + st.filename;
-					if (std::filesystem::exists(p) && WorkshopCache::is_transient(p)) {
-						return p;
+			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
+			if (std::filesystem::exists(parent_dir)) {
+				std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".stamp";
+				if (std::filesystem::exists(path) && WorkshopCache::is_transient(path)) {
+					return path;
+				}
+				for (const auto& st : SaveManager::get_stamp_files(parent_name)) {
+					if (!st.workshop_id.empty() && st.workshop_id == item.id) {
+						std::string p = SaveManager::get_saves_directory(parent_name) + st.filename;
+						if (std::filesystem::exists(p) && WorkshopCache::is_transient(p)) {
+							return p;
+						}
 					}
 				}
 			}
@@ -5137,14 +7151,14 @@ namespace {
 		return "";
 	}
 
-	static bool is_item_present_locally(const WorkshopItemClient& item) {
+	bool is_item_present_locally(const WorkshopItemClient& item) {
 		if (item.type == "theme") {
 			return false;
 		}
 		return !get_item_local_path(item).empty();
 	}
 
-	static bool is_item_modified_locally(const WorkshopItemClient& item, const std::string& target_version_hash = "") {
+	bool is_item_modified_locally(const WorkshopItemClient& item, const std::string& target_version_hash = "") {
 		if (item.type == "set") {
 			if (SetManager::get_current_set() == item.title && UI::has_unsaved_changes()) {
 				return true;
@@ -5271,8 +7285,8 @@ void UI::remove_workshop_item(const std::string& item_id) {
 void UI::validate_online_items(bool force) { ::validate_all_online_and_cached_items(force); }
 
 void UI::handle_uri(const std::string& uri) {
-	std::string item_id = "";
-	std::string item_type = "";
+	std::string item_id;
+	std::string item_type;
 
 	std::string s = uri;
 	while (!s.empty() && (s.front() == '"' || s.front() == '\'' || s.front() == ' '))
@@ -5309,14 +7323,12 @@ void UI::handle_uri(const std::string& uri) {
 		if (path_part.rfind("sand3://", 0) == 0) {
 			path_part = path_part.substr(8);
 		}
-		if (path_part.rfind("open/", 0) == 0)
+		if (path_part.rfind("open/", 0) == 0 || path_part.rfind("item/", 0) == 0)
 			path_part = path_part.substr(5);
 		else if (path_part == "open")
 			path_part = "";
 		else if (path_part.rfind("items/", 0) == 0)
 			path_part = path_part.substr(6);
-		else if (path_part.rfind("item/", 0) == 0)
-			path_part = path_part.substr(5);
 
 		while (!path_part.empty() && path_part.back() == '/')
 			path_part.pop_back();
@@ -5364,15 +7376,15 @@ std::string UI::generate_thumbnail_base64(int type_idx, const std::string& targe
 }
 
 namespace {
-	static bool s_show_set_override_warning = false;
-	static WorkshopItemClient s_pending_override_item;
-	static uint32_t s_pending_local_version = 1;
-	static uint32_t s_pending_target_version = 1;
-	static bool s_pending_is_update = false;
-	static bool s_pending_is_version_load = false;
-	static bool s_pending_is_switch = false;
-	static std::function<void()> s_pending_override_confirm = nullptr;
-	static std::function<void()> s_pending_override_keep_local = nullptr;
+	bool s_show_set_override_warning = false;
+	WorkshopItemClient s_pending_override_item;
+	uint32_t s_pending_local_version = 1;
+	uint32_t s_pending_target_version = 1;
+	bool s_pending_is_update = false;
+	bool s_pending_is_version_load = false;
+	bool s_pending_is_switch = false;
+	std::function<void()> s_pending_override_confirm = nullptr;
+	std::function<void()> s_pending_override_keep_local = nullptr;
 
 	bool apply_theme_from_file(const std::string& theme_path, const std::string& title = "") {
 		std::ifstream fin(theme_path);
@@ -5402,6 +7414,12 @@ namespace {
 				cfg.ui.sidebar_width = tj["sidebar_width"].get<int>();
 			if (tj.contains("material_list_height"))
 				cfg.ui.material_list_height = tj["material_list_height"].get<int>();
+			if (tj.contains("set_list_height"))
+				cfg.ui.set_list_height = tj["set_list_height"].get<int>();
+			if (tj.contains("save_list_height"))
+				cfg.ui.save_list_height = tj["save_list_height"].get<int>();
+			if (tj.contains("stamp_list_height"))
+				cfg.ui.stamp_list_height = tj["stamp_list_height"].get<int>();
 			if (tj.contains("background_color") && tj["background_color"].is_array() &&
 				tj["background_color"].size() >= 4) {
 				cfg.ui.background_color = ImVec4(tj["background_color"][0], tj["background_color"][1],
@@ -5446,11 +7464,11 @@ namespace {
 		}
 	}
 
-	static bool s_show_fork_item_modal = false;
-	static WorkshopItemClient s_fork_item;
-	static int s_fork_version = 1;
-	static std::vector<std::string> s_fork_available_sets;
-	static int s_selected_fork_set_idx = 0;
+	bool s_show_fork_item_modal = false;
+	WorkshopItemClient s_fork_item;
+	int s_fork_version = 1;
+	std::vector<std::string> s_fork_available_sets;
+	int s_selected_fork_set_idx = 0;
 
 	void open_fork_item_modal(const WorkshopItemClient& item, int version = 0) {
 		s_fork_item = item;
@@ -5582,6 +7600,7 @@ namespace {
 			ImGui::Text("Assign to Set:");
 			if (!s_fork_available_sets.empty()) {
 				std::vector<const char*> set_names;
+				set_names.reserve(s_fork_available_sets.size());
 				for (const auto& s : s_fork_available_sets) {
 					set_names.push_back(s.c_str());
 				}
@@ -5679,19 +7698,16 @@ namespace {
 			}
 		}
 
-		float avail_w = ImGui::GetContentRegionAvail().x;
-		bool has_many_actions = (item.type == "set") || is_owner;
-		float card_h = (has_many_actions && avail_w < 480.0f) ? 152.0f : 124.0f;
-
 		ImVec4 border_col = ImVec4(0.22f, 0.27f, 0.35f, 0.7f);
 		ImGui::PushStyleColor(ImGuiCol_Border, border_col);
 		ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.14f, 0.17f, 0.6f));
 		ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
 
-		ImGui::BeginChild(("CardChild_" + item.id).c_str(), ImVec2(0, card_h), true,
-						  ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+		ImGui::BeginChild(("CardChild_" + item.id).c_str(), ImVec2(0, 0),
+						  ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
 
+		float card_top_y = ImGui::GetCursorPosY();
 		ImVec2 thumb_sz(62, 62);
 		SDL_Texture* tex = get_or_load_thumbnail(item);
 		if (tex) {
@@ -5757,7 +7773,9 @@ namespace {
 			}
 			ImGui::SameLine(0, 5);
 		}
-		ImGui::TextColored(ImVec4(0.98f, 0.98f, 0.98f, 1.0f), "%s", item.title.c_str());
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.98f, 0.98f, 1.0f));
+		ImGui::TextWrapped("%s", item.title.c_str());
+		ImGui::PopStyleColor();
 
 		if (is_update) {
 			ImGui::SameLine(0, 5);
@@ -5781,7 +7799,6 @@ namespace {
 			}
 		}
 
-		// Line 2: Author & metadata
 		ImGui::TextColored(ImVec4(0.55f, 0.6f, 0.68f, 1.0f), "by %s", item.author.c_str());
 
 		if (!item.forked_from_author.empty() || !item.forked_from_title.empty()) {
@@ -5828,20 +7845,29 @@ namespace {
 			}
 		}
 
-		// Line 3: Description
 		if (!item.description.empty()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.75f, 0.8f, 1.0f));
-			ImGui::TextWrapped("%s", item.description.c_str());
+			if (item.description.length() > 300) {
+				std::string preview = item.description.substr(0, 297) + "...";
+				ImGui::TextWrapped("%s", preview.c_str());
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", item.description.c_str());
+				}
+			} else {
+				ImGui::TextWrapped("%s", item.description.c_str());
+			}
 			ImGui::PopStyleColor();
 		}
 
 		ImGui::EndGroup();
 
-		// Action buttons row (bottom of card)
+		if (ImGui::GetCursorPosY() < card_top_y + thumb_sz.y) {
+			ImGui::SetCursorPosY(card_top_y + thumb_sz.y);
+		}
 		ImGui::Spacing();
 
 		auto place_btn = [](float needed_w) {
-			if (ImGui::GetContentRegionAvail().x >= needed_w) {
+			if (ImGui::GetContentRegionAvail().x >= needed_w + 4.0f) {
 				ImGui::SameLine(0, 4);
 			}
 		};
@@ -6248,7 +8274,7 @@ namespace {
 		}
 
 		if (is_owner) {
-			place_btn(item.is_private ? 68.0f : 72.0f);
+			ImGui::Spacing();
 			const char* priv_lbl = item.is_private ? "Public##priv_" : "Private##priv_";
 			std::string priv_btn_id = priv_lbl + item.id;
 			if (UI::button_with_icon(priv_btn_id.c_str(),
@@ -6294,7 +8320,6 @@ namespace {
 			}
 		}
 
-		// Align Report button with the right border (matching website layout)
 		const float report_btn_w = 74.0f;
 		float current_avail = ImGui::GetContentRegionAvail().x;
 		if (current_avail >= report_btn_w + 4.0f) {
@@ -6322,7 +8347,7 @@ namespace {
 			ImGui::SetTooltip("Report this item");
 		}
 
-		ImGui::Dummy(ImVec2(0.0f, 2.0f));
+		ImGui::Dummy(ImVec2(0.0f, 4.0f));
 		ImGui::EndChild();
 		ImGui::PopStyleVar(2);
 		ImGui::PopStyleColor(2);
@@ -6392,8 +8417,8 @@ void UI::render_workshop() {
 				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.4f, 0.15f, 1.0f));
 				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.5f, 0.2f, 1.0f));
 			}
-			if (UI::button_with_icon(fav_active ? "Favorites##fav_filter" : "Favorites##fav_filter",
-									 IconManager::get(IconID::Star), ImVec2(half_btn_w, 22.0f))) {
+			if (UI::button_with_icon("Favorites##fav_filter", IconManager::get(IconID::Star),
+									 ImVec2(half_btn_w, 22.0f))) {
 				s_workshop_favorites = !s_workshop_favorites;
 				refresh_workshop_items();
 			}
@@ -6747,10 +8772,8 @@ namespace {
 										  filterNewline);
 
 				ImGui::Spacing();
-				ImGui::Checkbox("Private item (only visible to you)", &s_publish_is_private);
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Make this item private so only you can see and download it.");
-				}
+				UI::custom_checkbox("Private Item", &s_publish_is_private, IconID::Lock,
+									"Make this item private so only you can see and download it.");
 
 				ImGui::Spacing();
 
@@ -7074,6 +9097,9 @@ namespace {
 							tj["icon_size"] = cfg.ui.icon_size;
 							tj["sidebar_width"] = cfg.ui.sidebar_width;
 							tj["material_list_height"] = cfg.ui.material_list_height;
+							tj["set_list_height"] = cfg.ui.set_list_height;
+							tj["save_list_height"] = cfg.ui.save_list_height;
+							tj["stamp_list_height"] = cfg.ui.stamp_list_height;
 							tj["background_color"] = {cfg.ui.background_color.x, cfg.ui.background_color.y,
 													  cfg.ui.background_color.z, cfg.ui.background_color.w};
 							tj["selection_box_color"] = {cfg.ui.selection_box_color.x, cfg.ui.selection_box_color.y,
@@ -7328,24 +9354,24 @@ void UI::render_advanced_options() {
 		ImGui::Spacing();
 
 		bool vsync_enabled = Window::get_vsync();
-		if (ImGui::Checkbox("Enable VSync", &vsync_enabled)) {
+		if (custom_checkbox("VSync", &vsync_enabled, IconID::Monitor,
+							"Synchronizes the frame rate with the monitor's refresh rate.")) {
 			Window::set_vsync(vsync_enabled);
 			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Synchronizes the frame rate with the monitor's refresh rate.");
 		}
 
 		if (vsync_enabled) {
 			ImGui::BeginDisabled();
 		}
 		int target_fps = Window::get_target_fps();
-		if (ImGui::SliderInt("Target FPS", &target_fps, 10, 500, target_fps < 500 ? "%d FPS" : "Unlimited")) {
+		const char* fps_format = (target_fps >= 500) ? "Unlimited" : "%d";
+		if (ImGui::SliderInt("Target FPS", &target_fps, 10, 500, fps_format)) {
 			Window::set_target_fps(target_fps);
 			ConfigManager::save();
 		}
 		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Sets the target frame rate.");
+			ImGui::SetTooltip(
+				"Sets the target frame rate (10 - 500, 500 = Unlimited).\nCtrl+Click to type exact value.");
 		}
 		if (vsync_enabled) {
 			ImGui::EndDisabled();
@@ -7393,7 +9419,9 @@ void UI::render_advanced_options() {
 			ImGui::Spacing();
 
 			int thread_count = static_cast<int>(Grid::get_thread_count());
-			if (ImGui::SliderInt("Active Threads", &thread_count, 1, Grid::get_num_strips_y() / 2)) {
+			int max_threads = std::max(1, static_cast<int>(Grid::get_num_strips_y() / 2));
+			if (ImGui::InputInt("Active Threads", &thread_count, 1, 2)) {
+				thread_count = std::clamp(thread_count, 1, max_threads);
 				Grid::configure_threads(static_cast<uint32_t>(thread_count));
 				ConfigManager::save();
 			}
@@ -7410,13 +9438,11 @@ void UI::render_advanced_options() {
 			ImGui::Spacing();
 
 			bool prevent_downclock = Vulkan::is_prevent_downclock_enabled();
-			if (ImGui::Checkbox("Stop Downclocking", &prevent_downclock)) {
+			if (custom_checkbox("Prevent Downclocking", &prevent_downclock, IconID::Lightning,
+								"Stops the GPU from slowing down to save power when idle. Makes unpausing instant "
+								"after a few seconds of being paused.")) {
 				Vulkan::set_prevent_downclock(prevent_downclock);
 				ConfigManager::save();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Stops the GPU from slowing down to save power when idle. Makes unpausing instant "
-								  "after a few seconds of being paused. Increases idle power usage.");
 			}
 		}
 
@@ -7489,7 +9515,8 @@ void UI::render_advanced_options() {
 							   "Warning: Large canvas (>1024x1024 / >1M cells) can significantly reduce performance!");
 		}
 
-		ImGui::Checkbox("Preserve existing canvas cells (crop / pad)", &resize_preserve_content);
+		custom_checkbox("Preserve Cells", &resize_preserve_content, IconID::Photo,
+						"Keeps existing cells when changing canvas dimensions.");
 
 		bool size_differs =
 			(target_sim_w != static_cast<int>(current_w) || target_sim_h != static_cast<int>(current_h));
@@ -7545,7 +9572,9 @@ void UI::render_advanced_options() {
 
 		ImGui::Text("Rule Neighborhoods");
 		bool allow_large = ConfigManager::get_config().allow_large_neighborhoods;
-		if (ImGui::Checkbox("Allow Large Rule Neighborhoods (>100 cells)", &allow_large)) {
+		if (custom_checkbox("Large Neighborhoods", &allow_large, IconID::Zoom,
+							"Allows rule neighborhoods to exceed 100 cells.\nWarning: Very large neighborhoods can "
+							"significantly impact simulation performance.")) {
 			ConfigManager::get_config().allow_large_neighborhoods = allow_large;
 			ConfigManager::save();
 		}
@@ -7699,7 +9728,7 @@ void UI::render_shortcuts() {
 		std::transform(filter.begin(), filter.end(), filter.begin(),
 					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-		std::string last_cat = "";
+		std::string last_cat;
 		for (const auto& s : ShortcutManager::get_all()) {
 			if (s.action >= ShortcutAction::QuickSelect1 && s.action <= ShortcutAction::QuickSelect9) {
 				continue;
@@ -7897,106 +9926,281 @@ void UI::render_theme_editor() {
 		ImGui::Spacing();
 
 		if (ImGui::Button("Reset Style to Defaults", ImVec2(220, 26))) {
+			cfg.ui.base_spacing = def_cfg.ui.base_spacing;
+			cfg.ui.window_padding_x = def_cfg.ui.window_padding_x;
+			cfg.ui.window_padding_y = def_cfg.ui.window_padding_y;
+			cfg.ui.frame_padding_x = def_cfg.ui.frame_padding_x;
+			cfg.ui.frame_padding_y = def_cfg.ui.frame_padding_y;
+			cfg.ui.item_spacing_x = def_cfg.ui.item_spacing_x;
+			cfg.ui.item_spacing_y = def_cfg.ui.item_spacing_y;
+			cfg.ui.item_inner_spacing_x = def_cfg.ui.item_inner_spacing_x;
+			cfg.ui.item_inner_spacing_y = def_cfg.ui.item_inner_spacing_y;
+			cfg.ui.cell_padding_x = def_cfg.ui.cell_padding_x;
+			cfg.ui.cell_padding_y = def_cfg.ui.cell_padding_y;
+			cfg.ui.indent_spacing = def_cfg.ui.indent_spacing;
+			cfg.ui.scrollbar_size = def_cfg.ui.scrollbar_size;
+			cfg.ui.grab_min_size = def_cfg.ui.grab_min_size;
+
 			cfg.ui.window_rounding = def_cfg.ui.window_rounding;
+			cfg.ui.child_rounding = def_cfg.ui.child_rounding;
 			cfg.ui.frame_rounding = def_cfg.ui.frame_rounding;
+			cfg.ui.popup_rounding = def_cfg.ui.popup_rounding;
+			cfg.ui.scrollbar_rounding = def_cfg.ui.scrollbar_rounding;
+			cfg.ui.grab_rounding = def_cfg.ui.grab_rounding;
+			cfg.ui.tab_rounding = def_cfg.ui.tab_rounding;
+
+			cfg.ui.window_border_size = def_cfg.ui.window_border_size;
+			cfg.ui.child_border_size = def_cfg.ui.child_border_size;
+			cfg.ui.popup_border_size = def_cfg.ui.popup_border_size;
+			cfg.ui.frame_border_size = def_cfg.ui.frame_border_size;
+			cfg.ui.tab_border_size = def_cfg.ui.tab_border_size;
+
 			cfg.ui.button_size = def_cfg.ui.button_size;
 			cfg.ui.icon_size = def_cfg.ui.icon_size;
 			cfg.ui.material_list_height = def_cfg.ui.material_list_height;
+			cfg.ui.set_list_height = def_cfg.ui.set_list_height;
+			cfg.ui.save_list_height = def_cfg.ui.save_list_height;
+			cfg.ui.stamp_list_height = def_cfg.ui.stamp_list_height;
 			cfg.ui.sidebar_width = def_cfg.ui.sidebar_width;
-			cfg.ui.ui_scale = def_cfg.ui.ui_scale;
 			cfg.ui.font_size = def_cfg.ui.font_size;
 			cfg.ui.show_fps = def_cfg.ui.show_fps;
 			cfg.ui.show_active_cells = def_cfg.ui.show_active_cells;
 			cfg.ui.show_simulation_status = def_cfg.ui.show_simulation_status;
 			cfg.ui.background_color = def_cfg.ui.background_color;
 
-			style.WindowRounding = cfg.ui.window_rounding;
-			style.FrameRounding = cfg.ui.frame_rounding;
-			style.ChildRounding = cfg.ui.frame_rounding;
-			style.PopupRounding = cfg.ui.frame_rounding;
-			style.GrabRounding = cfg.ui.frame_rounding;
-			style.TabRounding = cfg.ui.frame_rounding;
+			UI::apply_theme_style(style, cfg.ui);
 
 			ConfigManager::save();
 			Window::set_background_color(cfg.ui.background_color);
 		}
 		ImGui::Spacing();
 
-		float win_round = cfg.ui.window_rounding;
-		if (ImGui::SliderFloat("Window Rounding", &win_round, 0.0f, 20.0f, "%.1f px")) {
-			cfg.ui.window_rounding = win_round;
-			style.WindowRounding = win_round;
-			ConfigManager::save();
+		if (ImGui::CollapsingHeader("Layout & Dimensions", ImGuiTreeNodeFlags_DefaultOpen)) {
+			int btn_size = cfg.ui.button_size;
+			if (ImGui::InputInt("Button Size", &btn_size, 1, 5)) {
+				btn_size = std::clamp(btn_size, 20, 50);
+				cfg.ui.button_size = btn_size;
+				ConfigManager::save();
+			}
+
+			int icon_sz = cfg.ui.icon_size;
+			if (ImGui::InputInt("Icon Size", &icon_sz, 1, 5)) {
+				icon_sz = std::clamp(icon_sz, 10, 36);
+				cfg.ui.icon_size = icon_sz;
+				ConfigManager::save();
+			}
+
+			int sb_w = cfg.ui.sidebar_width;
+			if (ImGui::InputInt("Sidebar Width", &sb_w, 10, 50)) {
+				sb_w = std::clamp(sb_w, 260, 800);
+				cfg.ui.sidebar_width = sb_w;
+				ConfigManager::save();
+			}
+
+			float f_sz = cfg.ui.font_size;
+			if (ImGui::InputFloat("Font Size*", &f_sz, 0.5f, 2.0f, "%.1f px")) {
+				f_sz = std::clamp(f_sz, 10.0f, 32.0f);
+				cfg.ui.font_size = f_sz;
+				ConfigManager::save();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("*Requires application restart to reload font atlas.");
+			}
+
+			bool show_fps = cfg.ui.show_fps;
+			if (custom_checkbox("FPS##show_fps", &show_fps, IconID::Clock, "Display FPS in header")) {
+				cfg.ui.show_fps = show_fps;
+				ConfigManager::save();
+			}
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+			bool show_cells = cfg.ui.show_active_cells;
+			if (custom_checkbox("Cells##show_cells", &show_cells, IconID::Brick,
+								"Display count of active cells in header")) {
+				cfg.ui.show_active_cells = show_cells;
+				ConfigManager::save();
+			}
+			ImGui::SameLine(0.0f, get_spacing(0.0f));
+			bool show_status = cfg.ui.show_simulation_status;
+			if (custom_checkbox("Status##show_status", &show_status, IconID::Play,
+								"Display PAUSED or RUNNING status indicator in header")) {
+				cfg.ui.show_simulation_status = show_status;
+				ConfigManager::save();
+			}
 		}
 
-		float frame_round = cfg.ui.frame_rounding;
-		if (ImGui::SliderFloat("Frame Rounding", &frame_round, 0.0f, 16.0f, "%.1f px")) {
-			cfg.ui.frame_rounding = frame_round;
-			style.FrameRounding = frame_round;
-			style.ChildRounding = frame_round;
-			style.PopupRounding = frame_round;
-			style.GrabRounding = frame_round;
-			style.TabRounding = frame_round;
-			ConfigManager::save();
+		if (ImGui::CollapsingHeader("Spacing & Padding System", ImGuiTreeNodeFlags_DefaultOpen)) {
+			float base_sp = cfg.ui.base_spacing;
+			if (ImGui::InputFloat("Base Spacing", &base_sp, 0.5f, 1.0f, "%.1f px")) {
+				base_sp = std::clamp(base_sp, 0.0f, 32.0f);
+				float delta = base_sp - cfg.ui.base_spacing;
+				cfg.ui.base_spacing = base_sp;
+				cfg.ui.window_padding_x = std::max(0.0f, cfg.ui.window_padding_x + delta);
+				cfg.ui.window_padding_y = std::max(0.0f, cfg.ui.window_padding_y + delta);
+				cfg.ui.frame_padding_x = std::max(0.0f, cfg.ui.frame_padding_x + delta);
+				cfg.ui.frame_padding_y = std::max(0.0f, cfg.ui.frame_padding_y + delta);
+				cfg.ui.item_spacing_x = std::max(0.0f, cfg.ui.item_spacing_x + delta);
+				cfg.ui.item_spacing_y = std::max(0.0f, cfg.ui.item_spacing_y + delta);
+				cfg.ui.item_inner_spacing_x = std::max(0.0f, cfg.ui.item_inner_spacing_x + delta);
+				cfg.ui.item_inner_spacing_y = std::max(0.0f, cfg.ui.item_inner_spacing_y + delta);
+				cfg.ui.cell_padding_x = std::max(0.0f, cfg.ui.cell_padding_x + delta);
+				cfg.ui.cell_padding_y = std::max(0.0f, cfg.ui.cell_padding_y + delta);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Master base spacing constant. Modifying shifts all derived spacings proportionally.");
+			}
+
+			if (ImGui::Button("Reset Offsets to Default")) {
+				cfg.ui.window_padding_x = cfg.ui.base_spacing + 6.0f;
+				cfg.ui.window_padding_y = cfg.ui.base_spacing + 6.0f;
+				cfg.ui.frame_padding_x = cfg.ui.base_spacing + 2.0f;
+				cfg.ui.frame_padding_y = std::max(0.0f, cfg.ui.base_spacing - 1.0f);
+				cfg.ui.item_spacing_x = cfg.ui.base_spacing + 2.0f;
+				cfg.ui.item_spacing_y = cfg.ui.base_spacing;
+				cfg.ui.item_inner_spacing_x = cfg.ui.base_spacing;
+				cfg.ui.item_inner_spacing_y = cfg.ui.base_spacing;
+				cfg.ui.cell_padding_x = std::max(0.0f, cfg.ui.base_spacing - 2.0f);
+				cfg.ui.cell_padding_y = std::max(0.0f, cfg.ui.base_spacing - 4.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Recalculate all padding and spacing values using default offsets from Base Spacing.");
+			}
+
+			auto render_spacing_item = [&](const char* name, float& val, const char* id) {
+				float offset = val - cfg.ui.base_spacing;
+				std::string label = fmt::format("{} (Base {:+.1f})##{}", name, offset, id);
+				float v = val;
+				if (ImGui::InputFloat(label.c_str(), &v, 0.5f, 1.0f, "%.1f px")) {
+					val = std::max(0.0f, v);
+					UI::apply_theme_style(style, cfg.ui);
+					ConfigManager::save();
+				}
+			};
+
+			render_spacing_item("Window Padding X", cfg.ui.window_padding_x, "wp_x");
+			render_spacing_item("Window Padding Y", cfg.ui.window_padding_y, "wp_y");
+			render_spacing_item("Frame Padding X", cfg.ui.frame_padding_x, "fp_x");
+			render_spacing_item("Frame Padding Y", cfg.ui.frame_padding_y, "fp_y");
+			render_spacing_item("Item Spacing X", cfg.ui.item_spacing_x, "is_x");
+			render_spacing_item("Item Spacing Y", cfg.ui.item_spacing_y, "is_y");
+			render_spacing_item("Item Inner Spacing X", cfg.ui.item_inner_spacing_x, "iis_x");
+			render_spacing_item("Item Inner Spacing Y", cfg.ui.item_inner_spacing_y, "iis_y");
+			render_spacing_item("Cell Padding X", cfg.ui.cell_padding_x, "cp_x");
+			render_spacing_item("Cell Padding Y", cfg.ui.cell_padding_y, "cp_y");
+
+			float ind = cfg.ui.indent_spacing;
+			if (ImGui::InputFloat("Indent Spacing", &ind, 1.0f, 5.0f, "%.1f px")) {
+				cfg.ui.indent_spacing = std::max(0.0f, ind);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float scr_sz = cfg.ui.scrollbar_size;
+			if (ImGui::InputFloat("Scrollbar Size", &scr_sz, 1.0f, 2.0f, "%.1f px")) {
+				cfg.ui.scrollbar_size = std::clamp(scr_sz, 6.0f, 32.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float g_min = cfg.ui.grab_min_size;
+			if (ImGui::InputFloat("Grab Min Size", &g_min, 1.0f, 2.0f, "%.1f px")) {
+				cfg.ui.grab_min_size = std::clamp(g_min, 4.0f, 32.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
 		}
 
-		int btn_size = cfg.ui.button_size;
-		if (ImGui::SliderInt("Button Size", &btn_size, 20, 50, "%d px")) {
-			cfg.ui.button_size = btn_size;
-			ConfigManager::save();
+		if (ImGui::CollapsingHeader("Rounding", ImGuiTreeNodeFlags_DefaultOpen)) {
+			float win_r = cfg.ui.window_rounding;
+			if (ImGui::InputFloat("Window Rounding", &win_r, 0.5f, 2.0f, "%.1f px")) {
+				cfg.ui.window_rounding = std::clamp(win_r, 0.0f, 24.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float child_r = cfg.ui.child_rounding;
+			if (ImGui::InputFloat("Child Rounding", &child_r, 0.5f, 2.0f, "%.1f px")) {
+				cfg.ui.child_rounding = std::clamp(child_r, 0.0f, 20.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float frame_r = cfg.ui.frame_rounding;
+			if (ImGui::InputFloat("Frame Rounding", &frame_r, 0.5f, 2.0f, "%.1f px")) {
+				cfg.ui.frame_rounding = std::clamp(frame_r, 0.0f, 20.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float popup_r = cfg.ui.popup_rounding;
+			if (ImGui::InputFloat("Popup Rounding", &popup_r, 0.5f, 2.0f, "%.1f px")) {
+				cfg.ui.popup_rounding = std::clamp(popup_r, 0.0f, 20.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float scrl_r = cfg.ui.scrollbar_rounding;
+			if (ImGui::InputFloat("Scrollbar Rounding", &scrl_r, 0.5f, 2.0f, "%.1f px")) {
+				cfg.ui.scrollbar_rounding = std::clamp(scrl_r, 0.0f, 20.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float grab_r = cfg.ui.grab_rounding;
+			if (ImGui::InputFloat("Grab Rounding", &grab_r, 0.5f, 2.0f, "%.1f px")) {
+				cfg.ui.grab_rounding = std::clamp(grab_r, 0.0f, 20.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
+
+			float tab_r = cfg.ui.tab_rounding;
+			if (ImGui::InputFloat("Tab Rounding", &tab_r, 0.5f, 2.0f, "%.1f px")) {
+				cfg.ui.tab_rounding = std::clamp(tab_r, 0.0f, 20.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
 		}
 
-		int icon_sz = cfg.ui.icon_size;
-		if (ImGui::SliderInt("Icon Size", &icon_sz, 10, 36, "%d px")) {
-			cfg.ui.icon_size = icon_sz;
-			ConfigManager::save();
-		}
+		if (ImGui::CollapsingHeader("Borders", ImGuiTreeNodeFlags_DefaultOpen)) {
+			float win_b = cfg.ui.window_border_size;
+			if (ImGui::InputFloat("Window Border Size", &win_b, 0.5f, 1.0f, "%.1f px")) {
+				cfg.ui.window_border_size = std::clamp(win_b, 0.0f, 10.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
 
-		int sb_w = cfg.ui.sidebar_width;
-		if (ImGui::SliderInt("Sidebar Width", &sb_w, 260, 800, "%d px")) {
-			cfg.ui.sidebar_width = sb_w;
-			ConfigManager::save();
-		}
+			float child_b = cfg.ui.child_border_size;
+			if (ImGui::InputFloat("Child Border Size", &child_b, 0.5f, 1.0f, "%.1f px")) {
+				cfg.ui.child_border_size = std::clamp(child_b, 0.0f, 10.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
 
-		int mat_h = cfg.ui.material_list_height;
-		if (ImGui::SliderInt("Material List Height", &mat_h, 70, 600, "%d px")) {
-			cfg.ui.material_list_height = mat_h;
-			ConfigManager::save();
-		}
+			float popup_b = cfg.ui.popup_border_size;
+			if (ImGui::InputFloat("Popup Border Size", &popup_b, 0.5f, 1.0f, "%.1f px")) {
+				cfg.ui.popup_border_size = std::clamp(popup_b, 0.0f, 10.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
 
-		float scale = cfg.ui.ui_scale;
-		if (ImGui::SliderFloat("UI Scale*", &scale, 0.5f, 2.5f, "%.2fx")) {
-			cfg.ui.ui_scale = scale;
-			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("*Requires application restart to apply.");
-		}
+			float frame_b = cfg.ui.frame_border_size;
+			if (ImGui::InputFloat("Frame Border Size", &frame_b, 0.5f, 1.0f, "%.1f px")) {
+				cfg.ui.frame_border_size = std::clamp(frame_b, 0.0f, 10.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
 
-		float f_sz = cfg.ui.font_size;
-		if (ImGui::SliderFloat("Font Size*", &f_sz, 10.0f, 32.0f, "%.1f px")) {
-			cfg.ui.font_size = f_sz;
-			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("*Requires application restart to reload font atlas.");
-		}
-
-		bool show_fps = cfg.ui.show_fps;
-		if (ImGui::Checkbox("Show FPS Counter in Header", &show_fps)) {
-			cfg.ui.show_fps = show_fps;
-			ConfigManager::save();
-		}
-		ImGui::SameLine();
-		bool show_cells = cfg.ui.show_active_cells;
-		if (ImGui::Checkbox("Show Active Cells in Header", &show_cells)) {
-			cfg.ui.show_active_cells = show_cells;
-			ConfigManager::save();
-		}
-		bool show_status = cfg.ui.show_simulation_status;
-		if (ImGui::Checkbox("Show Simulation Status (PAUSED / UNPAUSED) in Header", &show_status)) {
-			cfg.ui.show_simulation_status = show_status;
-			ConfigManager::save();
+			float tab_b = cfg.ui.tab_border_size;
+			if (ImGui::InputFloat("Tab Border Size", &tab_b, 0.5f, 1.0f, "%.1f px")) {
+				cfg.ui.tab_border_size = std::clamp(tab_b, 0.0f, 10.0f);
+				UI::apply_theme_style(style, cfg.ui);
+				ConfigManager::save();
+			}
 		}
 
 		ImGui::Spacing();
@@ -8010,13 +10214,13 @@ void UI::render_theme_editor() {
 		ImGui::InputTextWithHint("##col_filter", "Filter colors...", color_filter_buf, sizeof(color_filter_buf));
 
 		ImGui::Spacing();
-		ImGui::BeginChild("ColorEditorScroll", ImVec2(0, -1), true);
+		ImGui::BeginChild("ColorEditorScroll", ImVec2(0, 720), true);
 		const ImVec4* defs = UI::get_default_colors();
 		std::string filter = color_filter_buf;
 		std::transform(filter.begin(), filter.end(), filter.begin(),
 					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-		std::string last_col_cat = "";
+		std::string last_col_cat;
 		for (const auto& item : CURATED_THEME_COLORS) {
 			const char* col_name = "";
 			ImVec4* col_ptr = nullptr;
@@ -8238,33 +10442,56 @@ void UI::render_modals() {
 		ImGui::Separator();
 		ImGui::Spacing();
 
-		ImGui::TextWrapped("Adding rules to the 'empty' material means every empty cell on the grid will be "
-						   "evaluated every frame.");
-		ImGui::TextWrapped(
-			"This can significantly lower simulation performance when large areas of the grid are empty.");
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
+		if (s_pending_empty_inherit_id != 255) {
+			ImGui::TextWrapped("Inheriting rules onto the 'empty' material means every empty cell on the grid will be "
+							   "evaluated every frame.");
+			ImGui::TextWrapped(
+				"This can significantly lower simulation performance when large areas of the grid are empty.");
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
 
-		if (ImGui::Button("Add Rule Anyway", ImVec2(150, 30))) {
-			auto& mats = MaterialManager::get_materials();
-			for (auto& m : mats) {
-				if (m.id == 0) {
-					UndoManager::push_snapshot("Add Rule");
-					RuleDefinition new_rule;
-					new_rule.init_default(m.id);
-					m.rules.push_back(new_rule);
-					m.rule_order.push_back({false, m.rules.size() - 1});
-					MaterialManager::rebuild_compiled_rules();
-					unsaved_changes = true;
-					break;
-				}
+			if (ImGui::Button("Inherit Anyway", ImVec2(150, 30))) {
+				UndoManager::push_snapshot("Set Inheritance");
+				MaterialManager::set_material_inheritance(0, s_pending_empty_inherit_id);
+				unsaved_changes = true;
+				s_pending_empty_inherit_id = 255;
+				ImGui::CloseCurrentPopup();
 			}
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(120, 30))) {
-			ImGui::CloseCurrentPopup();
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 30))) {
+				s_pending_empty_inherit_id = 255;
+				ImGui::CloseCurrentPopup();
+			}
+		} else {
+			ImGui::TextWrapped("Adding rules to the 'empty' material means every empty cell on the grid will be "
+							   "evaluated every frame.");
+			ImGui::TextWrapped(
+				"This can significantly lower simulation performance when large areas of the grid are empty.");
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			if (ImGui::Button("Add Rule Anyway", ImVec2(150, 30))) {
+				auto& mats = MaterialManager::get_materials();
+				for (auto& m : mats) {
+					if (m.id == 0) {
+						UndoManager::push_snapshot("Add Rule");
+						RuleDefinition new_rule;
+						new_rule.init_default(m.id);
+						m.rules.push_back(new_rule);
+						m.rule_order.push_back({false, m.rules.size() - 1});
+						MaterialManager::rebuild_compiled_rules();
+						unsaved_changes = true;
+						break;
+					}
+				}
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 30))) {
+				ImGui::CloseCurrentPopup();
+			}
 		}
 		ImGui::EndPopup();
 	}

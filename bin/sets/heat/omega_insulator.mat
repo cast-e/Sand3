@@ -1,0 +1,15 @@
+{
+    "name": "omega_insulator",
+    "id": 2,
+    "color": [
+        90,
+        90,
+        90
+    ],
+    "default_attributes": [
+        300.0,
+        0.0,
+        0.0
+    ],
+    "rules": []
+}

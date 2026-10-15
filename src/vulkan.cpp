@@ -8,10 +8,12 @@
 #include "grid.hpp"
 #include "material_manager.hpp"
 #include "resources/simulation_spv.h"
+#include "set_manager.hpp"
 
 bool Vulkan::initialized = false;
 bool Vulkan::is_integrated = false;
 bool Vulkan::prevent_downclocking = false;
+int Vulkan::heatmap_attr_index = -1;
 uint32_t Vulkan::width = 0;
 uint32_t Vulkan::height = 0;
 
@@ -52,7 +54,7 @@ uint32_t* Vulkan::stats_mapped = nullptr;
 
 VkBuffer Vulkan::staging_buffer = VK_NULL_HANDLE;
 VkDeviceMemory Vulkan::staging_memory = VK_NULL_HANDLE;
-uint32_t* Vulkan::staging_mapped = nullptr;
+Cell* Vulkan::staging_mapped = nullptr;
 
 uint32_t Vulkan::find_memory_type(uint32_t type_filter, VkMemoryPropertyFlags preferred,
 								  VkMemoryPropertyFlags required) {
@@ -331,7 +333,8 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 		return false;
 	}
 
-	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
+	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(Cell);
+	VkDeviceSize display_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
 
 	create_buffer(grid_size_bytes,
 				  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -351,11 +354,11 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 	vkMapMemory(device, rules_memory, 0, sizeof(GpuRulesHeader), 0, reinterpret_cast<void**>(&rules_mapped));
 
 	create_buffer(
-		grid_size_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		display_size_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, display_buffer, display_memory);
-	vkMapMemory(device, display_memory, 0, grid_size_bytes, 0, reinterpret_cast<void**>(&display_mapped));
-	std::memset(display_mapped, 0, grid_size_bytes);
+	vkMapMemory(device, display_memory, 0, display_size_bytes, 0, reinterpret_cast<void**>(&display_mapped));
+	std::memset(display_mapped, 0, display_size_bytes);
 
 	create_buffer(sizeof(uint32_t) * 4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 				  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -375,7 +378,7 @@ bool Vulkan::init(uint32_t sim_width, uint32_t sim_height) {
 	buffer_infos[0] = {current_grid_buffer, 0, grid_size_bytes};
 	buffer_infos[1] = {next_grid_buffer, 0, grid_size_bytes};
 	buffer_infos[2] = {rules_buffer, 0, sizeof(GpuRulesHeader)};
-	buffer_infos[3] = {display_buffer, 0, grid_size_bytes};
+	buffer_infos[3] = {display_buffer, 0, display_size_bytes};
 	buffer_infos[4] = {stats_buffer, 0, sizeof(uint32_t) * 4};
 
 	std::array<VkWriteDescriptorSet, 5> writes{};
@@ -436,7 +439,8 @@ bool Vulkan::resize(uint32_t new_width, uint32_t new_height) {
 		current_grid_buffer = VK_NULL_HANDLE;
 	}
 
-	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
+	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(Cell);
+	VkDeviceSize display_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
 
 	create_buffer(grid_size_bytes,
 				  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -450,11 +454,11 @@ bool Vulkan::resize(uint32_t new_width, uint32_t new_height) {
 		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, next_grid_buffer, next_grid_memory);
 
 	create_buffer(
-		grid_size_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		display_size_bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, display_buffer, display_memory);
-	vkMapMemory(device, display_memory, 0, grid_size_bytes, 0, reinterpret_cast<void**>(&display_mapped));
-	std::memset(display_mapped, 0, grid_size_bytes);
+	vkMapMemory(device, display_memory, 0, display_size_bytes, 0, reinterpret_cast<void**>(&display_mapped));
+	std::memset(display_mapped, 0, display_size_bytes);
 
 	create_buffer(
 		grid_size_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -467,7 +471,7 @@ bool Vulkan::resize(uint32_t new_width, uint32_t new_height) {
 	buffer_infos[0] = {current_grid_buffer, 0, grid_size_bytes};
 	buffer_infos[1] = {next_grid_buffer, 0, grid_size_bytes};
 	buffer_infos[2] = {rules_buffer, 0, sizeof(GpuRulesHeader)};
-	buffer_infos[3] = {display_buffer, 0, grid_size_bytes};
+	buffer_infos[3] = {display_buffer, 0, display_size_bytes};
 	buffer_infos[4] = {stats_buffer, 0, sizeof(uint32_t) * 4};
 
 	std::array<VkWriteDescriptorSet, 5> writes{};
@@ -595,16 +599,64 @@ void Vulkan::update_rules() {
 
 	std::memset(rules_mapped, 0, sizeof(GpuRulesHeader));
 
+	const auto& meta = SetManager::get_current_metadata();
+	for (size_t a = 0; a < 3; ++a) {
+		if (a < meta.attributes.size()) {
+			rules_mapped->attr_meta[a].min_val = static_cast<float>(meta.attributes[a].min_val);
+			rules_mapped->attr_meta[a].max_val = static_cast<float>(meta.attributes[a].max_val);
+			rules_mapped->attr_meta[a].default_val = static_cast<float>(meta.attributes[a].default_val);
+			rules_mapped->attr_meta[a].type = (meta.attributes[a].type == AttributeType::Float) ? 1 : 0;
+		} else {
+			rules_mapped->attr_meta[a].min_val = -32768.0f;
+			rules_mapped->attr_meta[a].max_val = 32767.0f;
+			rules_mapped->attr_meta[a].default_val = 0.0f;
+			rules_mapped->attr_meta[a].type = 0;
+		}
+	}
+
 	uint32_t current_rule_idx = 0;
 	uint32_t current_var_idx = 0;
 	uint32_t current_cond_idx = 0;
 	uint32_t current_act_idx = 0;
+	uint32_t current_expr_op_idx = 0;
 
 	for (uint32_t mat_id = 0; mat_id < 256; ++mat_id) {
 		const auto& rm = MaterialManager::get_runtime_material(static_cast<uint8_t>(mat_id));
+		const auto& def = MaterialManager::get_material(static_cast<uint8_t>(mat_id));
 		rules_mapped->materials[mat_id].color = rm.packed_color;
 		rules_mapped->materials[mat_id].rule_start = current_rule_idx;
 		rules_mapped->materials[mat_id].rule_count = static_cast<uint32_t>(rm.rules.size());
+		for (size_t a = 0; a < 3; ++a) {
+			rules_mapped->materials[mat_id].default_attr[a] = static_cast<float>(def.default_attributes[a]);
+		}
+		rules_mapped->materials[mat_id].pad[0] = 0;
+		rules_mapped->materials[mat_id].pad[1] = 0;
+
+		for (size_t m_idx = 0; m_idx < 2; ++m_idx) {
+			auto& mod = rules_mapped->materials[mat_id].modifiers[m_idx];
+			if (m_idx < rm.color_modifiers.size()) {
+				const auto& rcm = rm.color_modifiers[m_idx];
+				mod.attr_index = rcm.attr_index;
+				mod.attr_min = rcm.attr_min;
+				mod.attr_max = rcm.attr_max;
+				mod.stop_count = std::min(static_cast<uint32_t>(rcm.gradient.stops.size()), 8u);
+				for (uint32_t s = 0; s < mod.stop_count; ++s) {
+					mod.stops[s].r = rcm.gradient.stops[s].color[0];
+					mod.stops[s].g = rcm.gradient.stops[s].color[1];
+					mod.stops[s].b = rcm.gradient.stops[s].color[2];
+					mod.stops[s].a = rcm.gradient.stops[s].color[3];
+					mod.stops[s].pos = rcm.gradient.stops[s].pos;
+					mod.stops[s].pad[0] = 0;
+					mod.stops[s].pad[1] = 0;
+					mod.stops[s].pad[2] = 0;
+				}
+			} else {
+				mod.attr_index = -1;
+				mod.attr_min = 0.0f;
+				mod.attr_max = 1.0f;
+				mod.stop_count = 0;
+			}
+		}
 
 		for (const auto& r : rm.rules) {
 			if (current_rule_idx >= 2048) {
@@ -615,6 +667,7 @@ void Vulkan::update_rules() {
 			gpu_r.variant_start = current_var_idx;
 			gpu_r.variant_count = static_cast<uint32_t>(r.variants.size());
 			gpu_r.chance_scaled = static_cast<uint32_t>(std::clamp(r.chance, 0.0f, 100.0f) * 1000.0f);
+			gpu_r.flags = (r.multi_apply ? 1u : 0u) | (r.continue_to_next ? 2u : 0u);
 
 			for (const auto& v : r.variants) {
 				if (current_var_idx >= 4096) {
@@ -643,8 +696,20 @@ void Vulkan::update_rules() {
 						}
 						gpu_c.allowed_mask[w] = word;
 					}
-					gpu_c.pad[0] = 0;
-					gpu_c.pad[1] = 0;
+					for (size_t ac_i = 0; ac_i < 2; ++ac_i) {
+						if (ac_i < cond.attr_conditions.size()) {
+							const auto& ac = cond.attr_conditions[ac_i];
+							gpu_c.attr_conds[ac_i].const_val = static_cast<float>(ac.const_value);
+							gpu_c.attr_conds[ac_i].attr_index = ac.attr_index;
+							gpu_c.attr_conds[ac_i].op = static_cast<uint32_t>(ac.op);
+							gpu_c.attr_conds[ac_i].target = static_cast<uint32_t>(ac.target);
+						} else {
+							gpu_c.attr_conds[ac_i].const_val = 0;
+							gpu_c.attr_conds[ac_i].attr_index = 0;
+							gpu_c.attr_conds[ac_i].op = 0;
+							gpu_c.attr_conds[ac_i].target = 0;
+						}
+					}
 					gpu_v.cond_count++;
 				}
 
@@ -656,17 +721,55 @@ void Vulkan::update_rules() {
 					gpu_a.dx = act.dx;
 					gpu_a.dy = act.dy;
 					gpu_a.target_material = act.target_material;
-					gpu_a.pad = 0;
+					gpu_a.updated = act.updated ? 1u : 0u;
+					for (size_t a = 0; a < 3; ++a) {
+						const auto& ops = act.attr_expr_ops[a];
+						if (ops.empty()) {
+							gpu_a.attr_actions[a].expr_start = 0;
+							gpu_a.attr_actions[a].expr_count = 0;
+							gpu_a.attr_actions[a].pad[0] = 0;
+							gpu_a.attr_actions[a].pad[1] = 0;
+						} else {
+							gpu_a.attr_actions[a].expr_start = static_cast<uint32_t>(current_expr_op_idx);
+							gpu_a.attr_actions[a].expr_count = static_cast<uint32_t>(ops.size());
+							gpu_a.attr_actions[a].pad[0] = 0;
+							gpu_a.attr_actions[a].pad[1] = 0;
+							for (const auto& op : ops) {
+								if (current_expr_op_idx < 4096) {
+									GpuExprOp& gop = rules_mapped->expr_ops[current_expr_op_idx++];
+									gop.type = static_cast<uint32_t>(op.type);
+									gop.dx = op.dx;
+									gop.dy = op.dy;
+									gop.val =
+										(op.type == ExprOpType::LoadCellAttr) ? static_cast<float>(op.attr) : op.val;
+								}
+							}
+						}
+					}
 					gpu_v.act_count++;
 				}
 			}
 		}
 	}
 
+	const auto& set_meta = SetManager::get_current_metadata();
+	rules_mapped->heatmap_stop_count = std::min(static_cast<uint32_t>(set_meta.heatmap_gradient.stops.size()), 8u);
+	for (uint32_t s = 0; s < rules_mapped->heatmap_stop_count; ++s) {
+		rules_mapped->heatmap_stops[s].r = set_meta.heatmap_gradient.stops[s].color[0];
+		rules_mapped->heatmap_stops[s].g = set_meta.heatmap_gradient.stops[s].color[1];
+		rules_mapped->heatmap_stops[s].b = set_meta.heatmap_gradient.stops[s].color[2];
+		rules_mapped->heatmap_stops[s].a = set_meta.heatmap_gradient.stops[s].color[3];
+		rules_mapped->heatmap_stops[s].pos = set_meta.heatmap_gradient.stops[s].pos;
+		rules_mapped->heatmap_stops[s].pad[0] = 0;
+		rules_mapped->heatmap_stops[s].pad[1] = 0;
+		rules_mapped->heatmap_stops[s].pad[2] = 0;
+	}
+
 	rules_mapped->total_rules = current_rule_idx;
 	rules_mapped->total_variants = current_var_idx;
 	rules_mapped->total_conditions = current_cond_idx;
 	rules_mapped->total_actions = current_act_idx;
+	rules_mapped->total_expr_ops = current_expr_op_idx;
 }
 
 void Vulkan::step(uint32_t frame_count, bool upload_pending) {
@@ -683,7 +786,7 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(command_buffer, &begin_info);
 
-	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
+	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(Cell);
 
 	if (upload_pending) {
 		VkBufferCopy upload_copy{};
@@ -735,6 +838,12 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 	pc.reverse_y = reverse_y ? 1 : 0;
 	pc.step_x = step_x;
 	pc.step_y = step_y;
+	pc.heatmap_attr = heatmap_attr_index;
+	pc.heatmap_flags = (Grid::get_heatmap_logarithmic() ? 1u : 0u) | (Grid::get_heatmap_custom_range() ? 2u : 0u);
+	pc.heatmap_view_min = Grid::get_heatmap_view_min();
+	pc.heatmap_view_max = Grid::get_heatmap_view_max();
+	pc.attr_layout = static_cast<uint32_t>(Grid::get_attr_layout());
+	pc.attr_types = Grid::get_attr_types();
 
 	VkMemoryBarrier phase_barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
 	phase_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
@@ -800,7 +909,7 @@ void Vulkan::step(uint32_t frame_count, bool upload_pending) {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 }
 
-void Vulkan::upload_grid(const uint8_t* materials, uint32_t count) {
+void Vulkan::upload_grid(const Cell* cells, uint32_t count) {
 	if (!initialized || !staging_mapped) {
 		return;
 	}
@@ -808,9 +917,7 @@ void Vulkan::upload_grid(const uint8_t* materials, uint32_t count) {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(device, 1, &fence);
 
-	for (uint32_t i = 0; i < count; ++i) {
-		staging_mapped[i] = static_cast<uint32_t>(materials[i]);
-	}
+	std::memcpy(staging_mapped, cells, static_cast<size_t>(count) * sizeof(Cell));
 
 	vkResetCommandBuffer(command_buffer, 0);
 
@@ -819,7 +926,7 @@ void Vulkan::upload_grid(const uint8_t* materials, uint32_t count) {
 	vkBeginCommandBuffer(command_buffer, &begin_info);
 
 	VkBufferCopy copy_region{};
-	copy_region.size = static_cast<VkDeviceSize>(count) * sizeof(uint32_t);
+	copy_region.size = static_cast<VkDeviceSize>(count) * sizeof(Cell);
 	vkCmdCopyBuffer(command_buffer, staging_buffer, current_grid_buffer, 1, &copy_region);
 	vkCmdCopyBuffer(command_buffer, staging_buffer, next_grid_buffer, 1, &copy_region);
 
@@ -837,6 +944,12 @@ void Vulkan::upload_grid(const uint8_t* materials, uint32_t count) {
 	pc.pass_type = 3;
 	pc.sim_width = width;
 	pc.sim_height = height;
+	pc.heatmap_attr = heatmap_attr_index;
+	pc.heatmap_flags = (Grid::get_heatmap_logarithmic() ? 1u : 0u) | (Grid::get_heatmap_custom_range() ? 2u : 0u);
+	pc.heatmap_view_min = Grid::get_heatmap_view_min();
+	pc.heatmap_view_max = Grid::get_heatmap_view_max();
+	pc.attr_layout = static_cast<uint32_t>(Grid::get_attr_layout());
+	pc.attr_types = Grid::get_attr_types();
 	vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
 	uint32_t render_group_x = (width + 15) / 16;
@@ -859,7 +972,7 @@ void Vulkan::upload_grid(const uint8_t* materials, uint32_t count) {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 }
 
-void Vulkan::download_grid(uint8_t* materials, uint32_t count) {
+void Vulkan::download_grid(Cell* cells, uint32_t count) {
 	if (!initialized || !staging_mapped) {
 		return;
 	}
@@ -874,7 +987,7 @@ void Vulkan::download_grid(uint8_t* materials, uint32_t count) {
 	vkBeginCommandBuffer(command_buffer, &begin_info);
 
 	VkBufferCopy copy_region{};
-	copy_region.size = static_cast<VkDeviceSize>(count) * sizeof(uint32_t);
+	copy_region.size = static_cast<VkDeviceSize>(count) * sizeof(Cell);
 	vkCmdCopyBuffer(command_buffer, current_grid_buffer, staging_buffer, 1, &copy_region);
 
 	VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
@@ -892,9 +1005,7 @@ void Vulkan::download_grid(uint8_t* materials, uint32_t count) {
 	vkQueueSubmit(compute_queue, 1, &submit_info, fence);
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 
-	for (uint32_t i = 0; i < count; ++i) {
-		materials[i] = static_cast<uint8_t>(staging_mapped[i] & 0xFFu);
-	}
+	std::memcpy(cells, staging_mapped, static_cast<size_t>(count) * sizeof(Cell));
 }
 
 void Vulkan::copy_staging_to_grid() {
@@ -905,7 +1016,7 @@ void Vulkan::copy_staging_to_grid() {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(device, 1, &fence);
 
-	VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
+	VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * sizeof(Cell);
 
 	vkResetCommandBuffer(command_buffer, 0);
 
@@ -936,10 +1047,14 @@ void Vulkan::clear() {
 	vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 	vkResetFences(device, 1, &fence);
 
-	VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
-	std::memset(staging_mapped, 0, size);
+	VkDeviceSize size = static_cast<VkDeviceSize>(width) * height * sizeof(Cell);
+	Cell empty_cell = Grid::make_empty_cell();
+	for (size_t i = 0; i < width * height; ++i) {
+		staging_mapped[i] = empty_cell;
+	}
 
-	const uint32_t bg_color = MaterialManager::get_runtime_material(0).packed_color;
+	const auto& rm = MaterialManager::get_runtime_material(0);
+	const uint32_t bg_color = compute_cell_color(rm, empty_cell);
 	for (size_t i = 0; i < width * height; ++i) {
 		display_mapped[i] = bg_color;
 	}
@@ -950,8 +1065,10 @@ void Vulkan::clear() {
 	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(command_buffer, &begin_info);
 
-	vkCmdFillBuffer(command_buffer, current_grid_buffer, 0, size, 0);
-	vkCmdFillBuffer(command_buffer, next_grid_buffer, 0, size, 0);
+	VkBufferCopy copy_region{};
+	copy_region.size = size;
+	vkCmdCopyBuffer(command_buffer, staging_buffer, current_grid_buffer, 1, &copy_region);
+	vkCmdCopyBuffer(command_buffer, staging_buffer, next_grid_buffer, 1, &copy_region);
 	vkCmdFillBuffer(command_buffer, stats_buffer, 0, sizeof(uint32_t) * 4, 0);
 
 	vkEndCommandBuffer(command_buffer);
@@ -978,7 +1095,7 @@ void Vulkan::refresh_display(bool upload_pending) {
 	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(command_buffer, &begin_info);
 
-	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(uint32_t);
+	VkDeviceSize grid_size_bytes = static_cast<VkDeviceSize>(width) * height * sizeof(Cell);
 
 	if (upload_pending && staging_buffer != VK_NULL_HANDLE) {
 		VkBufferCopy upload_copy{};
@@ -1004,6 +1121,12 @@ void Vulkan::refresh_display(bool upload_pending) {
 	pc.pass_type = 3;
 	pc.sim_width = width;
 	pc.sim_height = height;
+	pc.heatmap_attr = heatmap_attr_index;
+	pc.heatmap_flags = (Grid::get_heatmap_logarithmic() ? 1u : 0u) | (Grid::get_heatmap_custom_range() ? 2u : 0u);
+	pc.heatmap_view_min = Grid::get_heatmap_view_min();
+	pc.heatmap_view_max = Grid::get_heatmap_view_max();
+	pc.attr_layout = static_cast<uint32_t>(Grid::get_attr_layout());
+	pc.attr_types = Grid::get_attr_types();
 	vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
 	uint32_t render_group_x = (width + 15) / 16;

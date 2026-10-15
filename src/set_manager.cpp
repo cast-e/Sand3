@@ -15,17 +15,38 @@
 
 namespace fs = std::filesystem;
 
-std::string SetManager::current_set_name = "";
+std::string SetManager::current_set_name;
 SetMetadata SetManager::current_metadata{};
 std::unordered_map<std::string, bool> SetManager::online_set_cache;
 
+static bool is_valid_or_non_empty_set(const fs::path& dir_path) {
+	std::error_code ec;
+	for (const auto& sub_entry :
+		 fs::recursive_directory_iterator(dir_path, fs::directory_options::skip_permission_denied, ec)) {
+		if (sub_entry.is_regular_file(ec)) {
+			std::string ext = sub_entry.path().extension().string();
+			std::string fn = sub_entry.path().filename().string();
+			if (ext == ".mat" || ext == ".save" || ext == ".stamp" || fn == "set_config.ini") {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 std::vector<std::string> SetManager::get_sets() {
 	std::vector<std::string> sets;
-	fs::create_directories(SETS_DIRECTORY);
+	std::error_code ec;
+	fs::create_directories(SETS_DIRECTORY, ec);
 
-	for (const auto& entry : fs::directory_iterator(SETS_DIRECTORY)) {
-		if (entry.is_directory()) {
-			sets.push_back(entry.path().filename().string());
+	for (const auto& entry : fs::directory_iterator(SETS_DIRECTORY, ec)) {
+		if (entry.is_directory(ec)) {
+			std::string name = entry.path().filename().string();
+			if (!is_valid_or_non_empty_set(entry.path()) && name != current_set_name) {
+				fs::remove_all(entry.path(), ec);
+				continue;
+			}
+			sets.push_back(name);
 		}
 	}
 
@@ -64,7 +85,7 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 	}
 
 	std::string line;
-	std::string current_section = "";
+	std::string current_section;
 	while (std::getline(file, line)) {
 		std::string trimmed = trim(line);
 		if (trimmed.empty() || trimmed[0] == '#' || trimmed[0] == ';' || trimmed.rfind("//", 0) == 0) {
@@ -98,6 +119,73 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 						meta.forked_from_version = static_cast<uint32_t>(std::stoul(val));
 					} catch (...) {}
 				}
+			} else if (current_section == "Attributes") {
+				if (key == "count") {
+					try {
+						int cnt = std::clamp(std::stoi(val), 0, 3);
+						if (meta.attributes.size() < static_cast<size_t>(cnt)) {
+							meta.attributes.resize(cnt);
+						}
+					} catch (...) {}
+				} else {
+					for (int i = 0; i < 3; ++i) {
+						std::string prefix = "attr" + std::to_string(i) + "_";
+						if (key.rfind(prefix, 0) == 0) {
+							if (meta.attributes.size() <= static_cast<size_t>(i)) {
+								meta.attributes.resize(i + 1);
+							}
+							std::string field = key.substr(prefix.length());
+							if (field == "name") {
+								meta.attributes[i].name = val;
+							} else if (field == "type") {
+								meta.attributes[i].type = (val == "float") ? AttributeType::Float : AttributeType::Int;
+							} else if (field == "min") {
+								try {
+									meta.attributes[i].min_val = std::stod(val);
+								} catch (...) {}
+							} else if (field == "max") {
+								try {
+									meta.attributes[i].max_val = std::stod(val);
+								} catch (...) {}
+							} else if (field == "default") {
+								try {
+									meta.attributes[i].default_val = std::stod(val);
+								} catch (...) {}
+							}
+						}
+					}
+				}
+			} else if (current_section == "Heatmap") {
+				if (key == "stop_count") {
+					try {
+						int cnt = std::clamp(std::stoi(val), 1, 16);
+						meta.heatmap_gradient.stops.resize(cnt);
+					} catch (...) {}
+				} else {
+					for (int i = 0; i < 16; ++i) {
+						std::string prefix = "stop" + std::to_string(i) + "_";
+						if (key.rfind(prefix, 0) == 0) {
+							if (meta.heatmap_gradient.stops.size() <= static_cast<size_t>(i)) {
+								meta.heatmap_gradient.stops.resize(i + 1);
+							}
+							std::string field = key.substr(prefix.length());
+							if (field == "pos") {
+								try {
+									meta.heatmap_gradient.stops[i].pos = std::stof(val);
+								} catch (...) {}
+							} else if (field == "color") {
+								std::stringstream ss(val);
+								std::string item;
+								int c_idx = 0;
+								while (std::getline(ss, item, ',') && c_idx < 4) {
+									try {
+										meta.heatmap_gradient.stops[i].color[c_idx++] = std::stof(trim(item));
+									} catch (...) {}
+								}
+							}
+						}
+					}
+				}
 			} else {
 				try {
 					if (key == "author") {
@@ -122,6 +210,38 @@ SetMetadata SetManager::load_set_metadata(const std::string& name) {
 		}
 	}
 
+	for (auto& attr : meta.attributes) {
+		if (attr.min_val > attr.max_val) {
+			std::swap(attr.min_val, attr.max_val);
+		}
+		attr.default_val = std::clamp(attr.default_val, attr.min_val, attr.max_val);
+	}
+
+	if (!meta.attributes.empty()) {
+		float a_min = static_cast<float>(meta.attributes[0].min_val);
+		float a_max = static_cast<float>(meta.attributes[0].max_val);
+		if (a_max <= a_min) {
+			a_max = a_min + 1.0f;
+		}
+		if (meta.heatmap_gradient.stops.empty()) {
+			meta.heatmap_gradient = ColorGradient::default_heatmap(a_min, a_max);
+		} else {
+			bool all_01 = true;
+			for (const auto& s : meta.heatmap_gradient.stops) {
+				if (s.pos < 0.0f || s.pos > 1.0f) {
+					all_01 = false;
+					break;
+				}
+			}
+			if (all_01 && (a_max - a_min) > 1.5f) {
+				for (auto& s : meta.heatmap_gradient.stops) {
+					s.pos = a_min + s.pos * (a_max - a_min);
+				}
+			}
+		}
+	}
+
+	meta.heatmap_gradient.sort_stops();
 	return meta;
 }
 
@@ -134,9 +254,12 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 							  metadata.height > 0 || metadata.target_fps > 0 || metadata.processing_mode >= 0 ||
 							  !metadata.prevent_downclock || metadata.version > 1;
 	bool has_shortcuts = !metadata.shortcuts.empty();
-	bool has_workshop = !metadata.workshop_id.empty() || !metadata.workshop_hash.empty() || !metadata.forked_from_id.empty();
+	bool has_workshop =
+		!metadata.workshop_id.empty() || !metadata.workshop_hash.empty() || !metadata.forked_from_id.empty();
+	bool has_attributes = !metadata.attributes.empty();
+	bool has_heatmap = !metadata.attributes.empty() && !metadata.heatmap_gradient.stops.empty();
 
-	if (!has_meta_overrides && !has_shortcuts && !has_workshop) {
+	if (!has_meta_overrides && !has_shortcuts && !has_workshop && !has_attributes && !has_heatmap) {
 		if (fs::exists(cfg_path)) {
 			std::error_code ec;
 			fs::remove(cfg_path, ec);
@@ -204,6 +327,35 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 			file << "forked_from_version = " << metadata.forked_from_version << "\n";
 		}
 	}
+
+	if (has_attributes) {
+		file << "\n[Attributes]\n";
+		file << "count = " << metadata.attributes.size() << "\n";
+		for (size_t i = 0; i < metadata.attributes.size(); ++i) {
+			const auto& attr = metadata.attributes[i];
+			file << "attr" << i << "_name = " << attr.name << "\n";
+			file << "attr" << i << "_type = " << (attr.type == AttributeType::Float ? "float" : "int") << "\n";
+			if (attr.type == AttributeType::Int) {
+				file << "attr" << i << "_min = " << static_cast<int64_t>(std::round(attr.min_val)) << "\n";
+				file << "attr" << i << "_max = " << static_cast<int64_t>(std::round(attr.max_val)) << "\n";
+				file << "attr" << i << "_default = " << static_cast<int64_t>(std::round(attr.default_val)) << "\n";
+			} else {
+				file << "attr" << i << "_min = " << attr.min_val << "\n";
+				file << "attr" << i << "_max = " << attr.max_val << "\n";
+				file << "attr" << i << "_default = " << attr.default_val << "\n";
+			}
+		}
+	}
+
+	if (has_heatmap) {
+		file << "\n[Heatmap]\n";
+		file << "stop_count = " << metadata.heatmap_gradient.stops.size() << "\n";
+		for (size_t i = 0; i < metadata.heatmap_gradient.stops.size(); ++i) {
+			const auto& s = metadata.heatmap_gradient.stops[i];
+			file << "stop" << i << "_pos = " << s.pos << "\n";
+			file << "stop" << i << "_color = " << s.color[0] << "," << s.color[1] << "," << s.color[2] << "," << s.color[3] << "\n";
+		}
+	}
 }
 
 void SetManager::fork_set(const std::string& source_name, const std::string& new_name) {
@@ -236,6 +388,7 @@ void SetManager::set_current_set(const std::string& name) {
 	Window::set_cursor_wait(true);
 	current_set_name = name;
 	current_metadata = load_set_metadata(name);
+	Grid::update_attr_layout();
 	fs::create_directories(SETS_DIRECTORY + name);
 	MaterialManager::load_all_materials(SETS_DIRECTORY + name);
 
@@ -345,6 +498,13 @@ void SetManager::delete_set(const std::string& name) {
 
 void SetManager::update_current_metadata(const SetMetadata& metadata) {
 	current_metadata = metadata;
+	for (auto& attr : current_metadata.attributes) {
+		if (attr.min_val > attr.max_val) {
+			std::swap(attr.min_val, attr.max_val);
+		}
+		attr.default_val = std::clamp(attr.default_val, attr.min_val, attr.max_val);
+	}
+	Grid::update_attr_layout();
 	save_set_metadata(current_set_name, current_metadata);
 }
 
@@ -368,7 +528,9 @@ std::string SetManager::compute_set_hash(const std::string& set_name) {
 
 	std::vector<uint8_t> combined_bytes;
 	for (const auto& fname : filenames) {
-		std::string fpath = set_dir + "/" + fname;
+		std::string fpath = set_dir;
+		fpath += '/';
+		fpath += fname;
 		for (char c : fname)
 			combined_bytes.push_back(static_cast<uint8_t>(c));
 		combined_bytes.push_back(0);
@@ -402,8 +564,7 @@ bool SetManager::is_set_online(const std::string& set_name) {
 void SetManager::mark_set_online(const std::string& set_name, bool online) { online_set_cache[set_name] = online; }
 
 void SetManager::set_workshop_info(const std::string& set_name, const std::string& workshop_id,
-								   const std::string& workshop_hash, uint32_t version,
-								   const std::string& author) {
+								   const std::string& workshop_hash, uint32_t version, const std::string& author) {
 	SetMetadata m = load_set_metadata(set_name);
 	m.workshop_id = workshop_id;
 	m.workshop_hash = workshop_hash;

@@ -25,7 +25,7 @@ namespace {
 	char s_edit_title[128] = "";
 	char s_edit_desc[1024] = "";
 	bool s_edit_private = false;
-	std::string s_edit_status = "";
+	std::string s_edit_status;
 	bool s_edit_saving = false;
 	std::function<void()> s_edit_on_success = nullptr;
 
@@ -43,26 +43,19 @@ namespace {
 	std::vector<std::string> s_update_available_saves;
 	int s_update_stamp_idx = 0;
 	std::vector<std::string> s_update_available_stamps;
-	std::string s_update_status = "";
+	std::string s_update_status;
 	bool s_update_saving = false;
 	std::function<void()> s_update_on_success = nullptr;
 
 	bool s_show_delete_modal = false;
 	WorkshopItemClient s_delete_item;
-	std::string s_delete_status = "";
+	std::string s_delete_status;
 	bool s_delete_saving = false;
 	std::function<void()> s_delete_on_success = nullptr;
 
 	void refresh_update_sources(const std::string& item_type, const std::string& item_title) {
 		if (item_type == "set") {
-			s_update_available_sets.clear();
-			if (std::filesystem::exists(SETS_DIRECTORY)) {
-				for (const auto& entry : std::filesystem::directory_iterator(SETS_DIRECTORY)) {
-					if (entry.is_directory()) {
-						s_update_available_sets.push_back(entry.path().filename().string());
-					}
-				}
-			}
+			s_update_available_sets = SetManager::get_sets();
 			s_update_set_idx = 0;
 			for (size_t i = 0; i < s_update_available_sets.size(); ++i) {
 				if (s_update_available_sets[i] == item_title) {
@@ -212,10 +205,8 @@ void WorkshopItemEditor::render_edit_modal() {
 								  ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter, filterNewline);
 
 		ImGui::Spacing();
-		ImGui::Checkbox("Private item (only visible to you)", &s_edit_private);
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Make this item private so only you can see and download it.");
-		}
+		UI::custom_checkbox("Private item (only visible to you)", &s_edit_private, IconID::Lock,
+							"Make this item private so only you can see and download it.");
 
 		if (!s_edit_status.empty()) {
 			ImGui::Spacing();
@@ -356,9 +347,9 @@ void WorkshopItemEditor::render_update_modal() {
 			nlohmann::json meta = s_update_item.meta;
 
 			std::vector<uint8_t> payload_bytes;
-			std::string file_ext = "";
-			std::string set_hash = "";
-			std::string thumb_b64 = "";
+			std::string file_ext;
+			std::string set_hash;
+			std::string thumb_b64;
 
 			if (item_type == "set") {
 				if (s_update_set_idx >= 0 && s_update_set_idx < static_cast<int>(s_update_available_sets.size())) {
@@ -455,6 +446,9 @@ void WorkshopItemEditor::render_update_modal() {
 				tj["icon_size"] = cfg.ui.icon_size;
 				tj["sidebar_width"] = cfg.ui.sidebar_width;
 				tj["material_list_height"] = cfg.ui.material_list_height;
+				tj["set_list_height"] = cfg.ui.set_list_height;
+				tj["save_list_height"] = cfg.ui.save_list_height;
+				tj["stamp_list_height"] = cfg.ui.stamp_list_height;
 				tj["background_color"] = {cfg.ui.background_color.x, cfg.ui.background_color.y,
 										  cfg.ui.background_color.z, cfg.ui.background_color.w};
 				tj["selection_box_color"] = {cfg.ui.selection_box_color.x, cfg.ui.selection_box_color.y,

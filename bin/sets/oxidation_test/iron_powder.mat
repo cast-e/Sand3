@@ -1,0 +1,238 @@
+{
+    "name": "iron_powder",
+    "id": 2,
+    "color": [
+        255,
+        255,
+        255
+    ],
+    "color_modifiers": [
+        {
+            "enabled": true,
+            "gradient": [
+                {
+                    "pos": 0.0,
+                    "color": [
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                },
+                {
+                    "pos": 255.0,
+                    "color": [
+                        0.4585152864456177,
+                        0.25228351354599,
+                        0.0,
+                        1.0
+                    ]
+                }
+            ]
+        },
+        {
+            "enabled": false,
+            "gradient": [
+                {
+                    "pos": 0.0,
+                    "color": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ]
+                },
+                {
+                    "pos": 1.0,
+                    "color": [
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            ]
+        },
+        {
+            "enabled": false,
+            "gradient": [
+                {
+                    "pos": 0.0,
+                    "color": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0
+                    ]
+                },
+                {
+                    "pos": 1.0,
+                    "color": [
+                        1.0,
+                        1.0,
+                        1.0,
+                        1.0
+                    ]
+                }
+            ]
+        }
+    ],
+    "rules": [
+        {
+            "when": [
+                [],
+                [
+                    0
+                ]
+            ],
+            "then": [
+                255,
+                255
+            ],
+            "then_actions": [
+                {
+                    "exprs": [
+                        "s + 1",
+                        "",
+                        ""
+                    ],
+                    "updated": false
+                },
+                {
+                    "updated": false
+                }
+            ],
+            "bounds": [
+                0,
+                1,
+                0,
+                0
+            ],
+            "sym_rot": true,
+            "continue_to_next": true,
+            "chance": 10.0
+        },
+        {
+            "when": [
+                [],
+                [
+                    0
+                ]
+            ],
+            "then": [
+                0,
+                2
+            ],
+            "then_actions": [
+                null,
+                {
+                    "exprs": [
+                        "[0,0]",
+                        "",
+                        ""
+                    ]
+                }
+            ],
+            "bounds": [
+                0,
+                0,
+                0,
+                1
+            ]
+        },
+        {
+            "when": [
+                [],
+                [],
+                [],
+                [
+                    0
+                ]
+            ],
+            "when_attrs": [
+                [
+                    {
+                        "attr": 0,
+                        "op": 6,
+                        "target": 1,
+                        "val": 150.0
+                    }
+                ],
+                [],
+                [],
+                []
+            ],
+            "then": [
+                0,
+                255,
+                255,
+                2
+            ],
+            "then_actions": [
+                null,
+                null,
+                null,
+                {
+                    "exprs": [
+                        "[0,0]",
+                        "",
+                        ""
+                    ]
+                }
+            ],
+            "bounds": [
+                0,
+                1,
+                0,
+                1
+            ],
+            "sym_x": true
+        },
+        {
+            "when": [
+                [],
+                [
+                    2
+                ]
+            ],
+            "when_attrs": [
+                [],
+                [
+                    {
+                        "attr": 0,
+                        "op": 3,
+                        "target": 0,
+                        "val": 0.0
+                    }
+                ]
+            ],
+            "then": [
+                255,
+                255
+            ],
+            "then_actions": [
+                {
+                    "exprs": [
+                        "(0,1)",
+                        "",
+                        ""
+                    ]
+                },
+                {
+                    "exprs": [
+                        "[0,0]",
+                        "",
+                        ""
+                    ]
+                }
+            ],
+            "bounds": [
+                0,
+                0,
+                0,
+                1
+            ],
+            "chance": 2.0
+        }
+    ]
+}

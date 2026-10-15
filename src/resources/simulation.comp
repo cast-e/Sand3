@@ -13,21 +13,140 @@ layout(push_constant) uniform PushConstants {
 	uint reverse_y;
 	uint step_x;
 	uint step_y;
+	int heatmap_attr;
+	uint heatmap_flags;
+	float heatmap_view_min;
+	float heatmap_view_max;
+	uint attr_layout;
+	uint attr_types;
 }
 pc;
+
+struct GpuCell {
+	uint d0;
+	uint d1;
+};
+
+uint cell_mat(GpuCell c) { return c.d0 & 0xFFu; }
+
+uint cell_updated(GpuCell c) { return (c.d0 >> 8u) & 0xFFu; }
+
+float cell_attr(GpuCell c, uint idx) {
+	bool is_float = ((pc.attr_types >> idx) & 1u) != 0u;
+	bool is_unsigned = ((pc.attr_types >> (idx + 4u)) & 1u) != 0u;
+
+	if (pc.attr_layout == 1u) {
+		if (idx != 0u)
+			return 0.0;
+		if (is_float)
+			return uintBitsToFloat(c.d1);
+		if (is_unsigned)
+			return float(c.d1);
+		return float(int(c.d1));
+	} else if (pc.attr_layout == 2u) {
+		if (idx == 0u) {
+			if (is_float)
+				return uintBitsToFloat(c.d1);
+			if (is_unsigned)
+				return float(c.d1);
+			return float(int(c.d1));
+		} else if (idx == 1u) {
+			uint u16 = (c.d0 >> 16u) & 0xFFFFu;
+			if (is_float)
+				return unpackHalf2x16(u16).x;
+			if (is_unsigned)
+				return float(u16);
+			return float(int(c.d0) >> 16);
+		}
+		return 0.0;
+	} else {
+		uint u16;
+		if (idx == 0u)
+			u16 = c.d1 & 0xFFFFu;
+		else if (idx == 1u)
+			u16 = (c.d1 >> 16u) & 0xFFFFu;
+		else
+			u16 = (c.d0 >> 16u) & 0xFFFFu;
+
+		if (is_float)
+			return unpackHalf2x16(u16).x;
+		if (is_unsigned)
+			return float(u16);
+		int s16 = (idx == 0u) ? ((int(c.d1) << 16) >> 16) : (idx == 1u) ? (int(c.d1) >> 16) : (int(c.d0) >> 16);
+		return float(s16);
+	}
+}
+
+uint pack_u16(float val, uint idx) {
+	bool is_float = ((pc.attr_types >> idx) & 1u) != 0u;
+	bool is_unsigned = ((pc.attr_types >> (idx + 4u)) & 1u) != 0u;
+	if (is_float) {
+		return packHalf2x16(vec2(val, 0.0)) & 0xFFFFu;
+	} else if (is_unsigned) {
+		return uint(clamp(round(val), 0.0, 65535.0)) & 0xFFFFu;
+	} else {
+		return uint(int(clamp(round(val), -32768.0, 32767.0))) & 0xFFFFu;
+	}
+}
+
+uint pack_u32(float val, uint idx) {
+	bool is_float = ((pc.attr_types >> idx) & 1u) != 0u;
+	bool is_unsigned = ((pc.attr_types >> (idx + 4u)) & 1u) != 0u;
+	if (is_float) {
+		return floatBitsToUint(val);
+	} else if (is_unsigned) {
+		return uint(clamp(round(val), 0.0, 4294967295.0));
+	} else {
+		return uint(int(clamp(round(val), -2147483648.0, 2147483647.0)));
+	}
+}
+
+GpuCell pack_cell(uint mat, uint updated, float a0, float a1, float a2) {
+	GpuCell c;
+	if (pc.attr_layout == 1u) {
+		c.d0 = (mat & 0xFFu) | ((updated & 0xFFu) << 8u);
+		c.d1 = pack_u32(a0, 0u);
+	} else if (pc.attr_layout == 2u) {
+		uint u16_1 = pack_u16(a1, 1u);
+		c.d0 = (mat & 0xFFu) | ((updated & 0xFFu) << 8u) | (u16_1 << 16u);
+		c.d1 = pack_u32(a0, 0u);
+	} else {
+		uint u16_0 = pack_u16(a0, 0u);
+		uint u16_1 = pack_u16(a1, 1u);
+		uint u16_2 = pack_u16(a2, 2u);
+		c.d0 = (mat & 0xFFu) | ((updated & 0xFFu) << 8u) | (u16_2 << 16u);
+		c.d1 = u16_0 | (u16_1 << 16u);
+	}
+	return c;
+}
+
+struct GpuAttrCondition {
+	float const_val;
+	uint attr_index;
+	uint op;
+	uint target;
+};
 
 struct GpuCondition {
 	int dx;
 	int dy;
 	uint allowed_mask[8];
-	uint pad[2];
+	GpuAttrCondition attr_conds[2];
+};
+
+struct GpuAttrAction {
+	uint expr_start;
+	uint expr_count;
+	uint pad0;
+	uint pad1;
 };
 
 struct GpuAction {
 	int dx;
 	int dy;
 	uint target_material;
-	uint pad;
+	uint updated;
+	GpuAttrAction attr_actions[3];
 };
 
 struct GpuRuleVariant {
@@ -41,34 +160,70 @@ struct GpuRule {
 	uint variant_start;
 	uint variant_count;
 	uint chance_scaled;
-	uint pad;
+	uint flags;
+};
+
+struct GpuGradientStop {
+	vec4 color;
+	float pos;
+	float pad0;
+	float pad1;
+	float pad2;
+};
+
+struct GpuColorModifier {
+	int attr_index;
+	float attr_min;
+	float attr_max;
+	uint stop_count;
+	GpuGradientStop stops[8];
 };
 
 struct GpuMaterial {
 	uint rule_start;
 	uint rule_count;
 	uint color;
-	uint pad;
+	float default_attr[3];
+	uint pad[2];
+	GpuColorModifier modifiers[2];
 };
 
-layout(std430, set = 0, binding = 0) buffer CurrentGrid { uint current_cells[]; };
+struct GpuAttrMeta {
+	float min_val;
+	float max_val;
+	float default_val;
+	uint type;
+};
 
-layout(std430, set = 0, binding = 1) buffer NextGrid { uint next_cells[]; };
+struct GpuExprOp {
+	uint type;
+	int dx;
+	int dy;
+	float val;
+};
+
+layout(std430, set = 0, binding = 0) buffer CurrentGrid { GpuCell current_cells[]; };
+layout(std430, set = 0, binding = 1) buffer NextGrid { GpuCell next_cells[]; };
 
 layout(std430, set = 0, binding = 2) readonly buffer RulesBuffer {
 	GpuMaterial materials[256];
+	GpuAttrMeta attr_meta[3];
 	uint total_rules;
 	uint total_variants;
 	uint total_conditions;
 	uint total_actions;
+	uint total_expr_ops;
+	uint heatmap_stop_count;
+	uint pad_h[2];
+	GpuGradientStop heatmap_stops[8];
 	GpuRule rules[2048];
 	GpuRuleVariant variants[4096];
 	GpuCondition conditions[32768];
 	GpuAction actions[16384];
+	GpuExprOp expr_ops[4096];
 };
 
 layout(std430, set = 0, binding = 3) writeonly buffer DisplayBuffer { uint display_pixels[]; };
-
 layout(std430, set = 0, binding = 4) buffer StatsBuffer { uint changed_cells; };
 
 const uint perms[24] = uint[24](0x3210u, 0x2310u, 0x3120u, 0x1320u, 0x2130u, 0x1230u, 0x3201u, 0x2301u, 0x3021u,
@@ -80,6 +235,62 @@ uint xorshift32(inout uint state) {
 	state ^= state >> 17u;
 	state ^= state << 5u;
 	return state;
+}
+
+vec4 sample_gradient(GpuGradientStop stops[8], uint stop_count, float t) {
+	if (stop_count == 0u)
+		return vec4(1.0);
+	if (stop_count == 1u || t <= stops[0].pos)
+		return stops[0].color;
+	if (t >= stops[stop_count - 1u].pos)
+		return stops[stop_count - 1u].color;
+
+	for (uint i = 0u; i < 7u; ++i) {
+		if (i + 1u >= stop_count)
+			break;
+		if (t >= stops[i].pos && t <= stops[i + 1u].pos) {
+			float span = stops[i + 1u].pos - stops[i].pos;
+			float factor = (span > 0.00001) ? clamp((t - stops[i].pos) / span, 0.0, 1.0) : 0.0;
+			return mix(stops[i].color, stops[i + 1u].color, factor);
+		}
+	}
+	return stops[stop_count - 1u].color;
+}
+
+uint compute_cell_color(uint mat_id, GpuCell c) {
+	if (pc.heatmap_attr >= 0 && pc.heatmap_attr < 3) {
+		float val = cell_attr(c, uint(pc.heatmap_attr));
+		vec4 h_col = sample_gradient(heatmap_stops, heatmap_stop_count, val);
+		uint r = uint(clamp(h_col.r * 255.0, 0.0, 255.0));
+		uint g = uint(clamp(h_col.g * 255.0, 0.0, 255.0));
+		uint b = uint(clamp(h_col.b * 255.0, 0.0, 255.0));
+		return (255u << 24u) | (b << 16u) | (g << 8u) | r;
+	}
+
+	GpuMaterial m = materials[mat_id];
+	uint base_col = m.color;
+	float base_r = float(base_col & 0xFFu);
+	float base_g = float((base_col >> 8u) & 0xFFu);
+	float base_b = float((base_col >> 16u) & 0xFFu);
+	float r = base_r;
+	float g = base_g;
+	float b = base_b;
+
+	for (uint i = 0u; i < 2u; ++i) {
+		if (m.modifiers[i].attr_index >= 0) {
+			float val = cell_attr(c, uint(m.modifiers[i].attr_index));
+			vec4 col = sample_gradient(m.modifiers[i].stops, m.modifiers[i].stop_count, val);
+			float alpha = col.a;
+			r = col.r * 255.0 * alpha + r * (1.0 - alpha);
+			g = col.g * 255.0 * alpha + g * (1.0 - alpha);
+			b = col.b * 255.0 * alpha + b * (1.0 - alpha);
+		}
+	}
+
+	uint cr = uint(clamp(r, 0.0, 255.0));
+	uint cg = uint(clamp(g, 0.0, 255.0));
+	uint cb = uint(clamp(b, 0.0, 255.0));
+	return (255u << 24u) | (cb << 16u) | (cg << 8u) | cr;
 }
 
 bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uint local_changed) {
@@ -94,10 +305,37 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 			return false;
 		}
 		uint n_idx = uint(ny) * pc.sim_width + uint(nx);
-		uint n_mat = current_cells[n_idx] & 0xFFu;
+		GpuCell n_cell = current_cells[n_idx];
+		uint n_mat = cell_mat(n_cell);
 		uint word = cond.allowed_mask[n_mat >> 5u];
 		if ((word & (1u << (n_mat & 31u))) == 0u) {
 			return false;
+		}
+
+		for (uint a = 0u; a < 2u; ++a) {
+			GpuAttrCondition ac = cond.attr_conds[a];
+			if (ac.op == 0u)
+				continue;
+			float val = cell_attr(next_cells[n_idx], ac.attr_index);
+			float target_val = ac.const_val;
+			if (ac.target == 0u) {
+				target_val = cell_attr(next_cells[center_id], ac.attr_index);
+			}
+			bool ok = true;
+			if (ac.op == 1u)
+				ok = (abs(val - target_val) < 1e-4);
+			else if (ac.op == 2u)
+				ok = (abs(val - target_val) >= 1e-4);
+			else if (ac.op == 3u)
+				ok = (val < target_val);
+			else if (ac.op == 4u)
+				ok = (val <= target_val);
+			else if (ac.op == 5u)
+				ok = (val > target_val);
+			else if (ac.op == 6u)
+				ok = (val >= target_val);
+			if (!ok)
+				return false;
 		}
 	}
 
@@ -112,23 +350,180 @@ bool try_apply_variant(uint var_idx, uint cx, uint cy, uint center_id, inout uin
 			continue;
 		}
 		uint target_id = uint(ny) * pc.sim_width + uint(nx);
-		if (((next_cells[target_id] >> 8u) & 1u) != 0u) {
+		if (cell_updated(next_cells[target_id]) != 0u) {
 			return false;
 		}
 	}
 
-	next_cells[center_id] = (next_cells[center_id] & 0xFFu) | (1u << 8u);
-	for (uint i = 0u; i < a_count; ++i) {
+	GpuCell saved_center = next_cells[center_id];
+
+	GpuCell written_cells[100];
+	uint target_ids[100];
+	uint num_written = min(a_count, 100u);
+
+	for (uint i = 0u; i < num_written; ++i) {
 		GpuAction act = actions[a_start + i];
 		int nx = int(cx) + act.dx;
 		int ny = int(cy) + act.dy;
 		if (nx < 0 || nx >= int(pc.sim_width) || ny < 0 || ny >= int(pc.sim_height)) {
+			target_ids[i] = 0xFFFFFFFFu;
 			continue;
 		}
 		uint target_id = uint(ny) * pc.sim_width + uint(nx);
-		next_cells[target_id] = act.target_material | (1u << 8u);
-		if (target_id != center_id) {
-			local_changed++;
+		target_ids[i] = target_id;
+		GpuCell orig_target = (target_id == center_id) ? saved_center : next_cells[target_id];
+		uint new_mat = cell_mat(orig_target);
+		float new_a0 = cell_attr(orig_target, 0u);
+		float new_a1 = cell_attr(orig_target, 1u);
+		float new_a2 = cell_attr(orig_target, 2u);
+
+		if (act.target_material != 255u) {
+			if (act.target_material != new_mat) {
+				new_mat = act.target_material;
+				GpuMaterial def_m = materials[new_mat];
+				new_a0 = clamp(def_m.default_attr[0], attr_meta[0].min_val, attr_meta[0].max_val);
+				new_a1 = clamp(def_m.default_attr[1], attr_meta[1].min_val, attr_meta[1].max_val);
+				new_a2 = clamp(def_m.default_attr[2], attr_meta[2].min_val, attr_meta[2].max_val);
+			}
+		}
+
+		for (uint a = 0u; a < 3u; ++a) {
+			GpuAttrAction aa = act.attr_actions[a];
+			if (aa.expr_count == 0u)
+				continue;
+			float cur_s = (a == 0u) ? new_a0 : ((a == 1u) ? new_a1 : new_a2);
+			uint op_start = aa.expr_start;
+			uint op_count = aa.expr_count;
+			float estack[16];
+			int esp = 0;
+			float cur_c = cell_attr(saved_center, a);
+			float min_v = attr_meta[a].min_val;
+			float max_v = attr_meta[a].max_val;
+
+			for (uint op_idx = 0u; op_idx < op_count; ++op_idx) {
+				GpuExprOp op = expr_ops[op_start + op_idx];
+				if (op.type == 1u) {  // PushConst
+					if (esp < 16)
+						estack[esp++] = op.val;
+				} else if (op.type == 2u) {	 // LoadSelf
+					if (esp < 16)
+						estack[esp++] = cur_s;
+				} else if (op.type == 3u) {	 // LoadCenter
+					if (esp < 16)
+						estack[esp++] = cur_c;
+				} else if (op.type == 4u) {	 // LoadCellAttr
+					int sx = int(cx) + op.dx;
+					int sy = int(cy) + op.dy;
+					uint target_a = uint(round(op.val));
+					if (target_a >= 3u)
+						target_a = a;
+					float val = attr_meta[target_a].default_val;
+					if (op.dx == 0 && op.dy == 0) {
+						val = cell_attr(saved_center, target_a);
+					} else if (sx >= 0 && sx < int(pc.sim_width) && sy >= 0 && sy < int(pc.sim_height)) {
+						uint src_id = uint(sy) * pc.sim_width + uint(sx);
+						val = cell_attr(next_cells[src_id], target_a);
+					}
+					if (esp < 16)
+						estack[esp++] = val;
+				} else if (op.type == 5u) {	 // LoadMin
+					if (esp < 16)
+						estack[esp++] = min_v;
+				} else if (op.type == 6u) {	 // LoadMax
+					if (esp < 16)
+						estack[esp++] = max_v;
+				} else if (op.type == 7u) {	 // Add
+					if (esp >= 2) {
+						float b = estack[--esp];
+						estack[esp - 1] += b;
+					}
+				} else if (op.type == 8u) {	 // Sub
+					if (esp >= 2) {
+						float b = estack[--esp];
+						estack[esp - 1] -= b;
+					}
+				} else if (op.type == 9u) {	 // Mul
+					if (esp >= 2) {
+						float b = estack[--esp];
+						estack[esp - 1] *= b;
+					}
+				} else if (op.type == 10u) {  // Div
+					if (esp >= 2) {
+						float b = estack[--esp];
+						estack[esp - 1] = (b != 0.0) ? (estack[esp - 1] / b) : 0.0;
+					}
+				} else if (op.type == 11u) {  // Mod
+					if (esp >= 2) {
+						float b = estack[--esp];
+						estack[esp - 1] = (b != 0.0) ? mod(estack[esp - 1], b) : 0.0;
+					}
+				} else if (op.type == 12u) {  // Pow
+					if (esp >= 2) {
+						float b = estack[--esp];
+						float b_base = estack[esp - 1];
+						estack[esp - 1] = (b_base >= 0.0 || fract(b) == 0.0) ? pow(b_base, b) : 0.0;
+					}
+				} else if (op.type == 13u) {  // Neg
+					if (esp >= 1) {
+						estack[esp - 1] = -estack[esp - 1];
+					}
+				} else if (op.type == 14u) {  // Abs
+					if (esp >= 1) {
+						estack[esp - 1] = abs(estack[esp - 1]);
+					}
+				} else if (op.type == 15u) {  // Min
+					if (esp >= 2) {
+						float b = estack[--esp];
+						estack[esp - 1] = min(estack[esp - 1], b);
+					}
+				} else if (op.type == 16u) {  // Max
+					if (esp >= 2) {
+						float b = estack[--esp];
+						estack[esp - 1] = max(estack[esp - 1], b);
+					}
+				} else if (op.type == 17u) {  // Clamp
+					if (esp >= 3) {
+						float hi = estack[--esp];
+						float lo = estack[--esp];
+						float x_v = estack[--esp];
+						estack[esp++] = clamp(x_v, lo, hi);
+					}
+				} else if (op.type == 18u) {  // Floor
+					if (esp >= 1) {
+						estack[esp - 1] = floor(estack[esp - 1]);
+					}
+				} else if (op.type == 19u) {  // Ceil
+					if (esp >= 1) {
+						estack[esp - 1] = ceil(estack[esp - 1]);
+					}
+				} else if (op.type == 20u) {  // Round
+					if (esp >= 1) {
+						estack[esp - 1] = round(estack[esp - 1]);
+					}
+				}
+			}
+			if (esp > 0) {
+				cur_s = clamp(estack[esp - 1], min_v, max_v);
+			}
+			if (a == 0u)
+				new_a0 = cur_s;
+			else if (a == 1u)
+				new_a1 = cur_s;
+			else
+				new_a2 = cur_s;
+		}
+
+		uint upd_val = (act.updated != 0u) ? 1u : cell_updated(next_cells[target_id]);
+		written_cells[i] = pack_cell(new_mat, upd_val, new_a0, new_a1, new_a2);
+	}
+
+	for (uint i = 0u; i < num_written; ++i) {
+		uint tid = target_ids[i];
+		if (tid != 0xFFFFFFFFu) {
+			next_cells[tid] = written_cells[i];
+			if (tid != center_id) {
+				local_changed++;
+			}
 		}
 	}
 	return true;
@@ -143,12 +538,16 @@ void main() {
 		}
 
 		uint idx = cy * pc.sim_width + cx;
-		uint next_val = next_cells[idx];
-		uint mat_id = next_val & 0xFFu;
+		GpuCell n_cell = next_cells[idx];
+		uint mat_id = cell_mat(n_cell);
+		float a0 = cell_attr(n_cell, 0u);
+		float a1 = cell_attr(n_cell, 1u);
+		float a2 = cell_attr(n_cell, 2u);
 
-		current_cells[idx] = mat_id;
+		GpuCell cur = pack_cell(mat_id, 0u, a0, a1, a2);
+		current_cells[idx] = cur;
 
-		display_pixels[idx] = materials[mat_id].color;
+		display_pixels[idx] = compute_cell_color(mat_id, cur);
 		return;
 	}
 
@@ -171,8 +570,9 @@ void main() {
 		}
 
 		uint idx = cy * pc.sim_width + cx;
-		uint mat_id = current_cells[idx] & 0xFFu;
-		display_pixels[idx] = materials[mat_id].color;
+		GpuCell cur = current_cells[idx];
+		uint mat_id = cell_mat(cur);
+		display_pixels[idx] = compute_cell_color(mat_id, cur);
 		return;
 	}
 
@@ -197,11 +597,12 @@ void main() {
 	}
 
 	uint center_id = cy * pc.sim_width + cx;
-	if (((next_cells[center_id] >> 8u) & 1u) != 0u) {
+	if (cell_updated(next_cells[center_id]) != 0u) {
 		return;
 	}
 
-	uint center_mat = current_cells[center_id] & 0xFFu;
+	GpuCell center_cell = next_cells[center_id];
+	uint center_mat = cell_mat(current_cells[center_id]);
 	GpuMaterial mat = materials[center_mat];
 	if (mat.rule_count == 0u) {
 		return;
@@ -222,6 +623,9 @@ void main() {
 		uint num_variants = rule.variant_count;
 		bool match_found = false;
 
+		bool multi_apply = (rule.flags & 1u) != 0u;
+		bool continue_to_next = (rule.flags & 2u) != 0u;
+
 		if (num_variants == 1u) {
 			if (try_apply_variant(rule.variant_start, cx, cy, center_id, local_changed)) {
 				match_found = true;
@@ -232,7 +636,9 @@ void main() {
 				uint var_idx = rule.variant_start + ((start_id + step) & 1u);
 				if (try_apply_variant(var_idx, cx, cy, center_id, local_changed)) {
 					match_found = true;
-					break;
+					if (!multi_apply) {
+						break;
+					}
 				}
 			}
 		} else if (num_variants == 4u) {
@@ -243,7 +649,9 @@ void main() {
 				uint var_idx = rule.variant_start + v_sub;
 				if (try_apply_variant(var_idx, cx, cy, center_id, local_changed)) {
 					match_found = true;
-					break;
+					if (!multi_apply) {
+						break;
+					}
 				}
 			}
 		} else {
@@ -252,13 +660,17 @@ void main() {
 				uint var_idx = rule.variant_start + ((start_id + step) % num_variants);
 				if (try_apply_variant(var_idx, cx, cy, center_id, local_changed)) {
 					match_found = true;
-					break;
+					if (!multi_apply) {
+						break;
+					}
 				}
 			}
 		}
 
 		if (match_found) {
-			break;
+			if (!continue_to_next) {
+				break;
+			}
 		}
 	}
 

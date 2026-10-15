@@ -5,6 +5,21 @@
 #include <unordered_map>
 #include <vector>
 
+enum class AttributeType : uint8_t {
+	Int = 0,
+	Float = 1
+};
+
+struct AttributeDefinition {
+	std::string name;
+	AttributeType type = AttributeType::Int;
+	double min_val = 0.0;
+	double max_val = 255.0;
+	double default_val = 0.0;
+};
+
+#include "gradient.hpp"
+
 struct SetMetadata {
 	std::string name;
 	std::string author;
@@ -22,6 +37,8 @@ struct SetMetadata {
 	uint32_t forked_from_version = 0;
 	bool is_online = false;
 	std::unordered_map<std::string, std::string> shortcuts;
+	std::vector<AttributeDefinition> attributes;
+	ColorGradient heatmap_gradient = ColorGradient::default_heatmap();
 };
 
 class SetManager {
@@ -47,7 +64,9 @@ public:
 	static std::string compute_set_hash(const std::string& set_name);
 	static bool is_set_online(const std::string& set_name);
 	static void mark_set_online(const std::string& set_name, bool online);
-	static void set_workshop_info(const std::string& set_name, const std::string& workshop_id, const std::string& workshop_hash, uint32_t version = 1, const std::string& author = "");
+	static void set_workshop_info(const std::string& set_name, const std::string& workshop_id,
+								  const std::string& workshop_hash, uint32_t version = 1,
+								  const std::string& author = "");
 	static void clear_workshop_info(const std::string& set_name);
 
 	static std::string get_current_material_shortcut(const std::string& mat_name);

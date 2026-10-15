@@ -4,9 +4,71 @@
 
 #include <array>
 #include <bitset>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
+
+enum class CompareOp : uint8_t { None = 0, Equal, NotEqual, Less, LessOrEqual, Greater, GreaterOrEqual };
+
+enum class CompareTarget : uint8_t { CenterCell = 0, Constant };
+
+struct AttributeCondition {
+	uint8_t attr_index = 0;
+	CompareOp op = CompareOp::None;
+	CompareTarget target = CompareTarget::CenterCell;
+	double const_value = 0.0;
+
+	bool operator==(const AttributeCondition& other) const {
+		return attr_index == other.attr_index && op == other.op && target == other.target &&
+			   const_value == other.const_value;
+	}
+};
+
+enum class ExprOpType : uint8_t {
+	PushConst = 1,
+	LoadSelf = 2,
+	LoadCenter = 3,
+	LoadCellAttr = 4,
+	LoadMin = 5,
+	LoadMax = 6,
+	Add = 7,
+	Sub = 8,
+	Mul = 9,
+	Div = 10,
+	Mod = 11,
+	Pow = 12,
+	Neg = 13,
+	Abs = 14,
+	Min = 15,
+	Max = 16,
+	Clamp = 17,
+	Floor = 18,
+	Ceil = 19,
+	Round = 20
+};
+
+struct ExprOp {
+	ExprOpType type = ExprOpType::PushConst;
+	int8_t dx = 0;
+	int8_t dy = 0;
+	uint8_t attr = 0;
+	float val = 0.0f;
+
+	bool operator==(const ExprOp& other) const {
+		return type == other.type && dx == other.dx && dy == other.dy && attr == other.attr && val == other.val;
+	}
+};
+
+struct ThenCellAction {
+	std::array<std::string, 3> attr_exprs = {"", "", ""};
+	bool updated = true;
+
+	bool operator==(const ThenCellAction& other) const {
+		return attr_exprs == other.attr_exprs && updated == other.updated;
+	}
+	bool operator!=(const ThenCellAction& other) const { return !(*this == other); }
+};
 
 struct SymmetryFlags {
 	bool flip_x = false;
@@ -20,9 +82,14 @@ struct RuleDefinition {
 	int8_t min_dy = -1;
 	int8_t max_dy = 1;
 	std::vector<std::vector<uint8_t>> when;
+	std::vector<std::vector<AttributeCondition>> when_attrs;
 	std::vector<uint8_t> then;
+	std::vector<ThenCellAction> then_actions;
 	SymmetryFlags symmetry;
 	float chance = 100.0f;
+	bool enabled = true;
+	bool multi_apply = false;
+	bool continue_to_next = false;
 
 	RuleDefinition() { init_default(0); }
 
@@ -32,10 +99,15 @@ struct RuleDefinition {
 		min_dy = -1;
 		max_dy = 1;
 		when.assign(9, std::vector<uint8_t>{});
+		when_attrs.assign(9, std::vector<AttributeCondition>{});
 		then.assign(9, 255);
+		then_actions.assign(9, ThenCellAction{});
 		when[4] = {center_id};
 		chance = 100.0f;
 		symmetry = SymmetryFlags{};
+		enabled = true;
+		multi_apply = false;
+		continue_to_next = false;
 	}
 
 	int width() const { return max_dx - min_dx + 1; }
@@ -75,11 +147,20 @@ struct RuleReference {
 	}
 };
 
+#include "gradient.hpp"
+
+struct AttributeColorModifier {
+	bool enabled = false;
+	ColorGradient gradient;
+};
+
 struct MaterialDefinition {
 	std::string name;
 	uint8_t id = 0;
 	uint8_t inherits_from = 255;
 	std::array<uint8_t, 3> color = {0, 0, 0};
+	std::array<double, 3> default_attributes = {0.0, 0.0, 0.0};
+	std::array<AttributeColorModifier, 3> attr_color_modifiers = {};
 	std::vector<RuleDefinition> rules;
 	std::vector<RuleReference> rule_order;
 	size_t last_synced_parent_rule_count = 0;
@@ -93,6 +174,7 @@ struct ConditionCheck {
 	int8_t dx = 0;
 	int8_t dy = 0;
 	std::bitset<256> allowed;
+	std::vector<AttributeCondition> attr_conditions;
 };
 
 struct OutputAction {
@@ -100,6 +182,8 @@ struct OutputAction {
 	int8_t dx = 0;
 	int8_t dy = 0;
 	uint8_t target_material = 255;
+	std::array<std::vector<ExprOp>, 3> attr_expr_ops = {};
+	bool updated = true;
 };
 
 struct CompiledRuleVariant {
@@ -109,17 +193,30 @@ struct CompiledRuleVariant {
 	int8_t max_dx = 0;
 	int8_t min_dy = 0;
 	int8_t max_dy = 0;
+	bool has_attribute_logic = false;
 };
 
 struct CompiledRule {
 	std::vector<CompiledRuleVariant> variants;
 	float chance = 1.0f;
+	bool multi_apply = false;
+	bool continue_to_next = false;
+};
+
+struct RuntimeColorMod {
+	uint8_t attr_index = 0;
+	float attr_min = 0.0f;
+	float attr_max = 1.0f;
+	ColorGradient gradient;
 };
 
 struct RuntimeMaterial {
 	uint8_t id = 0;
 	uint32_t packed_color = 0;
 	std::vector<CompiledRule> rules;
+	bool has_color_modifiers = false;
+	std::array<uint8_t, 3> base_color = {0, 0, 0};
+	std::vector<RuntimeColorMod> color_modifiers;
 };
 
 class MaterialManager {
@@ -158,3 +255,10 @@ private:
 	static MaterialDefinition default_empty;
 	static RuntimeMaterial default_runtime_empty;
 };
+
+bool parse_and_compile_expr(const std::string& expr, uint8_t target_attr, std::vector<ExprOp>& out_ops,
+							std::string* error_out = nullptr, int cell_dx = 0, int cell_dy = 0);
+std::string transform_expr_coords(const std::string& expr, int mode /* 0: flip_x, 1: flip_y, 2: rot_cw, 3: rot_ccw */);
+std::string shift_expr_coords(const std::string& expr, int delta_x, int delta_y);
+float eval_expr(const std::vector<ExprOp>& ops, float self_val, float center_val, float min_val, float max_val,
+				uint8_t cur_attr, const std::function<float(int8_t dx, int8_t dy, uint8_t attr)>& get_cell_attr);

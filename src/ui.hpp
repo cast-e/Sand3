@@ -7,11 +7,13 @@
 #include <string>
 #include <vector>
 
+#include "gradient.hpp"
 #include "grid.hpp"
+#include "icon_manager.hpp"
 #include "save_manager.hpp"
 
 enum class BrushShape : int { Square, Circle, Size };
-enum class ToolMode : int { Brush, Select };
+enum class ToolMode : int { Brush, Select, Attribute };
 enum class ResizeHandle : int { None, TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left };
 enum class SelectionState : int { None, Selecting, Selected, Moving, Pasting, Resizing };
 
@@ -64,10 +66,13 @@ public:
 
 	static const ImVec4* get_default_colors();
 	static void reset_theme_colors();
+	static float get_spacing(float offset = 0.0f);
+	static void apply_theme_style(ImGuiStyle& style, const struct UIConfig& cfg);
 
 	static BrushShape get_brush_shape() { return brush_shape; }
 	static uint8_t get_selected_id() { return selected_id; }
 	static void set_selected_id(uint8_t id) { selected_id = id; }
+	static bool brush_overwrite_attributes;
 
 	static ToolMode get_tool_mode() { return current_tool; }
 	static void set_tool_mode(ToolMode mode);
@@ -89,6 +94,9 @@ public:
 	static void copy_selection();
 	static void cut_selection();
 	static void fill_selection(uint8_t id);
+	static void flood_fill(uint32_t start_x, uint32_t start_y, uint8_t fill_mat);
+	static void flood_fill_attribute(uint32_t start_x, uint32_t start_y, uint8_t attr_idx, float val,
+									bool set_exact);
 	static void rotate_selection(bool clockwise = true);
 	static void paste_clipboard();
 	static void clear_clipboard();
@@ -103,6 +111,11 @@ public:
 	static bool selectable_with_color(const char* label, const ImVec4& color, bool selected,
 									  ImGuiSelectableFlags flags = 0, const ImVec2& size = ImVec2(0, 0),
 									  bool show_checkbox = false);
+	static bool custom_checkbox(const char* label, bool* val, IconID icon_id = IconID::Count,
+								const char* tooltip = nullptr, const ImVec2& size = ImVec2(0.0f, 0.0f));
+	static bool gradient_editor(const char* label, ColorGradient& gradient, float min_val = 0.0f,
+								float max_val = 1.0f, float width = 0.0f);
+	static void render_floating_toolbar();
 
 	static void refresh_workshop_items();
 	static void remove_workshop_item(const std::string& item_id);
@@ -135,7 +148,6 @@ private:
 	static void render_theme_editor();
 	static void render_modals();
 	static void render_mouse_overlay();
-	static void render_selection_controls();
 
 	static void handle_zoom_and_pan(ImGuiIO& io);
 	static void handle_keyboard_shortcuts(ImGuiIO& io);
@@ -182,6 +194,9 @@ private:
 	static float target_pan_y;
 
 	static ToolMode current_tool;
+	static int attr_tool_target_index;
+	static int attr_tool_mode;
+	static float attr_tool_value;
 	static SelectionState selection_state;
 	static ResizeHandle active_resize_handle;
 	static SelectionBox selection_box;

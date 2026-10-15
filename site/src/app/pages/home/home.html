@@ -147,6 +147,19 @@
             Materials can also inherit basic rules from parent materials (e.g. all liquids inheriting standard gravity
             flow, with custom rules added on top).
           </p>
+
+          <h4 class="mt-4">
+            <img src="/icons/cog.png" class="silk-icon" alt="Equations" />
+            Continuous Attributes & Equations
+          </h4>
+          <p class="text-muted">
+            Sand3 supports up to 3 continuous physical attributes (e.g. Temperature, Pressure). Reaction rules can dynamically calculate new attribute values with an intuitive mathematical equation workflow:
+          </p>
+          <ul class="text-muted small">
+            <li><strong>Click-to-Add Cell References</strong>: With the THEN cell popup open, click any cell in either the WHEN or THEN grid to append its position badge (e.g. <code>[0, 1]</code>) into the equation.</li>
+            <li><strong>Uneditable Badges & Relative Mode</strong>: Cell references appear as uneditable badges directly inside the equation text. Badges default to absolute positions that remain fixed when copying cells. <strong>Right-click</strong> any badge directly inside the box to toggle it into relative mode (<code>~[dx, dy]</code>), which shifts dynamically with cell copy offsets. Shift-click to remove.</li>
+            <li><strong>Direct Keyboard Input</strong>: Click the equation box to type mathematical operators and expressions (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>, <code>( )</code>, <code>min()</code>, <code>max()</code>, <code>clamp()</code>, <code>abs()</code>) directly on your keyboard.</li>
+          </ul>
         </div>
       </section>
 

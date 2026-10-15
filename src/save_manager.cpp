@@ -188,13 +188,13 @@ bool SaveManager::read_chunked_data(std::ifstream& file, uint32_t num_blocks, si
 }
 
 std::string SaveManager::get_saves_directory(const std::string& current_set) {
-	std::string dir = SETS_DIRECTORY + current_set + "/saves/";
-	std::filesystem::create_directories(dir);
-	return dir;
+	return std::string(SETS_DIRECTORY) + current_set + "/saves/";
 }
 
 bool SaveManager::save_to_file(const std::string& name, const std::string& current_set) {
 	std::string saves_dir = get_saves_directory(current_set);
+	std::error_code ec;
+	std::filesystem::create_directories(saves_dir, ec);
 	std::string filename = name;
 	if (filename.length() < 5 || filename.substr(filename.length() - 5) != ".save") {
 		filename += ".save";
@@ -231,6 +231,8 @@ void SaveManager::save_to_file_async(const std::string& name, const std::string&
 	Window::increment_busy();
 
 	std::string saves_dir = get_saves_directory(current_set);
+	std::error_code ec;
+	std::filesystem::create_directories(saves_dir, ec);
 	std::string filename = name;
 	if (filename.length() < 5 || filename.substr(filename.length() - 5) != ".save") {
 		filename += ".save";
@@ -367,7 +369,7 @@ void SaveManager::load_from_file_async(const std::string& path_or_name, const st
 	}
 
 	std::thread([filepath, current_set, placement, callback]() {
-		std::string loaded_set = "";
+		std::string loaded_set;
 		uint32_t saved_width = 0, saved_height = 0;
 		std::vector<uint8_t> saved_cells;
 		bool read_ok = false;
@@ -561,6 +563,8 @@ void SaveManager::set_save_workshop_info(const std::string& name_or_filename, co
 		filepath += ".save";
 	}
 	std::string meta_path = filepath + ".ini";
+	std::error_code ec;
+	std::filesystem::create_directories(std::filesystem::path(meta_path).parent_path(), ec);
 	std::ofstream out(meta_path);
 	if (out.is_open()) {
 		out << "[Workshop]\n";
@@ -600,6 +604,8 @@ void SaveManager::set_stamp_workshop_info(const std::string& name_or_filename, c
 		filepath += ".stamp";
 	}
 	std::string meta_path = filepath + ".ini";
+	std::error_code ec;
+	std::filesystem::create_directories(std::filesystem::path(meta_path).parent_path(), ec);
 	std::ofstream out(meta_path);
 	if (out.is_open()) {
 		out << "[Workshop]\n";
@@ -658,6 +664,8 @@ bool SaveManager::delete_save_file(const std::string& filename, const std::strin
 bool SaveManager::duplicate_save_file(const std::string& filename, const std::string& new_name,
 									  const std::string& current_set) {
 	std::string dir = get_saves_directory(current_set);
+	std::error_code ec;
+	std::filesystem::create_directories(dir, ec);
 	std::string old_path = dir + filename;
 	std::string new_filename = new_name;
 	if (new_filename.length() < 5 || new_filename.substr(new_filename.length() - 5) != ".save") {
@@ -685,6 +693,8 @@ bool SaveManager::migrate_save_file(const std::string& filename, const std::stri
 	in.close();
 
 	std::string dst_dir = get_saves_directory(target_set);
+	std::error_code ec;
+	std::filesystem::create_directories(dst_dir, ec);
 	std::string dst_path = dst_dir + filename;
 	std::ofstream out(dst_path, std::ios::binary);
 	if (!out.is_open())
@@ -734,6 +744,8 @@ bool SaveManager::fork_save_to_set(const std::string& src_filepath, const std::s
 	in.close();
 
 	std::string dst_dir = get_saves_directory(target_set);
+	std::error_code ec;
+	std::filesystem::create_directories(dst_dir, ec);
 	std::string dst_name = new_name;
 	if (dst_name.length() < 5 || dst_name.substr(dst_name.length() - 5) != ".save") {
 		dst_name += ".save";
@@ -772,6 +784,8 @@ bool SaveManager::save_stamp_to_file(const std::string& name, const std::string&
 		return false;
 	}
 	std::string saves_dir = get_saves_directory(current_set);
+	std::error_code ec;
+	std::filesystem::create_directories(saves_dir, ec);
 	std::string filename = name;
 	if (filename.length() < 6 || filename.substr(filename.length() - 6) != ".stamp") {
 		filename += ".stamp";
@@ -801,6 +815,8 @@ void SaveManager::save_stamp_to_file_async(const std::string& name, const std::s
 	Window::increment_busy();
 
 	std::string saves_dir = get_saves_directory(current_set);
+	std::error_code ec;
+	std::filesystem::create_directories(saves_dir, ec);
 	std::string filename = name;
 	if (filename.length() < 6 || filename.substr(filename.length() - 6) != ".stamp") {
 		filename += ".stamp";
@@ -1033,6 +1049,8 @@ bool SaveManager::migrate_stamp_file(const std::string& filename, const std::str
 	in.close();
 
 	std::string dst_dir = get_saves_directory(target_set);
+	std::error_code ec;
+	std::filesystem::create_directories(dst_dir, ec);
 	std::string dst_path = dst_dir + filename;
 	std::ofstream out(dst_path, std::ios::binary);
 	if (!out.is_open())
@@ -1082,6 +1100,8 @@ bool SaveManager::fork_stamp_to_set(const std::string& src_filepath, const std::
 	in.close();
 
 	std::string dst_dir = get_saves_directory(target_set);
+	std::error_code ec;
+	std::filesystem::create_directories(dst_dir, ec);
 	std::string dst_name = new_name;
 	if (dst_name.length() < 6 || dst_name.substr(dst_name.length() - 6) != ".stamp") {
 		dst_name += ".stamp";

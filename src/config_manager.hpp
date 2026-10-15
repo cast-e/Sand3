@@ -17,18 +17,50 @@ struct UIConfig {
 	int compact_width = 280;
 	int compact_height = 400;
 	float font_size = 16.0f;
-	float ui_scale = 1.0f;
 	bool show_fps = true;
 	bool show_active_cells = true;
 	bool show_simulation_status = true;
-	float window_rounding = 6.0f;
-	float frame_rounding = 4.0f;
 	int button_size = 32;
 	int icon_size = 16;
 	int material_list_height = 150;
+	int set_list_height = 200;
+	int save_list_height = 180;
+	int stamp_list_height = 180;
 	ImVec4 background_color = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
 	ImVec4 selection_box_color = ImVec4(80.0f / 255.0f, 200.0f / 255.0f, 1.0f, 1.0f);
 	ImVec4 selection_box_fill = ImVec4(50.0f / 255.0f, 150.0f / 255.0f, 1.0f, 30.0f / 255.0f);
+
+	// Unified spacing system (base spacing +/- offsets)
+	float base_spacing = 6.0f;
+	float window_padding_x = 12.0f;
+	float window_padding_y = 12.0f;
+	float frame_padding_x = 8.0f;
+	float frame_padding_y = 5.0f;
+	float item_spacing_x = 8.0f;
+	float item_spacing_y = 6.0f;
+	float item_inner_spacing_x = 6.0f;
+	float item_inner_spacing_y = 6.0f;
+	float cell_padding_x = 4.0f;
+	float cell_padding_y = 2.0f;
+	float indent_spacing = 21.0f;
+	float scrollbar_size = 14.0f;
+	float grab_min_size = 10.0f;
+
+	// Rounding constants
+	float window_rounding = 6.0f;
+	float child_rounding = 4.0f;
+	float frame_rounding = 4.0f;
+	float popup_rounding = 4.0f;
+	float scrollbar_rounding = 4.0f;
+	float grab_rounding = 4.0f;
+	float tab_rounding = 4.0f;
+
+	// Border constants
+	float window_border_size = 1.0f;
+	float child_border_size = 1.0f;
+	float popup_border_size = 1.0f;
+	float frame_border_size = 0.0f;
+	float tab_border_size = 0.0f;
 };
 
 struct Config {
@@ -49,9 +81,9 @@ struct Config {
 	UIConfig ui;
 
 	struct WorkshopConfig {
-		std::string url = "";
-		std::string token = "";
-		std::string username = "";
+		std::string url;
+		std::string token;
+		std::string username;
 	} workshop;
 };
 

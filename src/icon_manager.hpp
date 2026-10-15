@@ -40,6 +40,17 @@ enum class IconID {
 	Lock,
 	FlipHorizontal,
 	FlipVertical,
+	MultiApply,
+	ChartCurve,
+	ArrowInOut,
+	Monitor,
+	Lightning,
+	Clock,
+	ColorWheel,
+	Photo,
+	Zoom,
+	Brick,
+	Cog,
 	Count
 };
 

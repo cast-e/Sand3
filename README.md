@@ -21,6 +21,7 @@ Fast cellular automaton with fully customizable materials and rules.
 - **Customizable Simulation Grid Size**: Dynamic canvas sizing from 128x128 up to 4096x4096 (over 16M cells) with quick presets (256x256, 512x512, 1024x1024, 1536x1536, 2048x2048) and content preservation (crop/pad).
 - **Hardware-Accelerated GPU Simulation**: Ultra-fast simulation computed with Vulkan compute shaders for high FPS on massive canvases.
 - **Optimized Multithreaded CPU Processing**: High-performance multi-threaded CPU backend when Vulkan GPU compute is not in use.
+- **Continuous Attributes & Attribute Equations**: Simulate heat, pressure, and charge with per-cell float attributes, visual heatmaps, dynamic color modifiers, and an intuitive badge-based equation editor with relative and absolute cell references.
 - **Material Editor**: Create up to 255 materials with full RGB colors, rule inheritance, and custom reaction behaviors.
 - **Integrated Community Workshop**: Browse, download, search, publish, and fork Sets, Saves, and Stamps with version history, ratings, and automatic set dependency resolution.
 - **Selection & Transform Tools**: Rectangular selection to move, copy, cut, paste, resize, flip horizontally/vertically, and rotate with transparent pasting.

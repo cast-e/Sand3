@@ -211,6 +211,9 @@ void ShortcutManager::init() {
 	if (s_initialized)
 		return;
 
+	s_shortcuts.clear();
+	s_shortcuts.resize(static_cast<size_t>(ShortcutAction::Count));
+
 	auto add = [](ShortcutAction act, const std::string& id, const std::string& name, const std::string& cat,
 				  const std::string& def) {
 		ShortcutDef s;
@@ -221,10 +224,11 @@ void ShortcutManager::init() {
 		s.default_key = def;
 		s.current_key = def;
 		parse_key_combo(def, s.key, s.ctrl, s.shift, s.alt);
-		s_shortcuts.push_back(s);
+		size_t idx = static_cast<size_t>(act);
+		if (idx < s_shortcuts.size()) {
+			s_shortcuts[idx] = s;
+		}
 	};
-
-	s_shortcuts.clear();
 
 	add(ShortcutAction::ToggleSimulation, "toggle_simulation", "Toggle Simulation", "Simulation", "Space");
 	add(ShortcutAction::StepFrame, "step_frame", "Step Frame (Paused)", "Simulation", "F");
@@ -246,7 +250,7 @@ void ShortcutManager::init() {
 	add(ShortcutAction::QuickSelect7, "quick_select_7", "Select Material Slot 7", "General", "7");
 	add(ShortcutAction::QuickSelect8, "quick_select_8", "Select Material Slot 8", "General", "8");
 	add(ShortcutAction::QuickSelect9, "quick_select_9", "Select Material Slot 9", "General", "9");
-	add(ShortcutAction::ToggleCompact, "toggle_compact", "Toggle Compact UI", "General", "V");
+	add(ShortcutAction::ToggleCompact, "toggle_compact", "Toggle Compact UI", "General", "G");
 	add(ShortcutAction::Undo, "undo", "Undo Last Action", "General", "Ctrl+Z");
 	add(ShortcutAction::Redo, "redo", "Redo Last Action", "General", "Ctrl+Y");
 	add(ShortcutAction::Fullscreen, "fullscreen", "Toggle Fullscreen", "General", "F11");
@@ -261,9 +265,17 @@ void ShortcutManager::init() {
 	add(ShortcutAction::Delete, "delete", "Delete Selected Cells", "Tools & Selection", "Delete");
 	add(ShortcutAction::RotateCW, "rotate_cw", "Rotate 90° Clockwise", "Tools & Selection", "Q");
 	add(ShortcutAction::RotateCCW, "rotate_ccw", "Rotate 90° Counter-Clockwise", "Tools & Selection", "E");
-
 	add(ShortcutAction::BrushShape, "brush_shape", "Toggle Brush Shape", "Brush", "T");
-	add(ShortcutAction::ToggleTransparent, "toggle_transparent", "Toggle Transparent Selection", "Tools & Selection", "Alt+T");
+	add(ShortcutAction::ToggleTransparent, "toggle_transparent", "Toggle Transparent Selection", "Tools & Selection",
+		"Alt+T");
+
+	add(ShortcutAction::ToolAttribute, "tool_attribute", "Switch to Attribute Tool", "Tools & Selection", "V");
+	add(ShortcutAction::IncreaseAttrValue, "increase_attr_value", "Increase Attribute Brush Value", "Tools & Selection",
+		"]");
+	add(ShortcutAction::DecreaseAttrValue, "decrease_attr_value", "Decrease Attribute Brush Value", "Tools & Selection",
+		"[");
+	add(ShortcutAction::CycleDisplayMode, "cycle_display_mode", "Cycle Display Mode (Normal / Heatmaps)", "General",
+		"H");
 
 	s_initialized = true;
 }

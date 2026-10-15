@@ -152,24 +152,76 @@ void ConfigManager::load() {
 						config.ui.compact_height = std::stoi(val);
 					else if (key == "font_size")
 						config.ui.font_size = std::stof(val);
-					else if (key == "ui_scale")
-						config.ui.ui_scale = std::stof(val);
 					else if (key == "show_fps")
 						config.ui.show_fps = (val == "true" || val == "1");
 					else if (key == "show_active_cells")
 						config.ui.show_active_cells = (val == "true" || val == "1");
 					else if (key == "show_simulation_status")
 						config.ui.show_simulation_status = (val == "true" || val == "1");
+					else if (key == "base_spacing")
+						config.ui.base_spacing = std::stof(val);
+					else if (key == "window_padding_x")
+						config.ui.window_padding_x = std::stof(val);
+					else if (key == "window_padding_y")
+						config.ui.window_padding_y = std::stof(val);
+					else if (key == "frame_padding_x")
+						config.ui.frame_padding_x = std::stof(val);
+					else if (key == "frame_padding_y")
+						config.ui.frame_padding_y = std::stof(val);
+					else if (key == "item_spacing_x")
+						config.ui.item_spacing_x = std::stof(val);
+					else if (key == "item_spacing_y")
+						config.ui.item_spacing_y = std::stof(val);
+					else if (key == "item_inner_spacing_x")
+						config.ui.item_inner_spacing_x = std::stof(val);
+					else if (key == "item_inner_spacing_y")
+						config.ui.item_inner_spacing_y = std::stof(val);
+					else if (key == "cell_padding_x")
+						config.ui.cell_padding_x = std::stof(val);
+					else if (key == "cell_padding_y")
+						config.ui.cell_padding_y = std::stof(val);
+					else if (key == "indent_spacing")
+						config.ui.indent_spacing = std::stof(val);
+					else if (key == "scrollbar_size")
+						config.ui.scrollbar_size = std::stof(val);
+					else if (key == "grab_min_size")
+						config.ui.grab_min_size = std::stof(val);
 					else if (key == "window_rounding")
 						config.ui.window_rounding = std::stof(val);
+					else if (key == "child_rounding")
+						config.ui.child_rounding = std::stof(val);
 					else if (key == "frame_rounding")
 						config.ui.frame_rounding = std::stof(val);
+					else if (key == "popup_rounding")
+						config.ui.popup_rounding = std::stof(val);
+					else if (key == "scrollbar_rounding")
+						config.ui.scrollbar_rounding = std::stof(val);
+					else if (key == "grab_rounding")
+						config.ui.grab_rounding = std::stof(val);
+					else if (key == "tab_rounding")
+						config.ui.tab_rounding = std::stof(val);
+					else if (key == "window_border_size")
+						config.ui.window_border_size = std::stof(val);
+					else if (key == "child_border_size")
+						config.ui.child_border_size = std::stof(val);
+					else if (key == "popup_border_size")
+						config.ui.popup_border_size = std::stof(val);
+					else if (key == "frame_border_size")
+						config.ui.frame_border_size = std::stof(val);
+					else if (key == "tab_border_size")
+						config.ui.tab_border_size = std::stof(val);
 					else if (key == "button_size")
 						config.ui.button_size = std::stoi(val);
 					else if (key == "icon_size")
 						config.ui.icon_size = std::stoi(val);
 					else if (key == "material_list_height")
 						config.ui.material_list_height = std::stoi(val);
+					else if (key == "set_list_height")
+						config.ui.set_list_height = std::stoi(val);
+					else if (key == "save_list_height")
+						config.ui.save_list_height = std::stoi(val);
+					else if (key == "stamp_list_height")
+						config.ui.stamp_list_height = std::stoi(val);
 					else if (key == "background_color")
 						parse_color_string(val, config.ui.background_color);
 					else if (key == "selection_box_color" || key == "selection_box_border")
@@ -322,8 +374,6 @@ void ConfigManager::save() {
 		ui_lines.push_back("compact_height = " + std::to_string(config.ui.compact_height));
 	if (std::fabs(config.ui.font_size - default_config.ui.font_size) > 0.01f)
 		ui_lines.push_back("font_size = " + std::to_string(config.ui.font_size));
-	if (std::fabs(config.ui.ui_scale - default_config.ui.ui_scale) > 0.01f)
-		ui_lines.push_back("ui_scale = " + std::to_string(config.ui.ui_scale));
 	if (config.ui.show_fps != default_config.ui.show_fps)
 		ui_lines.push_back(std::string("show_fps = ") + (config.ui.show_fps ? "true" : "false"));
 	if (config.ui.show_active_cells != default_config.ui.show_active_cells)
@@ -331,16 +381,70 @@ void ConfigManager::save() {
 	if (config.ui.show_simulation_status != default_config.ui.show_simulation_status)
 		ui_lines.push_back(std::string("show_simulation_status = ") +
 						   (config.ui.show_simulation_status ? "true" : "false"));
+	if (std::fabs(config.ui.base_spacing - default_config.ui.base_spacing) > 0.01f)
+		ui_lines.push_back("base_spacing = " + std::to_string(config.ui.base_spacing));
+	if (std::fabs(config.ui.window_padding_x - default_config.ui.window_padding_x) > 0.01f)
+		ui_lines.push_back("window_padding_x = " + std::to_string(config.ui.window_padding_x));
+	if (std::fabs(config.ui.window_padding_y - default_config.ui.window_padding_y) > 0.01f)
+		ui_lines.push_back("window_padding_y = " + std::to_string(config.ui.window_padding_y));
+	if (std::fabs(config.ui.frame_padding_x - default_config.ui.frame_padding_x) > 0.01f)
+		ui_lines.push_back("frame_padding_x = " + std::to_string(config.ui.frame_padding_x));
+	if (std::fabs(config.ui.frame_padding_y - default_config.ui.frame_padding_y) > 0.01f)
+		ui_lines.push_back("frame_padding_y = " + std::to_string(config.ui.frame_padding_y));
+	if (std::fabs(config.ui.item_spacing_x - default_config.ui.item_spacing_x) > 0.01f)
+		ui_lines.push_back("item_spacing_x = " + std::to_string(config.ui.item_spacing_x));
+	if (std::fabs(config.ui.item_spacing_y - default_config.ui.item_spacing_y) > 0.01f)
+		ui_lines.push_back("item_spacing_y = " + std::to_string(config.ui.item_spacing_y));
+	if (std::fabs(config.ui.item_inner_spacing_x - default_config.ui.item_inner_spacing_x) > 0.01f)
+		ui_lines.push_back("item_inner_spacing_x = " + std::to_string(config.ui.item_inner_spacing_x));
+	if (std::fabs(config.ui.item_inner_spacing_y - default_config.ui.item_inner_spacing_y) > 0.01f)
+		ui_lines.push_back("item_inner_spacing_y = " + std::to_string(config.ui.item_inner_spacing_y));
+	if (std::fabs(config.ui.cell_padding_x - default_config.ui.cell_padding_x) > 0.01f)
+		ui_lines.push_back("cell_padding_x = " + std::to_string(config.ui.cell_padding_x));
+	if (std::fabs(config.ui.cell_padding_y - default_config.ui.cell_padding_y) > 0.01f)
+		ui_lines.push_back("cell_padding_y = " + std::to_string(config.ui.cell_padding_y));
+	if (std::fabs(config.ui.indent_spacing - default_config.ui.indent_spacing) > 0.01f)
+		ui_lines.push_back("indent_spacing = " + std::to_string(config.ui.indent_spacing));
+	if (std::fabs(config.ui.scrollbar_size - default_config.ui.scrollbar_size) > 0.01f)
+		ui_lines.push_back("scrollbar_size = " + std::to_string(config.ui.scrollbar_size));
+	if (std::fabs(config.ui.grab_min_size - default_config.ui.grab_min_size) > 0.01f)
+		ui_lines.push_back("grab_min_size = " + std::to_string(config.ui.grab_min_size));
 	if (std::fabs(config.ui.window_rounding - default_config.ui.window_rounding) > 0.01f)
 		ui_lines.push_back("window_rounding = " + std::to_string(config.ui.window_rounding));
+	if (std::fabs(config.ui.child_rounding - default_config.ui.child_rounding) > 0.01f)
+		ui_lines.push_back("child_rounding = " + std::to_string(config.ui.child_rounding));
 	if (std::fabs(config.ui.frame_rounding - default_config.ui.frame_rounding) > 0.01f)
 		ui_lines.push_back("frame_rounding = " + std::to_string(config.ui.frame_rounding));
+	if (std::fabs(config.ui.popup_rounding - default_config.ui.popup_rounding) > 0.01f)
+		ui_lines.push_back("popup_rounding = " + std::to_string(config.ui.popup_rounding));
+	if (std::fabs(config.ui.scrollbar_rounding - default_config.ui.scrollbar_rounding) > 0.01f)
+		ui_lines.push_back("scrollbar_rounding = " + std::to_string(config.ui.scrollbar_rounding));
+	if (std::fabs(config.ui.grab_rounding - default_config.ui.grab_rounding) > 0.01f)
+		ui_lines.push_back("grab_rounding = " + std::to_string(config.ui.grab_rounding));
+	if (std::fabs(config.ui.tab_rounding - default_config.ui.tab_rounding) > 0.01f)
+		ui_lines.push_back("tab_rounding = " + std::to_string(config.ui.tab_rounding));
+	if (std::fabs(config.ui.window_border_size - default_config.ui.window_border_size) > 0.01f)
+		ui_lines.push_back("window_border_size = " + std::to_string(config.ui.window_border_size));
+	if (std::fabs(config.ui.child_border_size - default_config.ui.child_border_size) > 0.01f)
+		ui_lines.push_back("child_border_size = " + std::to_string(config.ui.child_border_size));
+	if (std::fabs(config.ui.popup_border_size - default_config.ui.popup_border_size) > 0.01f)
+		ui_lines.push_back("popup_border_size = " + std::to_string(config.ui.popup_border_size));
+	if (std::fabs(config.ui.frame_border_size - default_config.ui.frame_border_size) > 0.01f)
+		ui_lines.push_back("frame_border_size = " + std::to_string(config.ui.frame_border_size));
+	if (std::fabs(config.ui.tab_border_size - default_config.ui.tab_border_size) > 0.01f)
+		ui_lines.push_back("tab_border_size = " + std::to_string(config.ui.tab_border_size));
 	if (config.ui.button_size != default_config.ui.button_size)
 		ui_lines.push_back("button_size = " + std::to_string(config.ui.button_size));
 	if (config.ui.icon_size != default_config.ui.icon_size)
 		ui_lines.push_back("icon_size = " + std::to_string(config.ui.icon_size));
 	if (config.ui.material_list_height != default_config.ui.material_list_height)
 		ui_lines.push_back("material_list_height = " + std::to_string(config.ui.material_list_height));
+	if (config.ui.set_list_height != default_config.ui.set_list_height)
+		ui_lines.push_back("set_list_height = " + std::to_string(config.ui.set_list_height));
+	if (config.ui.save_list_height != default_config.ui.save_list_height)
+		ui_lines.push_back("save_list_height = " + std::to_string(config.ui.save_list_height));
+	if (config.ui.stamp_list_height != default_config.ui.stamp_list_height)
+		ui_lines.push_back("stamp_list_height = " + std::to_string(config.ui.stamp_list_height));
 	if (color_differs(config.ui.background_color, default_config.ui.background_color))
 		ui_lines.push_back("background_color = " + color_to_hex(config.ui.background_color));
 	if (color_differs(config.ui.selection_box_color, default_config.ui.selection_box_color))

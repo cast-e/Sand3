@@ -1,10 +1,13 @@
 #include "grid.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <thread>
 
 #include "const.hpp"
 #include "material_manager.hpp"
+#include "set_manager.hpp"
 #include "vulkan.hpp"
 #include "window.hpp"
 
@@ -25,6 +28,7 @@ int Grid::max_rule_radius_y = 2;
 ProcessingMode Grid::processing_mode = ProcessingMode::CPU;
 std::vector<Cell> Grid::cells;
 std::vector<Cell> Grid::next_cells;
+std::vector<uint8_t> Grid::updated_cells;
 uint32_t Grid::num_active_threads = 0;
 std::unique_ptr<std::barrier<>> Grid::start_barrier;
 std::unique_ptr<std::barrier<>> Grid::done_barrier;
@@ -35,11 +39,22 @@ std::atomic<uint32_t> Grid::frame_changed{0};
 bool Grid::gpu_data_valid = true;
 bool Grid::gpu_needs_upload = true;
 uint64_t Grid::sim_step_count = 0;
+int Grid::heatmap_attr_index = -1;
+bool Grid::heatmap_logarithmic = false;
+bool Grid::heatmap_custom_range = false;
+float Grid::heatmap_view_min = 0.0f;
+float Grid::heatmap_view_max = 255.0f;
+AttributeLayout Grid::attr_layout = AttributeLayout::Layout_3x16;
+uint32_t Grid::attr_types = 0;
 
 void Grid::init() {
+	if (!workers.empty()) {
+		shutdown();
+	}
 	num_active_threads = Grid::get_num_strips_y() / 2;
 	cells.resize(Grid::get_size());
 	next_cells.resize(Grid::get_size());
+	updated_cells.assign(Grid::get_size(), 0);
 
 	clear();
 
@@ -90,7 +105,8 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 	done_barrier.reset();
 	phase_barrier.reset();
 
-	std::vector<Cell> new_cells(new_width * new_height, Cell{0, false});
+	Cell empty_cell = make_empty_cell();
+	std::vector<Cell> new_cells(new_width * new_height, empty_cell);
 	if (preserve_content) {
 		uint32_t copy_w = std::min(width, new_width);
 		uint32_t copy_h = std::min(height, new_height);
@@ -104,10 +120,8 @@ bool Grid::resize(uint32_t new_width, uint32_t new_height, bool preserve_content
 	width = new_width;
 	height = new_height;
 	cells = std::move(new_cells);
-	for (auto& cell : cells) {
-		cell.updated = true;
-	}
-	next_cells.assign(width * height, Cell{0, false});
+	next_cells.assign(width * height, empty_cell);
+	updated_cells.assign(width * height, 0);
 
 	MaterialManager::rebuild_compiled_rules();
 
@@ -185,11 +199,7 @@ void Grid::sync_to_gpu() {
 	if (!Vulkan::is_available()) {
 		return;
 	}
-	std::vector<uint8_t> mat_data(Grid::get_size());
-	for (uint32_t i = 0; i < Grid::get_size(); ++i) {
-		mat_data[i] = cells[i].material;
-	}
-	Vulkan::upload_grid(mat_data.data(), Grid::get_size());
+	Vulkan::upload_grid(cells.data(), Grid::get_size());
 	gpu_needs_upload = false;
 	gpu_data_valid = true;
 }
@@ -202,12 +212,7 @@ void Grid::sync_from_gpu() {
 		Vulkan::copy_staging_to_grid();
 		gpu_needs_upload = false;
 	}
-	std::vector<uint8_t> mat_data(Grid::get_size());
-	Vulkan::download_grid(mat_data.data(), Grid::get_size());
-	for (uint32_t i = 0; i < Grid::get_size(); ++i) {
-		cells[i].material = mat_data[i];
-		cells[i].updated = true;
-	}
+	Vulkan::download_grid(cells.data(), Grid::get_size());
 	gpu_data_valid = true;
 	gpu_needs_upload = false;
 	Grid::draw();
@@ -290,8 +295,11 @@ void Grid::worker_thread(const uint32_t thread_id) {
 	}
 }
 
-inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, const uint32_t cx, const unsigned cy,
-										const bool is_fast_path, uint32_t& local_changed) {
+bool Grid::apply_compiled_rules(const std::vector<CompiledRule>& rules, const uint32_t cx, const unsigned cy,
+								const bool is_fast_path, uint32_t& local_changed) {
+	bool any_match_found = false;
+	const uint32_t center_id = cy * Grid::get_width() + cx;
+
 	for (const CompiledRule& cur : rules) {
 		if (xorshift32() % (100 * 1000) >= static_cast<uint32_t>(cur.chance * 1000))
 			continue;
@@ -302,7 +310,7 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 		if (num_variants == 1) {
 			const CompiledRuleVariant& rule = cur.variants[0];
 			if (is_fast_path) {
-				match_found = Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed);
+				match_found = Grid::try_apply_rule_fast(rule, center_id, local_changed);
 			} else {
 				match_found = Grid::try_apply_rule_safe(rule, cx, cy, local_changed);
 			}
@@ -311,14 +319,18 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 			for (uint32_t step = 0; step < 2; ++step) {
 				const CompiledRuleVariant& rule = cur.variants[(start_id + step) & 1];
 				if (is_fast_path) {
-					if (Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed)) {
+					if (Grid::try_apply_rule_fast(rule, center_id, local_changed)) {
 						match_found = true;
-						break;
+						if (!cur.multi_apply) {
+							break;
+						}
 					}
 				} else {
 					if (Grid::try_apply_rule_safe(rule, cx, cy, local_changed)) {
 						match_found = true;
-						break;
+						if (!cur.multi_apply) {
+							break;
+						}
 					}
 				}
 			}
@@ -332,14 +344,18 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 			for (uint32_t step = 0; step < 4; ++step) {
 				const CompiledRuleVariant& rule = cur.variants[perms[perm_id][step]];
 				if (is_fast_path) {
-					if (Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed)) {
+					if (Grid::try_apply_rule_fast(rule, center_id, local_changed)) {
 						match_found = true;
-						break;
+						if (!cur.multi_apply) {
+							break;
+						}
 					}
 				} else {
 					if (Grid::try_apply_rule_safe(rule, cx, cy, local_changed)) {
 						match_found = true;
-						break;
+						if (!cur.multi_apply) {
+							break;
+						}
 					}
 				}
 			}
@@ -348,23 +364,32 @@ inline static void apply_compiled_rules(const std::vector<CompiledRule>& rules, 
 			for (uint32_t step = 0; step < num_variants; ++step) {
 				const CompiledRuleVariant& rule = cur.variants[(start_id + step) % num_variants];
 				if (is_fast_path) {
-					if (Grid::try_apply_rule_fast(rule, cy * Grid::get_width() + cx, local_changed)) {
+					if (Grid::try_apply_rule_fast(rule, center_id, local_changed)) {
 						match_found = true;
-						break;
+						if (!cur.multi_apply) {
+							break;
+						}
 					}
 				} else {
 					if (Grid::try_apply_rule_safe(rule, cx, cy, local_changed)) {
 						match_found = true;
-						break;
+						if (!cur.multi_apply) {
+							break;
+						}
 					}
 				}
 			}
 		}
 
 		if (match_found) {
-			break;
+			any_match_found = true;
+			if (!cur.continue_to_next) {
+				break;
+			}
 		}
 	}
+
+	return any_match_found;
 }
 
 void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool reverse_y, uint32_t& local_changed) {
@@ -375,12 +400,13 @@ void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool r
 		for (uint32_t x = 0; x < Grid::get_width(); ++x) {
 			const uint32_t cx = reverse_x ? (Grid::get_width() - 1 - x) : x;
 			const uint32_t cy = reverse_y ? (y_end - 1 - y) : (y_start + y);
+			const uint32_t center_id = cy * Grid::get_width() + cx;
 
-			if (next_cells[cy * Grid::get_width() + cx].updated)
+			if (updated_cells[center_id])
 				continue;
 
 			const auto& rules =
-				MaterialManager::get_runtime_material(cells[cy * Grid::get_width() + cx].material).rules;
+				MaterialManager::get_runtime_material(cells[center_id].material).rules;
 			if (rules.empty())
 				continue;
 
@@ -394,25 +420,133 @@ void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool r
 	}
 }
 
+inline static bool eval_attr_condition(const AttributeCondition& ac, const Cell& target_cell, const Cell& center_cell) {
+	float val = target_cell.get_attr_f(ac.attr_index);
+	float target_val = 0.0f;
+	switch (ac.target) {
+		case CompareTarget::Constant:
+			target_val = static_cast<float>(ac.const_value);
+			break;
+		case CompareTarget::CenterCell:
+			target_val = center_cell.get_attr_f(ac.attr_index);
+			break;
+	}
+	switch (ac.op) {
+		case CompareOp::Equal:
+			return std::abs(val - target_val) < 1e-4f;
+		case CompareOp::NotEqual:
+			return std::abs(val - target_val) >= 1e-4f;
+		case CompareOp::Less:
+			return val < target_val;
+		case CompareOp::LessOrEqual:
+			return val <= target_val;
+		case CompareOp::Greater:
+			return val > target_val;
+		case CompareOp::GreaterOrEqual:
+			return val >= target_val;
+		default:
+			break;
+	}
+	return true;
+}
+
 bool Grid::try_apply_rule_fast(const CompiledRuleVariant& rule, const uint32_t center_id, uint32_t& local_changed) {
+	const uint32_t gw = Grid::get_width();
+
 	for (const auto& cond : rule.conditions) {
-		if (!cond.allowed.test(cells[center_id + cond.offset].material)) {
+		const Cell& c = cells[center_id + cond.offset];
+		if (!cond.allowed.test(c.material)) {
 			return false;
+		}
+		if (!cond.attr_conditions.empty()) {
+			const Cell& center_c = next_cells[center_id];
+			const Cell& target_c = next_cells[center_id + cond.offset];
+			for (const auto& ac : cond.attr_conditions) {
+				if (!eval_attr_condition(ac, target_c, center_c)) {
+					return false;
+				}
+			}
 		}
 	}
 
-	for (const auto& act : rule.actions) {
-		if (next_cells[center_id + act.offset].updated) {
-			return false;
-		}
-	}
-
-	next_cells[center_id].updated = true;
 	for (const auto& act : rule.actions) {
 		uint32_t target_id = center_id + act.offset;
-		next_cells[target_id].material = act.target_material;
-		next_cells[target_id].updated = true;
-		if (target_id != center_id) {
+		if (updated_cells[target_id]) {
+			return false;
+		}
+	}
+
+	Cell saved_center = next_cells[center_id];
+	const auto& set_attrs = SetManager::get_current_metadata().attributes;
+	const uint32_t gh = Grid::get_height();
+	uint32_t cx = center_id % gw;
+	uint32_t cy = center_id / gw;
+	auto get_attr = [&](int8_t dx, int8_t dy, uint8_t attr_i) -> float {
+		if (dx == 0 && dy == 0) {
+			return saved_center.get_attr_f(attr_i);
+		}
+		int64_t sx = static_cast<int64_t>(cx) + dx;
+		int64_t sy = static_cast<int64_t>(cy) + dy;
+		if (sx >= 0 && sx < static_cast<int64_t>(gw) && sy >= 0 && sy < static_cast<int64_t>(gh)) {
+			uint32_t s_id = static_cast<uint32_t>(sy) * gw + static_cast<uint32_t>(sx);
+			return next_cells[s_id].get_attr_f(attr_i);
+		}
+		return (attr_i < set_attrs.size()) ? static_cast<float>(set_attrs[attr_i].default_val) : 0.0f;
+	};
+
+	struct StagedAction {
+		uint32_t target_id;
+		uint8_t target_material;
+		float attr_vals[3];
+		bool has_attr[3];
+		bool updated;
+	};
+	std::array<StagedAction, 100> staged;
+	size_t num_staged = 0;
+
+	for (const auto& act : rule.actions) {
+		if (num_staged >= staged.size())
+			break;
+		uint32_t target_id = center_id + act.offset;
+		StagedAction& sa = staged[num_staged++];
+		sa.target_id = target_id;
+		sa.target_material = act.target_material;
+		sa.updated = act.updated;
+
+		for (size_t a = 0; a < 3; ++a) {
+			sa.has_attr[a] = false;
+			if (act.attr_expr_ops[a].empty())
+				continue;
+			float min_v = (a < set_attrs.size()) ? static_cast<float>(set_attrs[a].min_val) : -32768.0f;
+			float max_v = (a < set_attrs.size()) ? static_cast<float>(set_attrs[a].max_val) : 32767.0f;
+			float s_val = next_cells[target_id].get_attr_f(a);
+			float c_val = saved_center.get_attr_f(a);
+			sa.attr_vals[a] =
+				eval_expr(act.attr_expr_ops[a], s_val, c_val, min_v, max_v, static_cast<uint8_t>(a), get_attr);
+			sa.has_attr[a] = true;
+		}
+	}
+
+	for (size_t i = 0; i < num_staged; ++i) {
+		const auto& sa = staged[i];
+		if (sa.target_material != 255) {
+			if (sa.target_material != next_cells[sa.target_id].material) {
+				next_cells[sa.target_id].material = sa.target_material;
+				const auto& def = MaterialManager::get_material(sa.target_material);
+				for (size_t a = 0; a < 3; ++a) {
+					next_cells[sa.target_id].set_attr_f(a, static_cast<float>(def.default_attributes[a]));
+				}
+			}
+		}
+		for (size_t a = 0; a < 3; ++a) {
+			if (sa.has_attr[a]) {
+				next_cells[sa.target_id].set_attr_f(a, sa.attr_vals[a]);
+			}
+		}
+		if (sa.updated) {
+			updated_cells[sa.target_id] = 1;
+		}
+		if (sa.target_id != center_id) {
 			local_changed++;
 		}
 	}
@@ -423,6 +557,7 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 							   uint32_t& local_changed) {
 	const uint32_t gw = Grid::get_width();
 	const uint32_t gh = Grid::get_height();
+	const uint32_t center_id = y * gw + x;
 
 	for (const auto& cond : rule.conditions) {
 		const uint32_t tx = x + cond.dx;
@@ -432,25 +567,21 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 			return false;
 		}
 
-		if (!cond.allowed.test(cells[ty * gw + tx].material)) {
+		const Cell& c = cells[ty * gw + tx];
+		if (!cond.allowed.test(c.material)) {
 			return false;
+		}
+		if (!cond.attr_conditions.empty()) {
+			const Cell& center_c = next_cells[center_id];
+			const Cell& target_c = next_cells[ty * gw + tx];
+			for (const auto& ac : cond.attr_conditions) {
+				if (!eval_attr_condition(ac, target_c, center_c)) {
+					return false;
+				}
+			}
 		}
 	}
 
-	for (const auto& act : rule.actions) {
-		const uint32_t tx = x + act.dx;
-		const uint32_t ty = y + act.dy;
-
-		if (tx >= gw || ty >= gh) {
-			continue;
-		}
-
-		if (next_cells[ty * gw + tx].updated) {
-			return false;
-		}
-	}
-
-	next_cells[y * gw + x].updated = true;
 	for (const auto& act : rule.actions) {
 		const uint32_t tx = x + act.dx;
 		const uint32_t ty = y + act.dy;
@@ -460,9 +591,87 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 		}
 
 		const uint32_t target_id = ty * gw + tx;
-		next_cells[target_id].material = act.target_material;
-		next_cells[target_id].updated = true;
-		if (tx != x || ty != y) {
+		if (updated_cells[target_id]) {
+			return false;
+		}
+	}
+
+	Cell saved_center = next_cells[center_id];
+	const auto& set_attrs = SetManager::get_current_metadata().attributes;
+	auto get_attr = [&](int8_t dx, int8_t dy, uint8_t attr_i) -> float {
+		if (dx == 0 && dy == 0) {
+			return saved_center.get_attr_f(attr_i);
+		}
+		int64_t sx = static_cast<int64_t>(x) + dx;
+		int64_t sy = static_cast<int64_t>(y) + dy;
+		if (sx >= 0 && sx < static_cast<int64_t>(gw) && sy >= 0 && sy < static_cast<int64_t>(gh)) {
+			return next_cells[static_cast<uint32_t>(sy) * gw + static_cast<uint32_t>(sx)].get_attr_f(attr_i);
+		}
+		return (attr_i < set_attrs.size()) ? static_cast<float>(set_attrs[attr_i].default_val) : 0.0f;
+	};
+
+	struct StagedAction {
+		uint32_t target_id;
+		uint32_t tx;
+		uint32_t ty;
+		uint8_t target_material;
+		float attr_vals[3];
+		bool has_attr[3];
+		bool updated;
+	};
+	std::array<StagedAction, 100> staged;
+	size_t num_staged = 0;
+
+	for (const auto& act : rule.actions) {
+		const uint32_t tx = x + act.dx;
+		const uint32_t ty = y + act.dy;
+
+		if (tx >= gw || ty >= gh || num_staged >= staged.size()) {
+			continue;
+		}
+
+		const uint32_t target_id = ty * gw + tx;
+		StagedAction& sa = staged[num_staged++];
+		sa.target_id = target_id;
+		sa.tx = tx;
+		sa.ty = ty;
+		sa.target_material = act.target_material;
+		sa.updated = act.updated;
+
+		for (size_t a = 0; a < 3; ++a) {
+			sa.has_attr[a] = false;
+			if (act.attr_expr_ops[a].empty())
+				continue;
+			float min_v = (a < set_attrs.size()) ? static_cast<float>(set_attrs[a].min_val) : -32768.0f;
+			float max_v = (a < set_attrs.size()) ? static_cast<float>(set_attrs[a].max_val) : 32767.0f;
+			float s_val = next_cells[target_id].get_attr_f(a);
+			float c_val = saved_center.get_attr_f(a);
+			sa.attr_vals[a] =
+				eval_expr(act.attr_expr_ops[a], s_val, c_val, min_v, max_v, static_cast<uint8_t>(a), get_attr);
+			sa.has_attr[a] = true;
+		}
+	}
+
+	for (size_t i = 0; i < num_staged; ++i) {
+		const auto& sa = staged[i];
+		if (sa.target_material != 255) {
+			if (sa.target_material != next_cells[sa.target_id].material) {
+				next_cells[sa.target_id].material = sa.target_material;
+				const auto& def = MaterialManager::get_material(sa.target_material);
+				for (size_t a = 0; a < 3; ++a) {
+					next_cells[sa.target_id].set_attr_f(a, static_cast<float>(def.default_attributes[a]));
+				}
+			}
+		}
+		for (size_t a = 0; a < 3; ++a) {
+			if (sa.has_attr[a]) {
+				next_cells[sa.target_id].set_attr_f(a, sa.attr_vals[a]);
+			}
+		}
+		if (sa.updated) {
+			updated_cells[sa.target_id] = 1;
+		}
+		if (sa.tx != x || sa.ty != y) {
 			local_changed++;
 		}
 	}
@@ -474,11 +683,9 @@ void Grid::update() {
 
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
 		Vulkan::step(static_cast<uint32_t>(sim_step_count), gpu_needs_upload);
-		uint32_t* staging = Vulkan::get_staging_buffer();
+		Cell* staging = Vulkan::get_staging_cells();
 		if (staging) {
-			for (size_t i = 0; i < Grid::get_size(); ++i) {
-				cells[i].material = static_cast<uint8_t>(staging[i] & 0xFFu);
-			}
+			std::memcpy(cells.data(), staging, Grid::get_size() * sizeof(Cell));
 		}
 		gpu_data_valid = true;
 		gpu_needs_upload = false;
@@ -488,8 +695,10 @@ void Grid::update() {
 	}
 
 	next_cells = cells;
-	for (auto& cell : next_cells) {
-		cell.updated = false;
+	if (updated_cells.size() != Grid::get_size()) {
+		updated_cells.assign(Grid::get_size(), 0);
+	} else {
+		std::memset(updated_cells.data(), 0, updated_cells.size());
 	}
 
 	if (num_active_threads > 0) {
@@ -499,6 +708,73 @@ void Grid::update() {
 
 	cells = next_cells;
 	sim_step_count++;
+}
+
+void Grid::update_attr_layout() {
+	const auto& attrs = SetManager::get_current_metadata().attributes;
+	attr_types = 0;
+	if (attrs.size() <= 1) {
+		attr_layout = AttributeLayout::Layout_1x32;
+	} else if (attrs.size() == 2) {
+		attr_layout = AttributeLayout::Layout_1x32_1x16;
+	} else {
+		attr_layout = AttributeLayout::Layout_3x16;
+	}
+
+	for (size_t i = 0; i < attrs.size() && i < 3; ++i) {
+		if (attrs[i].type == AttributeType::Float) {
+			attr_types |= (1u << i);
+		}
+		if (attrs[i].min_val >= 0.0) {
+			attr_types |= (1u << (i + 4));
+		}
+	}
+}
+
+void Grid::set_heatmap_mode(int attr_idx) {
+	heatmap_attr_index = attr_idx;
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		Vulkan::set_heatmap_mode(attr_idx);
+		Vulkan::refresh_display(gpu_needs_upload);
+		return;
+	}
+	draw();
+}
+
+void Grid::set_heatmap_logarithmic(bool log_mode) {
+	heatmap_logarithmic = log_mode;
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		Vulkan::refresh_display(gpu_needs_upload);
+		return;
+	}
+	draw();
+}
+
+void Grid::set_heatmap_custom_range(bool custom_range) {
+	heatmap_custom_range = custom_range;
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		Vulkan::refresh_display(gpu_needs_upload);
+		return;
+	}
+	draw();
+}
+
+void Grid::set_heatmap_view_min(float v_min) {
+	heatmap_view_min = v_min;
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		Vulkan::refresh_display(gpu_needs_upload);
+		return;
+	}
+	draw();
+}
+
+void Grid::set_heatmap_view_max(float v_max) {
+	heatmap_view_max = v_max;
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		Vulkan::refresh_display(gpu_needs_upload);
+		return;
+	}
+	draw();
 }
 
 void Grid::draw() {
@@ -511,12 +787,30 @@ void Grid::draw() {
 		return;
 	}
 
-	for (uint32_t id = 0; id < Grid::get_size(); ++id) {
-		if (!cells[id].updated) {
-			continue;
+	if (heatmap_attr_index >= 0) {
+		const auto& meta = SetManager::get_current_metadata();
+		if (heatmap_attr_index < static_cast<int>(meta.attributes.size())) {
+			const auto& attr_def = meta.attributes[heatmap_attr_index];
+			float min_v = static_cast<float>(attr_def.min_val);
+			float max_v = static_cast<float>(attr_def.max_val);
+			float range = (max_v > min_v) ? (max_v - min_v) : 1.0f;
+
+			for (uint32_t id = 0; id < Grid::get_size(); ++id) {
+				float val = cells[id].get_attr_f(heatmap_attr_index);
+				auto col = meta.heatmap_gradient.sample(val);
+				uint8_t r = static_cast<uint8_t>(std::clamp(col[0] * 255.0f, 0.0f, 255.0f));
+				uint8_t g = static_cast<uint8_t>(std::clamp(col[1] * 255.0f, 0.0f, 255.0f));
+				uint8_t b = static_cast<uint8_t>(std::clamp(col[2] * 255.0f, 0.0f, 255.0f));
+				buffer[id] = (255u << 24) | (b << 16) | (g << 8) | r;
+			}
+			return;
 		}
+	}
+
+	for (uint32_t id = 0; id < Grid::get_size(); ++id) {
 		uint8_t cell = cells[id].material;
-		buffer[id] = MaterialManager::get_runtime_material(cell).packed_color;
+		const auto& rm = MaterialManager::get_runtime_material(cell);
+		buffer[id] = compute_cell_color(rm, cells[id]);
 	}
 }
 
@@ -530,35 +824,151 @@ void Grid::draw_material(uint32_t id) {
 
 	for (uint32_t i = 0; i < Grid::get_size(); ++i) {
 		if (cells[i].material == id) {
-			buffer[i] = MaterialManager::get_runtime_material(cells[i].material).packed_color;
+			const auto& rm = MaterialManager::get_runtime_material(cells[i].material);
+			buffer[i] = compute_cell_color(rm, cells[i]);
 		}
 	}
 }
 
 uint8_t& Grid::get_cell(const uint32_t x, const uint32_t y) { return cells[y * Grid::get_width() + x].material; }
 
-void Grid::set_cell(const uint32_t x, const uint32_t y, uint8_t cell) {
+Cell& Grid::get_cell_full(const uint32_t x, const uint32_t y) { return cells[y * width + x]; }
+
+const Cell& Grid::get_cell_full_const(const uint32_t x, const uint32_t y) { return cells[y * width + x]; }
+
+void Grid::set_cell(const uint32_t x, const uint32_t y, uint8_t material) {
 	if (x >= width || y >= height) {
 		return;
 	}
 	const uint32_t idx = y * width + x;
-	cells[idx].material = cell;
-	cells[idx].updated = true;
+	cells[idx].material = material;
+	const auto& def = MaterialManager::get_material(material);
+	for (size_t a = 0; a < 3; ++a) {
+		cells[idx].set_attr_f(a, static_cast<float>(def.default_attributes[a]));
+	}
 	gpu_needs_upload = true;
+
+	const auto& rm = MaterialManager::get_runtime_material(material);
+	uint32_t cell_col = compute_cell_color(rm, cells[idx]);
 
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
 		uint32_t* disp = Vulkan::get_display_buffer();
 		if (disp) {
-			disp[idx] = MaterialManager::get_runtime_material(cell).packed_color;
+			disp[idx] = cell_col;
 		}
-		uint32_t* staging = Vulkan::get_staging_buffer();
+		Cell* staging = Vulkan::get_staging_cells();
 		if (staging) {
-			staging[idx] = static_cast<uint32_t>(cell);
+			staging[idx] = cells[idx];
 		}
 	} else {
 		uint32_t* buffer = Window::get_buffer();
 		if (buffer) {
-			buffer[idx] = MaterialManager::get_runtime_material(cell).packed_color;
+			buffer[idx] = cell_col;
+		}
+	}
+}
+
+void Grid::set_cell_material_only(const uint32_t x, const uint32_t y, const uint8_t material) {
+	if (x >= width || y >= height) {
+		return;
+	}
+	const uint32_t idx = y * width + x;
+	cells[idx].material = material;
+	gpu_needs_upload = true;
+
+	const auto& rm = MaterialManager::get_runtime_material(material);
+	uint32_t cell_col = compute_cell_color(rm, cells[idx]);
+
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		uint32_t* disp = Vulkan::get_display_buffer();
+		if (disp) {
+			disp[idx] = cell_col;
+		}
+		Cell* staging = Vulkan::get_staging_cells();
+		if (staging) {
+			staging[idx] = cells[idx];
+		}
+	} else {
+		uint32_t* buffer = Window::get_buffer();
+		if (buffer) {
+			buffer[idx] = cell_col;
+		}
+	}
+}
+
+void Grid::adjust_cell_attr(const uint32_t x, const uint32_t y, const uint8_t attr_idx, const float delta_or_val,
+							const bool set_exact) {
+	if (x >= width || y >= height) {
+		return;
+	}
+	const uint32_t idx = y * width + x;
+	const auto& meta = SetManager::get_current_metadata();
+	if (attr_idx >= meta.attributes.size()) {
+		return;
+	}
+
+	float min_v = static_cast<float>(meta.attributes[attr_idx].min_val);
+	float max_v = static_cast<float>(meta.attributes[attr_idx].max_val);
+
+	float cur_val = cells[idx].get_attr_f(attr_idx);
+	float new_val = set_exact ? delta_or_val : (cur_val + delta_or_val);
+	new_val = std::clamp(new_val, min_v, max_v);
+	cells[idx].set_attr_f(attr_idx, new_val);
+	gpu_needs_upload = true;
+
+	uint32_t cell_col;
+	if (heatmap_attr_index == static_cast<int>(attr_idx)) {
+		auto col = meta.heatmap_gradient.sample(new_val);
+		uint8_t r = static_cast<uint8_t>(std::clamp(col[0] * 255.0f, 0.0f, 255.0f));
+		uint8_t g = static_cast<uint8_t>(std::clamp(col[1] * 255.0f, 0.0f, 255.0f));
+		uint8_t b = static_cast<uint8_t>(std::clamp(col[2] * 255.0f, 0.0f, 255.0f));
+		cell_col = (255u << 24) | (b << 16) | (g << 8) | r;
+	} else {
+		const auto& rm = MaterialManager::get_runtime_material(cells[idx].material);
+		cell_col = compute_cell_color(rm, cells[idx]);
+	}
+
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		uint32_t* disp = Vulkan::get_display_buffer();
+		if (disp) {
+			disp[idx] = cell_col;
+		}
+		Cell* staging = Vulkan::get_staging_cells();
+		if (staging) {
+			staging[idx] = cells[idx];
+		}
+	} else {
+		uint32_t* buffer = Window::get_buffer();
+		if (buffer) {
+			buffer[idx] = cell_col;
+		}
+	}
+}
+
+void Grid::set_cell_full(const uint32_t x, const uint32_t y, const Cell& cell) {
+	if (x >= width || y >= height) {
+		return;
+	}
+	const uint32_t idx = y * width + x;
+	cells[idx] = cell;
+	gpu_needs_upload = true;
+
+	const auto& rm = MaterialManager::get_runtime_material(cell.material);
+	uint32_t cell_col = compute_cell_color(rm, cells[idx]);
+
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		uint32_t* disp = Vulkan::get_display_buffer();
+		if (disp) {
+			disp[idx] = cell_col;
+		}
+		Cell* staging = Vulkan::get_staging_cells();
+		if (staging) {
+			staging[idx] = cells[idx];
+		}
+	} else {
+		uint32_t* buffer = Window::get_buffer();
+		if (buffer) {
+			buffer[idx] = cell_col;
 		}
 	}
 }
@@ -572,7 +982,6 @@ void Grid::remap_materials(const std::vector<uint8_t>& old_to_new) {
 		} else {
 			cell.material = 0;
 		}
-		cell.updated = true;
 	}
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
 		sync_to_gpu();
@@ -581,17 +990,32 @@ void Grid::remap_materials(const std::vector<uint8_t>& old_to_new) {
 	}
 }
 
-void Grid::clear() {
-	for (auto& cell : cells) {
-		cell.material = 0;
-		cell.updated = true;
+Cell Grid::make_empty_cell() {
+	Cell cell{};
+	cell.material = 0;
+	const auto& def = MaterialManager::get_material(0);
+	for (size_t a = 0; a < 3; ++a) {
+		cell.set_attr_f(a, static_cast<float>(def.default_attributes[a]));
 	}
+	return cell;
+}
+
+void Grid::clear() {
+	Cell empty_cell = make_empty_cell();
+	for (auto& cell : cells) {
+		cell = empty_cell;
+	}
+	for (auto& cell : next_cells) {
+		cell = empty_cell;
+	}
+	updated_cells.assign(Grid::get_size(), 0);
 	if (Vulkan::is_available()) {
 		Vulkan::clear();
 	}
 	gpu_needs_upload = false;
 	gpu_data_valid = true;
 	draw();
+	frame_changed = 0;
 }
 
 void Grid::restore_state(const std::vector<uint8_t>& state) {
@@ -599,32 +1023,64 @@ void Grid::restore_state(const std::vector<uint8_t>& state) {
 		return;
 	}
 
+	const auto& meta = SetManager::get_current_metadata();
 	for (size_t i = 0; i < Grid::get_size(); ++i) {
 		cells[i].material = state[i];
-		cells[i].updated = true;
+		const auto& def = MaterialManager::get_material(state[i]);
+		for (size_t a = 0; a < 3; ++a) {
+			float min_v = (a < meta.attributes.size()) ? static_cast<float>(meta.attributes[a].min_val) : -1e9f;
+			float max_v = (a < meta.attributes.size()) ? static_cast<float>(meta.attributes[a].max_val) : 1e9f;
+			float val = std::clamp(static_cast<float>(def.default_attributes[a]), min_v, max_v);
+			cells[i].set_attr_f(a, val);
+		}
 	}
 
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
-		Vulkan::upload_grid(state.data(), Grid::get_size());
+		Vulkan::upload_grid(cells.data(), Grid::get_size());
 		gpu_needs_upload = false;
 		gpu_data_valid = true;
 	} else {
 		uint32_t* buffer = Window::get_buffer();
 		if (buffer) {
 			for (size_t i = 0; i < Grid::get_size(); ++i) {
-				buffer[i] = MaterialManager::get_runtime_material(state[i]).packed_color;
+				const auto& rm = MaterialManager::get_runtime_material(state[i]);
+				buffer[i] = compute_cell_color(rm, cells[i]);
 			}
 		}
+	}
+}
+
+void Grid::restore_state_full(const std::vector<Cell>& state) {
+	if (state.size() != Grid::get_size()) {
+		return;
+	}
+
+	cells = state;
+	const auto& meta = SetManager::get_current_metadata();
+	for (auto& cell : cells) {
+		for (size_t a = 0; a < 3; ++a) {
+			float min_v = (a < meta.attributes.size()) ? static_cast<float>(meta.attributes[a].min_val) : -1e9f;
+			float max_v = (a < meta.attributes.size()) ? static_cast<float>(meta.attributes[a].max_val) : 1e9f;
+			cell.set_attr_f(a, std::clamp(cell.get_attr_f(a), min_v, max_v));
+		}
+	}
+
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available()) {
+		Vulkan::upload_grid(cells.data(), Grid::get_size());
+		gpu_needs_upload = false;
+		gpu_data_valid = true;
+	} else {
+		draw();
 	}
 }
 
 std::vector<uint8_t> Grid::get_all_cells() {
 	std::vector<uint8_t> state(Grid::get_size());
 	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available() && !gpu_needs_upload) {
-		uint32_t* staging = Vulkan::get_staging_buffer();
+		Cell* staging = Vulkan::get_staging_cells();
 		if (staging) {
 			for (size_t i = 0; i < Grid::get_size(); ++i) {
-				state[i] = static_cast<uint8_t>(staging[i] & 0xFFu);
+				state[i] = staging[i].material;
 			}
 			return state;
 		}
@@ -633,4 +1089,14 @@ std::vector<uint8_t> Grid::get_all_cells() {
 		state[i] = cells[i].material;
 	}
 	return state;
+}
+
+std::vector<Cell> Grid::get_all_cells_full() {
+	if (processing_mode == ProcessingMode::GPU && Vulkan::is_available() && !gpu_needs_upload) {
+		Cell* staging = Vulkan::get_staging_cells();
+		if (staging) {
+			std::memcpy(cells.data(), staging, Grid::get_size() * sizeof(Cell));
+		}
+	}
+	return cells;
 }

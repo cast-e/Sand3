@@ -40,6 +40,10 @@ enum class ShortcutAction {
 	RotateCCW,
 	BrushShape,
 	ToggleTransparent,
+	ToolAttribute,
+	IncreaseAttrValue,
+	DecreaseAttrValue,
+	CycleDisplayMode,
 	Count
 };
 

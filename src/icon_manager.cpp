@@ -54,7 +54,18 @@ namespace {
 		{IconID::Branch, "arrow_branch.png", icon_branch_png, icon_branch_png_len},
 		{IconID::Lock, "lock.png", icon_lock_png, icon_lock_png_len},
 		{IconID::FlipHorizontal, "shape_flip_horizontal.png", icon_flip_horizontal_png, icon_flip_horizontal_png_len},
-		{IconID::FlipVertical, "shape_flip_vertical.png", icon_flip_vertical_png, icon_flip_vertical_png_len}};
+		{IconID::FlipVertical, "shape_flip_vertical.png", icon_flip_vertical_png, icon_flip_vertical_png_len},
+		{IconID::MultiApply, "arrow_out.png", icon_multi_apply_png, icon_multi_apply_png_len},
+		{IconID::ChartCurve, "chart_curve.png", icon_chart_curve_png, icon_chart_curve_png_len},
+		{IconID::ArrowInOut, "arrow_inout.png", icon_arrow_inout_png, icon_arrow_inout_png_len},
+		{IconID::Monitor, "monitor.png", icon_monitor_png, icon_monitor_png_len},
+		{IconID::Lightning, "lightning.png", icon_lightning_png, icon_lightning_png_len},
+		{IconID::Clock, "clock.png", icon_clock_png, icon_clock_png_len},
+		{IconID::ColorWheel, "color_wheel.png", icon_color_wheel_png, icon_color_wheel_png_len},
+		{IconID::Photo, "photo.png", icon_photo_png, icon_photo_png_len},
+		{IconID::Zoom, "zoom.png", icon_zoom_png, icon_zoom_png_len},
+		{IconID::Brick, "brick.png", icon_brick_png, icon_brick_png_len},
+		{IconID::Cog, "cog.png", icon_cog_png, icon_cog_png_len}};
 
 	std::array<SDL_Texture*, static_cast<size_t>(IconID::Count)> textures{};
 

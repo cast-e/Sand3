@@ -16,9 +16,9 @@
 #endif
 
 std::string WorkshopClient::base_url = "https://sand3.vercel.app/api";
-std::string WorkshopClient::client_uuid = "";
-std::string WorkshopClient::auth_token = "";
-std::string WorkshopClient::logged_in_username = "";
+std::string WorkshopClient::client_uuid;
+std::string WorkshopClient::auth_token;
+std::string WorkshopClient::logged_in_username;
 std::mutex WorkshopClient::callback_mutex;
 std::queue<std::function<void()>> WorkshopClient::main_thread_callbacks;
 
@@ -245,7 +245,7 @@ std::string WorkshopClient::http_get(const std::string& url, int& out_status) {
 	curl_easy_cleanup(curl);
 	return response;
 #else
-	std::string auth_arg = "";
+	std::string auth_arg;
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
@@ -334,12 +334,12 @@ std::string WorkshopClient::http_post_json(const std::string& url, const std::st
 	out << json_body;
 	out.close();
 
-	std::string auth_arg = "";
+	std::string auth_arg;
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
-	std::string cmd =
-		"curl -s -L -A \"Sand3/1.0\" -X POST -H \"Content-Type: application/json\"" + auth_arg + " -w \"\\n%{http_code}\" -d @" + temp_file + " \"" + url + "\"";
+	std::string cmd = "curl -s -L -A \"Sand3/1.0\" -X POST -H \"Content-Type: application/json\"" + auth_arg +
+					  " -w \"\\n%{http_code}\" -d @" + temp_file + " \"" + url + "\"";
 	FILE* pipe = popen(cmd.c_str(), "r");
 	std::string resp;
 	if (pipe) {
@@ -359,8 +359,8 @@ std::string WorkshopClient::http_post_json(const std::string& url, const std::st
 	size_t last_nl = resp.find_last_of('\n');
 	if (last_nl != std::string::npos) {
 		size_t prev_nl = resp.find_last_of('\n', last_nl - 1);
-		std::string status_str = (prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1)
-																: resp.substr(0, last_nl);
+		std::string status_str =
+			(prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1) : resp.substr(0, last_nl);
 		if (!status_str.empty() && status_str.back() == '\r') {
 			status_str.pop_back();
 		}
@@ -424,12 +424,12 @@ std::string WorkshopClient::http_put_json(const std::string& url, const std::str
 	out << json_body;
 	out.close();
 
-	std::string auth_arg = "";
+	std::string auth_arg;
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
-	std::string cmd =
-		"curl -s -L -A \"Sand3/1.0\" -X PUT -H \"Content-Type: application/json\"" + auth_arg + " -w \"\\n%{http_code}\" -d @" + temp_file + " \"" + url + "\"";
+	std::string cmd = "curl -s -L -A \"Sand3/1.0\" -X PUT -H \"Content-Type: application/json\"" + auth_arg +
+					  " -w \"\\n%{http_code}\" -d @" + temp_file + " \"" + url + "\"";
 	FILE* pipe = popen(cmd.c_str(), "r");
 	std::string resp;
 	if (pipe) {
@@ -449,8 +449,8 @@ std::string WorkshopClient::http_put_json(const std::string& url, const std::str
 	size_t last_nl = resp.find_last_of('\n');
 	if (last_nl != std::string::npos) {
 		size_t prev_nl = resp.find_last_of('\n', last_nl - 1);
-		std::string status_str = (prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1)
-																: resp.substr(0, last_nl);
+		std::string status_str =
+			(prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1) : resp.substr(0, last_nl);
 		if (!status_str.empty() && status_str.back() == '\r') {
 			status_str.pop_back();
 		}
@@ -503,7 +503,7 @@ std::string WorkshopClient::http_delete(const std::string& url, int& out_status)
 	curl_easy_cleanup(curl);
 	return response;
 #else
-	std::string auth_arg = "";
+	std::string auth_arg;
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
@@ -526,8 +526,8 @@ std::string WorkshopClient::http_delete(const std::string& url, int& out_status)
 	size_t last_nl = resp.find_last_of('\n');
 	if (last_nl != std::string::npos) {
 		size_t prev_nl = resp.find_last_of('\n', last_nl - 1);
-		std::string status_str = (prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1)
-																: resp.substr(0, last_nl);
+		std::string status_str =
+			(prev_nl != std::string::npos) ? resp.substr(prev_nl + 1, last_nl - prev_nl - 1) : resp.substr(0, last_nl);
 		if (!status_str.empty() && status_str.back() == '\r') {
 			status_str.pop_back();
 		}
@@ -590,7 +590,7 @@ bool WorkshopClient::http_download_file(const std::string& url, const std::strin
 	}
 	return ok;
 #else
-	std::string auth_arg = "";
+	std::string auth_arg;
 	if (!auth_token.empty()) {
 		auth_arg = " -H \"Authorization: Bearer " + auth_token + "\"";
 	}
@@ -1013,8 +1013,7 @@ void WorkshopClient::toggle_favorite(const std::string& id,
 	}).detach();
 }
 
-void WorkshopClient::toggle_private(const std::string& id,
-									std::function<void(bool success, int is_private)> callback) {
+void WorkshopClient::toggle_private(const std::string& id, std::function<void(bool success, int is_private)> callback) {
 	Window::increment_busy();
 	std::thread([id, callback]() {
 		std::string url = base_url + "/workshop/items/" + id + "/toggle-private";
@@ -1134,8 +1133,7 @@ void WorkshopClient::update_item(const std::string& id, const std::string& title
 								 int version, const std::string& changelog, const std::vector<uint8_t>& file_bytes,
 								 const std::string& file_ext, const std::string& meta_json, const std::string& set_hash,
 								 const std::string& thumbnail_data,
-								 std::function<void(bool success, const std::string& error)> callback,
-								 int is_private) {
+								 std::function<void(bool success, const std::string& error)> callback, int is_private) {
 	Window::increment_busy();
 	std::thread([id, title, description, version, changelog, file_bytes, file_ext, meta_json, set_hash, thumbnail_data,
 				 callback, is_private]() {

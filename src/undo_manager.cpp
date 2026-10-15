@@ -6,6 +6,7 @@
 std::deque<UndoSnapshot> UndoManager::history;
 int UndoManager::current_index = -1;
 std::vector<uint8_t> UndoManager::pending_grid_state;
+std::vector<Cell> UndoManager::pending_grid_cells;
 
 void UndoManager::init() {
 	clear();
@@ -23,6 +24,7 @@ void UndoManager::push_snapshot(const std::string& action_name) {
 
 	UndoSnapshot snap;
 	snap.grid_materials = Grid::get_all_cells();
+	snap.grid_cells = Grid::get_all_cells_full();
 	snap.materials = MaterialManager::get_materials();
 	snap.selected_id = UI::get_selected_id();
 	snap.action_name = action_name;
@@ -50,7 +52,11 @@ void UndoManager::undo() {
 	const auto& snap = history[current_index];
 	MaterialManager::get_materials() = snap.materials;
 	MaterialManager::rebuild_compiled_rules();
-	Grid::restore_state(snap.grid_materials);
+	if (!snap.grid_cells.empty()) {
+		Grid::restore_state_full(snap.grid_cells);
+	} else {
+		Grid::restore_state(snap.grid_materials);
+	}
 
 	uint8_t current_id = UI::get_selected_id();
 	bool exists = false;
@@ -75,7 +81,11 @@ void UndoManager::redo() {
 	const auto& snap = history[current_index];
 	MaterialManager::get_materials() = snap.materials;
 	MaterialManager::rebuild_compiled_rules();
-	Grid::restore_state(snap.grid_materials);
+	if (!snap.grid_cells.empty()) {
+		Grid::restore_state_full(snap.grid_cells);
+	} else {
+		Grid::restore_state(snap.grid_materials);
+	}
 
 	uint8_t current_id = UI::get_selected_id();
 	bool exists = false;
@@ -96,19 +106,40 @@ void UndoManager::clear() {
 	history.clear();
 	current_index = -1;
 	pending_grid_state.clear();
+	pending_grid_cells.clear();
 }
 
 void UndoManager::set_pending_grid_snapshot() {
 	UI::reset_stepping_sequence();
 	pending_grid_state = Grid::get_all_cells();
+	pending_grid_cells = Grid::get_all_cells_full();
 }
 
 void UndoManager::commit_grid_snapshot_if_changed(const std::string& action_name) {
-	if (pending_grid_state.empty())
+	if (pending_grid_cells.empty() && pending_grid_state.empty())
 		return;
-	std::vector<uint8_t> current_state = Grid::get_all_cells();
-	if (current_state != pending_grid_state) {
+	bool changed = false;
+	if (!pending_grid_cells.empty()) {
+		std::vector<Cell> current_cells = Grid::get_all_cells_full();
+		if (current_cells.size() != pending_grid_cells.size()) {
+			changed = true;
+		} else {
+			for (size_t i = 0; i < current_cells.size(); ++i) {
+				if (current_cells[i].material != pending_grid_cells[i].material ||
+					current_cells[i].a_aux != pending_grid_cells[i].a_aux ||
+					current_cells[i].a_prim != pending_grid_cells[i].a_prim) {
+					changed = true;
+					break;
+				}
+			}
+		}
+	} else {
+		std::vector<uint8_t> current_state = Grid::get_all_cells();
+		changed = (current_state != pending_grid_state);
+	}
+	if (changed) {
 		push_snapshot(action_name);
 	}
 	pending_grid_state.clear();
+	pending_grid_cells.clear();
 }

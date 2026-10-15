@@ -1,0 +1,44 @@
+{
+    "name": "heater",
+    "id": 4,
+    "color": [
+        255,
+        255,
+        255
+    ],
+    "default_attributes": [
+        500.0,
+        0.0,
+        0.0
+    ],
+    "rules": [
+        {
+            "when": [
+                [],
+                []
+            ],
+            "then": [
+                255,
+                255
+            ],
+            "then_actions": [
+                {
+                    "exprs": [
+                        "500",
+                        "",
+                        ""
+                    ],
+                    "updated": false
+                },
+                null
+            ],
+            "bounds": [
+                0,
+                0,
+                -1,
+                0
+            ],
+            "sym_rot": true
+        }
+    ]
+}

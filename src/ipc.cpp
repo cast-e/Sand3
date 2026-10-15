@@ -144,7 +144,7 @@ void IPC::poll(std::function<void(const std::string&)> on_uri_received) {
 	int client_fd = accept(s_server_fd, nullptr, nullptr);
 	if (client_fd >= 0) {
 		char buf[512];
-		std::string received = "";
+		std::string received;
 		ssize_t n = 0;
 		while ((n = read(client_fd, buf, sizeof(buf) - 1)) > 0) {
 			buf[n] = '\0';
@@ -169,7 +169,7 @@ void IPC::poll(std::function<void(const std::string&)> on_uri_received) {
 	SOCKET client = accept(s_win_sock, nullptr, nullptr);
 	if (client != INVALID_SOCKET) {
 		char buf[512];
-		std::string received = "";
+		std::string received;
 		int n = 0;
 		while ((n = recv(client, buf, sizeof(buf) - 1, 0)) > 0) {
 			buf[n] = '\0';
