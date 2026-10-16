@@ -353,7 +353,8 @@ void SetManager::save_set_metadata(const std::string& name, const SetMetadata& m
 		for (size_t i = 0; i < metadata.heatmap_gradient.stops.size(); ++i) {
 			const auto& s = metadata.heatmap_gradient.stops[i];
 			file << "stop" << i << "_pos = " << s.pos << "\n";
-			file << "stop" << i << "_color = " << s.color[0] << "," << s.color[1] << "," << s.color[2] << "," << s.color[3] << "\n";
+			file << "stop" << i << "_color = " << s.color[0] << "," << s.color[1] << "," << s.color[2] << ","
+				 << s.color[3] << "\n";
 		}
 	}
 }

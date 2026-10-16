@@ -33,6 +33,27 @@ set(SOURCES
     ui.hpp
     ui.cpp
 
+    ui_widgets.hpp
+    ui_widgets.cpp
+
+    ui_theme.hpp
+    ui_theme.cpp
+
+    ui_modals.hpp
+    ui_modals.cpp
+
+    ui_thumbnails.hpp
+    ui_thumbnails.cpp
+
+    ui_shortcuts.hpp
+    ui_shortcuts.cpp
+
+    ui_advanced.hpp
+    ui_advanced.cpp
+
+    ui_workshop.hpp
+    ui_workshop.cpp
+
     undo_manager.hpp
     undo_manager.cpp
 

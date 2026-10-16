@@ -20,8 +20,8 @@ inline static uint32_t xorshift32() {
 	return xorshift32_state;
 }
 
-uint32_t Grid::width = DEFAULT_SIM_WIDTH;
-uint32_t Grid::height = DEFAULT_SIM_HEIGHT;
+uint32_t Grid::width = 1024;
+uint32_t Grid::height = 1024;
 int Grid::max_rule_radius_x = 2;
 int Grid::max_rule_radius_y = 2;
 
@@ -405,8 +405,7 @@ void Grid::update_strip_1d(const uint32_t sy, const bool reverse_x, const bool r
 			if (updated_cells[center_id])
 				continue;
 
-			const auto& rules =
-				MaterialManager::get_runtime_material(cells[center_id].material).rules;
+			const auto& rules = MaterialManager::get_runtime_material(cells[center_id].material).rules;
 			if (rules.empty())
 				continue;
 
@@ -501,7 +500,7 @@ bool Grid::try_apply_rule_fast(const CompiledRuleVariant& rule, const uint32_t c
 		bool has_attr[3];
 		bool updated;
 	};
-	std::array<StagedAction, 100> staged;
+	std::array<StagedAction, 100> staged{};
 	size_t num_staged = 0;
 
 	for (const auto& act : rule.actions) {
@@ -619,7 +618,7 @@ bool Grid::try_apply_rule_safe(const CompiledRuleVariant& rule, const uint32_t x
 		bool has_attr[3];
 		bool updated;
 	};
-	std::array<StagedAction, 100> staged;
+	std::array<StagedAction, 100> staged{};
 	size_t num_staged = 0;
 
 	for (const auto& act : rule.actions) {
@@ -1015,6 +1014,21 @@ void Grid::clear() {
 	gpu_needs_upload = false;
 	gpu_data_valid = true;
 	draw();
+	uint32_t* buf = Window::get_buffer();
+	if (buf && heatmap_attr_index >= 0) {
+		const auto& meta = SetManager::get_current_metadata();
+		if (heatmap_attr_index < static_cast<int>(meta.attributes.size())) {
+			float val = empty_cell.get_attr_f(heatmap_attr_index);
+			auto col = meta.heatmap_gradient.sample(val);
+			uint8_t r = static_cast<uint8_t>(std::clamp(col[0] * 255.0f, 0.0f, 255.0f));
+			uint8_t g = static_cast<uint8_t>(std::clamp(col[1] * 255.0f, 0.0f, 255.0f));
+			uint8_t b = static_cast<uint8_t>(std::clamp(col[2] * 255.0f, 0.0f, 255.0f));
+			uint32_t hm_col = (255u << 24) | (b << 16) | (g << 8) | r;
+			for (size_t i = 0; i < Grid::get_size(); ++i) {
+				buf[i] = hm_col;
+			}
+		}
+	}
 	frame_changed = 0;
 }
 

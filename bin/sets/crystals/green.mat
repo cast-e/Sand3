@@ -1,17 +1,17 @@
 {
-    "name": "deteoritating",
-    "id": 1,
+    "name": "green",
+    "id": 3,
     "color": [
+        0,
         255,
-        255,
-        255
+        0
     ],
     "color_modifiers": [
         {
             "enabled": true,
             "gradient": [
                 {
-                    "pos": 0.0,
+                    "pos": 1.0,
                     "color": [
                         1.0,
                         1.0,
@@ -20,7 +20,16 @@
                     ]
                 },
                 {
-                    "pos": 255.0,
+                    "pos": 3.0,
+                    "color": [
+                        1.0,
+                        1.0,
+                        1.0,
+                        0.0
+                    ]
+                },
+                {
+                    "pos": 15.972222328186035,
                     "color": [
                         0.0,
                         0.0,
@@ -89,16 +98,16 @@
                 [
                     {
                         "attr": 0,
-                        "op": 5,
+                        "op": 3,
                         "target": 1,
-                        "val": 250.0
+                        "val": 12.0
                     }
                 ],
                 []
             ],
             "then": [
                 0,
-                1
+                3
             ],
             "then_actions": [
                 null,
@@ -115,12 +124,12 @@
                 0,
                 0,
                 1
-            ]
+            ],
+            "sym_rot": true,
+            "chance": 80.0
         },
         {
             "when": [
-                [],
-                [],
                 [],
                 [
                     0
@@ -130,24 +139,117 @@
                 [
                     {
                         "attr": 0,
-                        "op": 5,
+                        "op": 3,
                         "target": 1,
-                        "val": 250.0
+                        "val": 12.0
                     }
                 ],
+                []
+            ],
+            "then": [
+                255,
+                3
+            ],
+            "then_actions": [
+                {
+                    "exprs": [
+                        "[0,0]",
+                        "",
+                        ""
+                    ]
+                },
+                {
+                    "exprs": [
+                        "[0,0] + 1",
+                        "",
+                        ""
+                    ]
+                }
+            ],
+            "bounds": [
+                0,
+                0,
+                0,
+                1
+            ],
+            "sym_rot": true
+        },
+        {
+            "when": [
                 [],
+                [
+                    3
+                ]
+            ],
+            "when_attrs": [
+                [
+                    {
+                        "attr": 0,
+                        "op": 3,
+                        "target": 1,
+                        "val": 12.0
+                    }
+                ],
+                [
+                    {
+                        "attr": 0,
+                        "op": 5,
+                        "target": 0,
+                        "val": 0.0
+                    }
+                ]
+            ],
+            "then": [
+                255,
+                3
+            ],
+            "then_actions": [
+                {
+                    "exprs": [
+                        "[0,0]",
+                        "",
+                        ""
+                    ]
+                },
+                {
+                    "exprs": [
+                        "[0,0] + 1",
+                        "",
+                        ""
+                    ]
+                }
+            ],
+            "bounds": [
+                0,
+                0,
+                0,
+                1
+            ],
+            "sym_rot": true
+        },
+        {
+            "when": [
                 [],
+                [
+                    0
+                ]
+            ],
+            "when_attrs": [
+                [
+                    {
+                        "attr": 0,
+                        "op": 3,
+                        "target": 1,
+                        "val": 12.0
+                    }
+                ],
                 []
             ],
             "then": [
                 0,
-                255,
-                255,
-                1
+                3
             ],
             "then_actions": [
-                null,
-                null,
                 null,
                 {
                     "exprs": [
@@ -159,35 +261,35 @@
             ],
             "bounds": [
                 0,
-                1,
+                0,
                 0,
                 1
             ],
-            "sym_x": true
+            "sym_rot": true
         },
         {
             "when": [
                 []
             ],
-            "then": [
-                255
+            "when_attrs": [
+                [
+                    {
+                        "attr": 0,
+                        "op": 1,
+                        "target": 1,
+                        "val": 0.0
+                    }
+                ]
             ],
-            "then_actions": [
-                {
-                    "exprs": [
-                        "s + 1",
-                        "",
-                        ""
-                    ]
-                }
+            "then": [
+                0
             ],
             "bounds": [
                 0,
                 0,
                 0,
                 0
-            ],
-            "chance": 15.0
+            ]
         }
     ]
 }

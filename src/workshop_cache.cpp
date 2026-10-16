@@ -45,9 +45,7 @@ bool WorkshopCache::is_transient(const std::string& path) {
 	return transient_paths.find(path) != transient_paths.end();
 }
 
-void WorkshopCache::remove_transient(const std::string& path) {
-	transient_paths.erase(path);
-}
+void WorkshopCache::remove_transient(const std::string& path) { transient_paths.erase(path); }
 
 void WorkshopCache::remove_transient_by_id(const std::string& item_id) {
 	if (item_id.empty()) {
@@ -88,9 +86,7 @@ void WorkshopCache::remove_transient_by_id(const std::string& item_id) {
 	}
 }
 
-const std::unordered_set<std::string>& WorkshopCache::get_transient_paths() {
-	return transient_paths;
-}
+const std::unordered_set<std::string>& WorkshopCache::get_transient_paths() { return transient_paths; }
 
 bool WorkshopCache::promote_to_local(const std::string& item_id, const std::string& type,
 									 const std::string& target_name, const std::string& current_set,
@@ -120,7 +116,8 @@ bool WorkshopCache::promote_to_local(const std::string& item_id, const std::stri
 				if (!src_path.empty() && fs::exists(src_path)) {
 					fs::create_directories(dest_dir);
 					if (fs::is_directory(src_path)) {
-						fs::copy(src_path, dest_dir, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+						fs::copy(src_path, dest_dir,
+								 fs::copy_options::recursive | fs::copy_options::overwrite_existing);
 					} else {
 						ZipUtil::extract_zip(src_path, dest_dir);
 					}

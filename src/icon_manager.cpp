@@ -70,7 +70,6 @@ namespace {
 	std::array<SDL_Texture*, static_cast<size_t>(IconID::Count)> textures{};
 
 }  // namespace
-
 void IconManager::init() {
 	shutdown();
 

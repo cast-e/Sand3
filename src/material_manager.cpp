@@ -808,7 +808,6 @@ std::string transform_expr_coords(const std::string& expr, int mode) {
 }
 
 std::string shift_expr_coords(const std::string& expr, int delta_x, int delta_y) {
-	// Neither relative nor absolute badges change coordinates when copied
 	(void)delta_x;
 	(void)delta_y;
 	return expr;

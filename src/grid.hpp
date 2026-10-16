@@ -306,7 +306,8 @@ inline void Cell::set_attr_f(size_t idx, float val) {
 			if (is_float) {
 				std::memcpy(&a_prim, &val, sizeof(a_prim));
 			} else if (is_unsigned) {
-				a_prim = static_cast<int32_t>(static_cast<uint32_t>(std::clamp(std::nearbyint(val), 0.0f, 4294967295.0f)));
+				a_prim =
+					static_cast<int32_t>(static_cast<uint32_t>(std::clamp(std::nearbyint(val), 0.0f, 4294967295.0f)));
 			} else {
 				a_prim = static_cast<int32_t>(std::clamp(std::nearbyint(val), -2147483648.0f, 2147483647.0f));
 			}

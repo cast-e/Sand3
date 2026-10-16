@@ -308,6 +308,14 @@ void WorkshopItemEditor::render_update_modal() {
 		ImGui::InputTextMultiline("##update_desc", s_update_desc, sizeof(s_update_desc), ImVec2(-1.0f, 60.0f),
 								  ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter, filterNewline);
 
+		if (s_update_item.type == "save" || s_update_item.type == "stamp") {
+			if (ConfigManager::get_config().compression_quality != 2) {
+				ImGui::Spacing();
+				ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+								   "Notice: Highest compression is required and will be enforced for this workshop upload.");
+			}
+		}
+
 		if (!s_update_status.empty()) {
 			ImGui::Spacing();
 			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", s_update_status.c_str());
@@ -391,7 +399,7 @@ void WorkshopItemEditor::render_update_modal() {
 				file_ext = ".save";
 				if (s_update_save_mode == 0) {
 					std::string cur_s = SetManager::get_current_set();
-					SaveManager::save_to_file("__ws_temp_update", cur_s);
+					SaveManager::save_to_file("__ws_temp_update", cur_s, CompressionQuality::High);
 					std::string fpath = SaveManager::get_saves_directory(cur_s) + "__ws_temp_update.save";
 					std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
 					if (fin.is_open()) {
@@ -421,6 +429,9 @@ void WorkshopItemEditor::render_update_modal() {
 						}
 					}
 				}
+				if (SaveManager::recompress_to_highest(payload_bytes, SetManager::get_current_set())) {
+					ToastManager::warning("Recompressed save to Highest compression for workshop upload.");
+				}
 			} else if (item_type == "stamp") {
 				file_ext = ".stamp";
 				if (s_update_stamp_idx >= 0 &&
@@ -434,6 +445,9 @@ void WorkshopItemEditor::render_update_modal() {
 					if (s_update_update_thumb) {
 						thumb_b64 = UI::generate_thumbnail_base64(2, SetManager::get_current_set(), fname);
 					}
+				}
+				if (SaveManager::recompress_to_highest(payload_bytes, SetManager::get_current_set())) {
+					ToastManager::warning("Recompressed stamp to Highest compression for workshop upload.");
 				}
 			} else if (item_type == "theme") {
 				file_ext = ".theme";

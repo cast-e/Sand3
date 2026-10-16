@@ -5,8 +5,8 @@
 #include <vector>
 
 struct GradientStop {
-	float pos = 0.0f;										// Range: [0.0, 1.0]
-	std::array<float, 4> color = {1.0f, 1.0f, 1.0f, 1.0f};	// RGBA in [0.0, 1.0]
+	float pos = 0.0f;
+	std::array<float, 4> color = {1.0f, 1.0f, 1.0f, 1.0f};
 
 	bool operator==(const GradientStop& other) const { return pos == other.pos && color == other.color; }
 };
@@ -97,10 +97,7 @@ struct ColorGradient {
 
 	static ColorGradient create_default(float min_val = 0.0f, float max_val = 1.0f) {
 		ColorGradient g;
-		g.stops = {
-			{min_val, {0.0f, 0.0f, 0.0f, 1.0f}},
-			{max_val, {1.0f, 1.0f, 1.0f, 1.0f}}
-		};
+		g.stops = {{min_val, {0.0f, 0.0f, 0.0f, 1.0f}}, {max_val, {1.0f, 1.0f, 1.0f, 1.0f}}};
 		g.selected_stop = 0;
 		return g;
 	}
@@ -108,13 +105,11 @@ struct ColorGradient {
 	static ColorGradient default_heatmap(float min_val = 0.0f, float max_val = 100.0f) {
 		float span = max_val - min_val;
 		ColorGradient g;
-		g.stops = {
-			{min_val,                {0.0f, 0.0f, 1.0f, 1.0f}}, // Blue
-			{min_val + span * 0.25f, {0.0f, 1.0f, 1.0f, 1.0f}}, // Cyan
-			{min_val + span * 0.50f, {0.0f, 1.0f, 0.0f, 1.0f}}, // Green
-			{min_val + span * 0.75f, {1.0f, 1.0f, 0.0f, 1.0f}}, // Yellow
-			{max_val,                {1.0f, 0.0f, 0.0f, 1.0f}}  // Red
-		};
+		g.stops = {{min_val, {0.0f, 0.0f, 1.0f, 1.0f}},
+				   {min_val + span * 0.25f, {0.0f, 1.0f, 1.0f, 1.0f}},
+				   {min_val + span * 0.50f, {0.0f, 1.0f, 0.0f, 1.0f}},
+				   {min_val + span * 0.75f, {1.0f, 1.0f, 0.0f, 1.0f}},
+				   {max_val, {1.0f, 0.0f, 0.0f, 1.0f}}};
 		g.selected_stop = 0;
 		return g;
 	}

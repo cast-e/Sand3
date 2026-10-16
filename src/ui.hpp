@@ -10,7 +10,6 @@
 #include "gradient.hpp"
 #include "grid.hpp"
 #include "icon_manager.hpp"
-#include "save_manager.hpp"
 
 enum class BrushShape : int { Square, Circle, Size };
 enum class ToolMode : int { Brush, Select, Attribute };
@@ -35,7 +34,7 @@ struct SelectionBox {
 struct ClipboardData {
 	int width = 0;
 	int height = 0;
-	std::vector<uint8_t> cells;
+	std::vector<Cell> cells;
 	bool empty() const { return cells.empty() || width <= 0 || height <= 0; }
 	void clear() {
 		width = 0;
@@ -54,7 +53,7 @@ public:
 	static void render();
 	static void handle_interaction();
 
-	static void trigger_exit() { show_exit_popup = true; }
+	static void trigger_exit();
 	static bool has_unsaved_changes() { return unsaved_changes; }
 	static bool should_update() { return update; }
 	static void pause_simulation() { update = false; }
@@ -95,11 +94,11 @@ public:
 	static void cut_selection();
 	static void fill_selection(uint8_t id);
 	static void flood_fill(uint32_t start_x, uint32_t start_y, uint8_t fill_mat);
-	static void flood_fill_attribute(uint32_t start_x, uint32_t start_y, uint8_t attr_idx, float val,
-									bool set_exact);
+	static void flood_fill_attribute(uint32_t start_x, uint32_t start_y, uint8_t attr_idx, float val, bool set_exact);
 	static void rotate_selection(bool clockwise = true);
 	static void paste_clipboard();
 	static void clear_clipboard();
+	static void load_stamp(const std::vector<Cell>& cells, uint32_t w, uint32_t h);
 	static void load_stamp(const std::vector<uint8_t>& cells, uint32_t w, uint32_t h);
 	static void deselect();
 	static void restore_selection_state(ToolMode mode, SelectionState state, const SelectionBox& box);
@@ -113,8 +112,8 @@ public:
 									  bool show_checkbox = false);
 	static bool custom_checkbox(const char* label, bool* val, IconID icon_id = IconID::Count,
 								const char* tooltip = nullptr, const ImVec2& size = ImVec2(0.0f, 0.0f));
-	static bool gradient_editor(const char* label, ColorGradient& gradient, float min_val = 0.0f,
-								float max_val = 1.0f, float width = 0.0f);
+	static bool gradient_editor(const char* label, ColorGradient& gradient, float min_val = 0.0f, float max_val = 1.0f,
+								float width = 0.0f);
 	static void render_floating_toolbar();
 
 	static void refresh_workshop_items();
@@ -141,12 +140,6 @@ private:
 	static void render_material_editor();
 	static void render_manage_sets();
 	static void render_save_load();
-	static void render_workshop();
-	static void render_workshop_auth_modal();
-	static void render_advanced_options();
-	static void render_shortcuts();
-	static void render_theme_editor();
-	static void render_modals();
 	static void render_mouse_overlay();
 
 	static void handle_zoom_and_pan(ImGuiIO& io);
@@ -160,17 +153,9 @@ private:
 
 	static int selected_save_id;
 	static int selected_stamp_id;
-	static bool open_diff_size_save_popup;
-	static SaveFileInfo pending_diff_save;
 	static uint8_t selected_id;
 	static int mouse_size;
 	static BrushShape brush_shape;
-
-	static bool open_switch_popup;
-	static bool open_create_set_popup;
-	static bool open_delete_set_popup;
-	static bool open_empty_rule_warning_popup;
-	static bool open_large_neighborhood_warning_popup;
 
 	static bool duplicate_set_checkbox;
 	static bool exit_save_as_new_set;
@@ -178,8 +163,6 @@ private:
 	static bool update;
 	static bool step_frame;
 	static bool stepping_sequence_active;
-
-	static bool show_exit_popup;
 
 	static bool unsaved_changes;
 	static std::string pending_set_switch;
@@ -201,8 +184,8 @@ private:
 	static ResizeHandle active_resize_handle;
 	static SelectionBox selection_box;
 	static ClipboardData clipboard;
-	static std::vector<uint8_t> floating_cells;
-	static std::vector<uint8_t> move_initial_cells;
+	static std::vector<Cell> floating_cells;
+	static std::vector<Cell> move_initial_cells;
 	static int floating_width;
 	static int floating_height;
 	static int move_initial_width;

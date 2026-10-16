@@ -9,11 +9,11 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include "config_manager.hpp"
 #include "const.hpp"
+#include "gradient.hpp"
 #include "grid.hpp"
 #include "icon_manager.hpp"
 #include "material_manager.hpp"
@@ -23,6 +23,13 @@
 #include "set_manager.hpp"
 #include "shortcut_manager.hpp"
 #include "toast_manager.hpp"
+#include "ui_advanced.hpp"
+#include "ui_modals.hpp"
+#include "ui_shortcuts.hpp"
+#include "ui_theme.hpp"
+#include "ui_thumbnails.hpp"
+#include "ui_widgets.hpp"
+#include "ui_workshop.hpp"
 #include "undo_manager.hpp"
 #include "vulkan.hpp"
 #include "window.hpp"
@@ -31,138 +38,13 @@
 #include "workshop_item_editor.hpp"
 #include "zip_util.hpp"
 
-static ImVec4 default_colors[ImGuiCol_COUNT];
-static bool default_colors_initialized = false;
+void UI::apply_theme_style(ImGuiStyle& style, const UIConfig& cfg) { UITheme::apply_theme_style(style, cfg); }
 
-void UI::apply_theme_style(ImGuiStyle& style, const UIConfig& cfg) {
-	style.WindowRounding = cfg.window_rounding;
-	style.ChildRounding = cfg.child_rounding;
-	style.FrameRounding = cfg.frame_rounding;
-	style.PopupRounding = cfg.popup_rounding;
-	style.ScrollbarRounding = cfg.scrollbar_rounding;
-	style.GrabRounding = cfg.grab_rounding;
-	style.TabRounding = cfg.tab_rounding;
+float UI::get_spacing(float offset) { return UITheme::get_spacing(offset); }
 
-	style.WindowBorderSize = cfg.window_border_size;
-	style.ChildBorderSize = cfg.child_border_size;
-	style.PopupBorderSize = cfg.popup_border_size;
-	style.FrameBorderSize = cfg.frame_border_size;
-	style.TabBorderSize = cfg.tab_border_size;
+const ImVec4* UI::get_default_colors() { return UITheme::get_default_colors(); }
 
-	style.WindowPadding = ImVec2(cfg.window_padding_x, cfg.window_padding_y);
-	style.FramePadding = ImVec2(cfg.frame_padding_x, cfg.frame_padding_y);
-	style.ItemSpacing = ImVec2(cfg.item_spacing_x, cfg.item_spacing_y);
-	style.ItemInnerSpacing = ImVec2(cfg.item_inner_spacing_x, cfg.item_inner_spacing_y);
-	style.CellPadding = ImVec2(cfg.cell_padding_x, cfg.cell_padding_y);
-	style.IndentSpacing = cfg.indent_spacing;
-	style.ScrollbarSize = cfg.scrollbar_size;
-	style.GrabMinSize = cfg.grab_min_size;
-}
-
-float UI::get_spacing(float offset) {
-	const auto& cfg = ConfigManager::get_config();
-	return std::max(0.0f, cfg.ui.base_spacing + offset);
-}
-
-static void init_style() {
-	const auto& cfg = ConfigManager::get_config();
-	ImGuiStyle& style = ImGui::GetStyle();
-	UI::apply_theme_style(style, cfg.ui);
-
-	ImVec4* colors = style.Colors;
-	colors[ImGuiCol_Text] = ImVec4(0.95f, 0.96f, 0.98f, 1.00f);
-	colors[ImGuiCol_TextDisabled] = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
-	colors[ImGuiCol_WindowBg] = ImVec4(0.11f, 0.11f, 0.13f, 0.95f);
-	colors[ImGuiCol_ChildBg] = ImVec4(0.09f, 0.09f, 0.10f, 0.00f);
-	colors[ImGuiCol_PopupBg] = ImVec4(0.14f, 0.14f, 0.16f, 0.98f);
-	colors[ImGuiCol_Border] = ImVec4(0.22f, 0.22f, 0.24f, 1.00f);
-	colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-	colors[ImGuiCol_FrameBg] = ImVec4(0.16f, 0.17f, 0.19f, 1.00f);
-	colors[ImGuiCol_FrameBgHovered] = ImVec4(0.22f, 0.23f, 0.26f, 1.00f);
-	colors[ImGuiCol_FrameBgActive] = ImVec4(0.28f, 0.29f, 0.32f, 1.00f);
-	colors[ImGuiCol_TitleBg] = ImVec4(0.12f, 0.12f, 0.14f, 1.00f);
-	colors[ImGuiCol_TitleBgActive] = ImVec4(0.16f, 0.16f, 0.18f, 1.00f);
-	colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.12f, 0.12f, 0.14f, 0.75f);
-	colors[ImGuiCol_MenuBarBg] = ImVec4(0.12f, 0.12f, 0.14f, 1.00f);
-	colors[ImGuiCol_ScrollbarBg] = ImVec4(0.09f, 0.09f, 0.11f, 0.53f);
-	colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.28f, 0.29f, 0.32f, 1.00f);
-	colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.38f, 0.39f, 0.42f, 1.00f);
-	colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.48f, 0.49f, 0.52f, 1.00f);
-	colors[ImGuiCol_CheckMark] = ImVec4(0.35f, 0.58f, 0.98f, 1.00f);
-	colors[ImGuiCol_SliderGrab] = ImVec4(0.30f, 0.54f, 0.94f, 1.00f);
-	colors[ImGuiCol_SliderGrabActive] = ImVec4(0.40f, 0.64f, 1.00f, 1.00f);
-	colors[ImGuiCol_Button] = ImVec4(0.22f, 0.23f, 0.26f, 1.00f);
-	colors[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.29f, 0.32f, 1.00f);
-	colors[ImGuiCol_ButtonActive] = ImVec4(0.20f, 0.50f, 0.85f, 1.00f);
-	colors[ImGuiCol_Header] = ImVec4(0.18f, 0.19f, 0.21f, 1.00f);
-	colors[ImGuiCol_HeaderHovered] = ImVec4(0.25f, 0.26f, 0.29f, 1.00f);
-	colors[ImGuiCol_HeaderActive] = ImVec4(0.32f, 0.33f, 0.37f, 1.00f);
-	colors[ImGuiCol_Separator] = ImVec4(0.22f, 0.22f, 0.24f, 1.00f);
-	colors[ImGuiCol_SeparatorHovered] = ImVec4(0.28f, 0.29f, 0.32f, 1.00f);
-	colors[ImGuiCol_SeparatorActive] = ImVec4(0.38f, 0.39f, 0.42f, 1.00f);
-	colors[ImGuiCol_ResizeGrip] = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-	colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.26f, 0.59f, 0.98f, 0.67f);
-	colors[ImGuiCol_ResizeGripActive] = ImVec4(0.26f, 0.59f, 0.98f, 0.95f);
-	colors[ImGuiCol_Tab] = ImVec4(0.16f, 0.17f, 0.19f, 0.86f);
-	colors[ImGuiCol_TabHovered] = ImVec4(0.30f, 0.54f, 0.94f, 0.80f);
-	colors[ImGuiCol_TabActive] = ImVec4(0.22f, 0.45f, 0.78f, 1.00f);
-	colors[ImGuiCol_TabSelectedOverline] = ImVec4(0.20f, 0.50f, 0.85f, 1.00f);
-	colors[ImGuiCol_TabUnfocused] = ImVec4(0.09f, 0.09f, 0.11f, 0.97f);
-	colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.12f, 0.12f, 0.14f, 1.00f);
-	colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.15f, 0.40f, 0.70f, 1.00f);
-	colors[ImGuiCol_PlotLines] = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
-	colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
-	colors[ImGuiCol_PlotHistogram] = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
-	colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00f, 0.60f, 0.00f, 1.00f);
-	colors[ImGuiCol_TableHeaderBg] = ImVec4(0.19f, 0.19f, 0.20f, 1.00f);
-	colors[ImGuiCol_TableBorderStrong] = ImVec4(0.31f, 0.31f, 0.35f, 1.00f);
-	colors[ImGuiCol_TableBorderLight] = ImVec4(0.23f, 0.23f, 0.25f, 1.00f);
-	colors[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-	colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.00f, 1.00f, 1.00f, 0.06f);
-	colors[ImGuiCol_TextSelectedBg] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
-	colors[ImGuiCol_DragDropTarget] = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-	colors[ImGuiCol_NavHighlight] = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
-	colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
-	colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-	colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.05f, 0.05f, 0.05f, 0.60f);
-
-	if (!default_colors_initialized) {
-		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
-			default_colors[i] = colors[i];
-		}
-		default_colors_initialized = true;
-	}
-
-	for (const auto& [name, val] : ConfigManager::get_color_overrides()) {
-		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
-			if (name == ImGui::GetStyleColorName(i)) {
-				ImVec4 col;
-				if (ConfigManager::parse_color_string(val, col)) {
-					colors[i] = col;
-				}
-				break;
-			}
-		}
-	}
-}
-
-const ImVec4* UI::get_default_colors() { return default_colors; }
-
-void UI::reset_theme_colors() {
-	ImGuiStyle& style = ImGui::GetStyle();
-	for (int i = 0; i < ImGuiCol_COUNT; ++i) {
-		style.Colors[i] = default_colors[i];
-	}
-	auto& cfg = ConfigManager::get_config();
-	const auto& def_cfg = ConfigManager::get_default_config();
-	cfg.ui.background_color = def_cfg.ui.background_color;
-	cfg.ui.selection_box_color = def_cfg.ui.selection_box_color;
-	cfg.ui.selection_box_fill = def_cfg.ui.selection_box_fill;
-	Window::set_background_color(cfg.ui.background_color);
-
-	ConfigManager::get_color_overrides().clear();
-	ConfigManager::save();
-}
+void UI::reset_theme_colors() { UITheme::reset_theme_colors(); }
 
 struct GridRect {
 	int x, y, w, h;
@@ -534,6 +416,9 @@ static void paint_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8
 	}
 }
 
+static uint32_t s_attr_stroke_id = 0;
+static std::vector<uint32_t> s_attr_cell_stroke;
+
 static void paint_attribute_brush_at(int start_x, int start_y, int brush_size, uint8_t attr_idx, float val,
 									 bool set_exact, BrushShape shape) {
 	int min_x = std::clamp(start_x, 0, static_cast<int>(Grid::get_width()));
@@ -544,9 +429,22 @@ static void paint_attribute_brush_at(int start_x, int start_y, int brush_size, u
 	if (min_x >= max_x || min_y >= max_y)
 		return;
 
+	uint32_t grid_sz = Grid::get_size();
+	if (s_attr_cell_stroke.size() != grid_sz) {
+		s_attr_cell_stroke.assign(grid_sz, 0);
+	}
+	uint32_t w = Grid::get_width();
+
 	if (shape == BrushShape::Square || brush_size <= 1) {
-		parallel_for_rows(min_y, max_y, [min_x, max_x, attr_idx, val, set_exact](int y) {
+		parallel_for_rows(min_y, max_y, [min_x, max_x, w, attr_idx, val, set_exact](int y) {
 			for (int x = min_x; x < max_x; ++x) {
+				uint32_t idx = static_cast<uint32_t>(y) * w + static_cast<uint32_t>(x);
+				if (s_attr_stroke_id != 0 && s_attr_cell_stroke[idx] == s_attr_stroke_id) {
+					continue;
+				}
+				if (s_attr_stroke_id != 0) {
+					s_attr_cell_stroke[idx] = s_attr_stroke_id;
+				}
 				Grid::adjust_cell_attr(static_cast<uint32_t>(x), static_cast<uint32_t>(y), attr_idx, val, set_exact);
 			}
 		});
@@ -556,7 +454,7 @@ static void paint_attribute_brush_at(int start_x, int start_y, int brush_size, u
 		float r = static_cast<float>(brush_size) * 0.5f;
 		float r_sq = r * r;
 
-		parallel_for_rows(min_y, max_y, [min_x, max_x, cx, cy, r_sq, attr_idx, val, set_exact](int y) {
+		parallel_for_rows(min_y, max_y, [min_x, max_x, cx, cy, r_sq, w, attr_idx, val, set_exact](int y) {
 			float dy = (static_cast<float>(y) + 0.5f) - cy;
 			float dy_sq = dy * dy;
 			if (dy_sq <= r_sq) {
@@ -566,6 +464,13 @@ static void paint_attribute_brush_at(int start_x, int start_y, int brush_size, u
 				rx_min = std::clamp(rx_min, min_x, max_x);
 				rx_max = std::clamp(rx_max, min_x, max_x);
 				for (int x = rx_min; x < rx_max; ++x) {
+					uint32_t idx = static_cast<uint32_t>(y) * w + static_cast<uint32_t>(x);
+					if (s_attr_stroke_id != 0 && s_attr_cell_stroke[idx] == s_attr_stroke_id) {
+						continue;
+					}
+					if (s_attr_stroke_id != 0) {
+						s_attr_cell_stroke[idx] = s_attr_stroke_id;
+					}
 					Grid::adjust_cell_attr(static_cast<uint32_t>(x), static_cast<uint32_t>(y), attr_idx, val,
 										   set_exact);
 				}
@@ -577,15 +482,28 @@ static void paint_attribute_brush_at(int start_x, int start_y, int brush_size, u
 static void paint_attribute_line(ImVec2 start_grid, ImVec2 end_grid, int brush_size, uint8_t attr_idx, float val,
 								 bool set_exact, BrushShape shape) {
 	std::vector<LineSpan> spans = compute_line_spans(start_grid, end_grid, brush_size, shape);
+	uint32_t grid_sz = Grid::get_size();
+	if (s_attr_cell_stroke.size() != grid_sz) {
+		s_attr_cell_stroke.assign(grid_sz, 0);
+	}
+	uint32_t w = Grid::get_width();
+
 	for (const auto& span : spans) {
 		if (span.x0 >= span.x1)
 			continue;
 		int y = span.y;
 		if (y < 0 || y >= static_cast<int>(Grid::get_height()))
 			continue;
-		int x0 = std::clamp(span.x0, 0, static_cast<int>(Grid::get_width()));
-		int x1 = std::clamp(span.x1, 0, static_cast<int>(Grid::get_width()));
+		int x0 = std::clamp(span.x0, 0, static_cast<int>(w));
+		int x1 = std::clamp(span.x1, 0, static_cast<int>(w));
 		for (int x = x0; x < x1; ++x) {
+			uint32_t idx = static_cast<uint32_t>(y) * w + static_cast<uint32_t>(x);
+			if (s_attr_stroke_id != 0 && s_attr_cell_stroke[idx] == s_attr_stroke_id) {
+				continue;
+			}
+			if (s_attr_stroke_id != 0) {
+				s_attr_cell_stroke[idx] = s_attr_stroke_id;
+			}
 			Grid::adjust_cell_attr(static_cast<uint32_t>(x), static_cast<uint32_t>(y), attr_idx, val, set_exact);
 		}
 	}
@@ -710,6 +628,7 @@ void UI::flood_fill_attribute(uint32_t start_x, uint32_t start_y, uint8_t attr_i
 		}
 	}
 }
+void UI::trigger_exit() { UIModals::open_exit(); }
 
 char UI::save_file_name_buf[128] = "";
 char UI::save_as_buf[64] = "";
@@ -717,18 +636,9 @@ char UI::new_set_name_buf[64] = "";
 
 int UI::selected_save_id = -1;
 int UI::selected_stamp_id = -1;
-bool UI::open_diff_size_save_popup = false;
-SaveFileInfo UI::pending_diff_save{};
 uint8_t UI::selected_id = 0;
 int UI::mouse_size = 5;
 BrushShape UI::brush_shape = BrushShape::Square;
-
-bool UI::open_switch_popup = false;
-bool UI::open_create_set_popup = false;
-bool UI::open_delete_set_popup = false;
-bool UI::open_empty_rule_warning_popup = false;
-static uint8_t s_pending_empty_inherit_id = 255;
-bool UI::open_large_neighborhood_warning_popup = false;
 
 enum class ExpandSide { Top, Bottom, Left, Right };
 static int s_pending_expand_rule_idx = -1;
@@ -741,8 +651,6 @@ bool UI::exit_save_as_new_set = false;
 bool UI::update = false;
 bool UI::step_frame = false;
 bool UI::stepping_sequence_active = false;
-
-bool UI::show_exit_popup = false;
 
 bool UI::unsaved_changes = false;
 std::string UI::pending_set_switch;
@@ -765,8 +673,8 @@ SelectionState UI::selection_state = SelectionState::None;
 ResizeHandle UI::active_resize_handle = ResizeHandle::None;
 SelectionBox UI::selection_box = {};
 ClipboardData UI::clipboard = {};
-std::vector<uint8_t> UI::floating_cells = {};
-std::vector<uint8_t> UI::move_initial_cells = {};
+std::vector<Cell> UI::floating_cells = {};
+std::vector<Cell> UI::move_initial_cells = {};
 int UI::floating_width = 0;
 int UI::floating_height = 0;
 int UI::move_initial_width = 0;
@@ -794,7 +702,7 @@ void UI::init() {
 	font_cfg.FontDataOwnedByAtlas = false;
 	io.Fonts->AddFontFromMemoryTTF(const_cast<uint8_t*>(roboto_ttf), roboto_ttf_len, font_sz, &font_cfg);
 
-	init_style();
+	UITheme::init_style();
 
 	ImGui_ImplSDL3_InitForSDLRenderer(Window::get_window(), Window::get_renderer());
 	ImGui_ImplSDLRenderer3_Init(Window::get_renderer());
@@ -888,10 +796,10 @@ void UI::render() {
 				render_material_editor();
 				render_save_load();
 				render_manage_sets();
-				render_theme_editor();
-				render_workshop();
-				render_shortcuts();
-				render_advanced_options();
+				UITheme::render_theme_editor();
+				UIWorkshop::render();
+				UIShortcuts::render();
+				UIAdvanced::render();
 				ImGui::EndTabBar();
 			}
 
@@ -951,7 +859,7 @@ void UI::render() {
 	render_mouse_overlay();
 	render_floating_toolbar();
 
-	render_modals();
+	UIModals::render();
 
 	ImGuiContext& g = *GImGui;
 	if (g.HoveredIdIsDisabled) {
@@ -990,7 +898,7 @@ void UI::deselect() {
 				int gy = move_origin_y + y;
 				if (gx >= 0 && gx < static_cast<int>(Grid::get_width()) && gy >= 0 &&
 					gy < static_cast<int>(Grid::get_height())) {
-					Grid::set_cell(gx, gy, move_initial_cells[y * move_initial_width + x]);
+					Grid::set_cell_full(gx, gy, move_initial_cells[y * move_initial_width + x]);
 				}
 			}
 		}
@@ -1027,6 +935,9 @@ void UI::restore_selection_state(ToolMode mode, SelectionState state, const Sele
 void UI::copy_selection() {
 	if (selection_state != SelectionState::Selected)
 		return;
+	if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+		Grid::sync_from_gpu();
+	}
 	int min_x = selection_box.min_x();
 	int min_y = selection_box.min_y();
 	int bw = selection_box.width();
@@ -1036,7 +947,7 @@ void UI::copy_selection() {
 	clipboard.cells.resize(bw * bh);
 	for (int y = 0; y < bh; ++y) {
 		for (int x = 0; x < bw; ++x) {
-			clipboard.cells[y * bw + x] = Grid::get_cell(min_x + x, min_y + y);
+			clipboard.cells[y * bw + x] = Grid::get_cell_full_const(min_x + x, min_y + y);
 		}
 	}
 }
@@ -1044,14 +955,18 @@ void UI::copy_selection() {
 void UI::cut_selection() {
 	if (selection_state != SelectionState::Selected)
 		return;
+	if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+		Grid::sync_from_gpu();
+	}
 	copy_selection();
 	int min_x = selection_box.min_x();
 	int min_y = selection_box.min_y();
 	int bw = selection_box.width();
 	int bh = selection_box.height();
+	Cell empty_cell{};
 	for (int y = 0; y < bh; ++y) {
 		for (int x = 0; x < bw; ++x) {
-			Grid::set_cell(min_x + x, min_y + y, 0);
+			Grid::set_cell_full(min_x + x, min_y + y, empty_cell);
 		}
 	}
 	UndoManager::push_snapshot("Cut Selection");
@@ -1086,24 +1001,28 @@ void UI::rotate_selection(bool clockwise) {
 		if (w <= 0 || h <= 0)
 			return;
 
-		std::vector<uint8_t> old_cells(w * h);
+		if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+			Grid::sync_from_gpu();
+		}
+		std::vector<Cell> old_cells(w * h);
 		for (int y = 0; y < h; ++y) {
 			for (int x = 0; x < w; ++x) {
-				old_cells[y * w + x] = Grid::get_cell(min_x + x, min_y + y);
+				old_cells[y * w + x] = Grid::get_cell_full_const(min_x + x, min_y + y);
 			}
 		}
 
+		Cell empty_cell{};
 		for (int y = 0; y < h; ++y) {
 			for (int x = 0; x < w; ++x) {
-				if (!transparent_mode || old_cells[y * w + x] != 0) {
-					Grid::set_cell(min_x + x, min_y + y, 0);
+				if (!transparent_mode || old_cells[y * w + x].material != 0) {
+					Grid::set_cell_full(min_x + x, min_y + y, empty_cell);
 				}
 			}
 		}
 
 		int new_w = h;
 		int new_h = w;
-		std::vector<uint8_t> new_cells(new_w * new_h);
+		std::vector<Cell> new_cells(new_w * new_h);
 		for (int y = 0; y < h; ++y) {
 			for (int x = 0; x < w; ++x) {
 				int nx, ny;
@@ -1125,9 +1044,9 @@ void UI::rotate_selection(bool clockwise) {
 
 		for (int ny = 0; ny < new_h; ++ny) {
 			for (int nx = 0; nx < new_w; ++nx) {
-				uint8_t c = new_cells[ny * new_w + nx];
-				if (!transparent_mode || c != 0) {
-					Grid::set_cell(new_min_x + nx, new_min_y + ny, c);
+				const auto& c = new_cells[ny * new_w + nx];
+				if (!transparent_mode || c.material != 0) {
+					Grid::set_cell_full(new_min_x + nx, new_min_y + ny, c);
 				}
 			}
 		}
@@ -1146,7 +1065,7 @@ void UI::rotate_selection(bool clockwise) {
 
 		int new_w = h;
 		int new_h = w;
-		std::vector<uint8_t> new_cells(new_w * new_h);
+		std::vector<Cell> new_cells(new_w * new_h);
 		for (int y = 0; y < h; ++y) {
 			for (int x = 0; x < w; ++x) {
 				int nx, ny;
@@ -1194,7 +1113,7 @@ void UI::rotate_selection(bool clockwise) {
 
 		int new_w = h;
 		int new_h = w;
-		std::vector<uint8_t> new_cells(new_w * new_h);
+		std::vector<Cell> new_cells(new_w * new_h);
 		for (int y = 0; y < h; ++y) {
 			for (int x = 0; x < w; ++x) {
 				int nx, ny;
@@ -1232,7 +1151,7 @@ void UI::clear_clipboard() {
 	clipboard.height = 0;
 }
 
-void UI::load_stamp(const std::vector<uint8_t>& cells, uint32_t w, uint32_t h) {
+void UI::load_stamp(const std::vector<Cell>& cells, uint32_t w, uint32_t h) {
 	if (cells.empty() || w == 0 || h == 0)
 		return;
 	clipboard.cells = cells;
@@ -1241,9 +1160,26 @@ void UI::load_stamp(const std::vector<uint8_t>& cells, uint32_t w, uint32_t h) {
 	paste_clipboard();
 }
 
+void UI::load_stamp(const std::vector<uint8_t>& cells, uint32_t w, uint32_t h) {
+	if (cells.empty() || w == 0 || h == 0)
+		return;
+	clipboard.cells.resize(cells.size());
+	for (size_t i = 0; i < cells.size(); ++i) {
+		clipboard.cells[i].material = cells[i];
+		clipboard.cells[i].a_aux = 0;
+		clipboard.cells[i].a_prim = 0;
+	}
+	clipboard.width = static_cast<int>(w);
+	clipboard.height = static_cast<int>(h);
+	paste_clipboard();
+}
+
 void UI::start_moving_selection(int gx, int gy) {
 	if (selection_state != SelectionState::Selected)
 		return;
+	if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+		Grid::sync_from_gpu();
+	}
 	int min_x = selection_box.min_x();
 	int min_y = selection_box.min_y();
 	int bw = selection_box.width();
@@ -1254,13 +1190,14 @@ void UI::start_moving_selection(int gx, int gy) {
 	move_initial_height = bh;
 	floating_cells.resize(bw * bh);
 	move_initial_cells.resize(bw * bh);
+	Cell empty_cell{};
 	for (int y = 0; y < bh; ++y) {
 		for (int x = 0; x < bw; ++x) {
-			uint8_t c = Grid::get_cell(min_x + x, min_y + y);
+			Cell c = Grid::get_cell_full_const(min_x + x, min_y + y);
 			floating_cells[y * bw + x] = c;
 			move_initial_cells[y * bw + x] = c;
-			if (!transparent_mode || c != 0) {
-				Grid::set_cell(min_x + x, min_y + y, 0);
+			if (!transparent_mode || c.material != 0) {
+				Grid::set_cell_full(min_x + x, min_y + y, empty_cell);
 			}
 		}
 	}
@@ -1297,9 +1234,9 @@ void UI::drop_moving_selection() {
 			int fgy = current_floating_y + y;
 			if (fgx >= 0 && fgx < static_cast<int>(Grid::get_width()) && fgy >= 0 &&
 				fgy < static_cast<int>(Grid::get_height())) {
-				uint8_t cell = floating_cells[y * bw + x];
-				if (!transparent_mode || cell != 0) {
-					Grid::set_cell(fgx, fgy, cell);
+				const Cell& cell = floating_cells[y * bw + x];
+				if (!transparent_mode || cell.material != 0) {
+					Grid::set_cell_full(fgx, fgy, cell);
 				}
 			}
 		}
@@ -1321,436 +1258,20 @@ void UI::drop_moving_selection() {
 }
 
 bool UI::button_with_icon(const char* label, SDL_Texture* icon, const ImVec2& size_arg) {
-	ImGuiWindow* window = ImGui::GetCurrentWindow();
-	if (window->SkipItems)
-		return false;
-
-	ImGuiContext& g = *GImGui;
-	const ImGuiStyle& style = g.Style;
-	const auto& cfg = ConfigManager::get_config();
-	const ImGuiID id = window->GetID(label);
-	const char* label_end = ImGui::FindRenderedTextEnd(label);
-	const ImVec2 text_size = ImGui::CalcTextSize(label, label_end, false);
-
-	float default_btn_h = (cfg.ui.button_size > 0) ? static_cast<float>(cfg.ui.button_size) : 30.0f;
-	float req_h = (size_arg.y > 0.0f) ? size_arg.y : default_btn_h;
-	float base_icon_sz = (cfg.ui.icon_size > 0) ? static_cast<float>(cfg.ui.icon_size) : 16.0f;
-	float icon_sz =
-		icon ? std::min(base_icon_sz, std::max(8.0f, (req_h >= base_icon_sz + 2.0f) ? base_icon_sz : (req_h - 2.0f)))
-			 : 0.0f;
-	const float spacing = (icon && text_size.x > 0.0f) ? 6.0f : 0.0f;
-	const float total_content_w = (icon ? icon_sz : 0.0f) + spacing + text_size.x;
-	const float total_content_h = std::max(icon_sz, text_size.y);
-
-	ImVec2 pos = window->DC.CursorPos;
-	float req_w = (size_arg.x > 0.0f) ? size_arg.x
-									  : (text_size.x > 0.0f ? (total_content_w + style.FramePadding.x * 2.0f) : req_h);
-	ImVec2 size(req_w, req_h);
-
-	const ImRect bb(pos, ImVec2(pos.x + size.x, pos.y + size.y));
-	ImGui::ItemSize(size, style.FramePadding.y);
-	if (!ImGui::ItemAdd(bb, id))
-		return false;
-
-	bool hovered, held;
-	bool pressed = ImGui::ButtonBehavior(bb, id, &hovered, &held, ImGuiButtonFlags_None);
-
-	const ImU32 col = ImGui::GetColorU32((held && hovered) ? ImGuiCol_ButtonActive
-										 : hovered		   ? ImGuiCol_ButtonHovered
-														   : ImGuiCol_Button);
-	ImGui::RenderNavCursor(bb, id);
-	ImGui::RenderFrame(bb.Min, bb.Max, col, true, style.FrameRounding);
-
-	float content_start_x = std::round(bb.Min.x + (bb.GetWidth() - total_content_w) * 0.5f);
-	if (content_start_x < bb.Min.x + style.FramePadding.x)
-		content_start_x = bb.Min.x + style.FramePadding.x;
-
-	if (icon) {
-		float icon_x = (text_size.x > 0.0f) ? content_start_x : std::round(bb.Min.x + (bb.GetWidth() - icon_sz) * 0.5f);
-		float icon_y = std::round(bb.Min.y + (bb.GetHeight() - icon_sz) * 0.5f);
-		ImVec2 icon_min(icon_x, icon_y);
-		ImVec2 icon_max(icon_x + icon_sz, icon_y + icon_sz);
-		bool is_disabled = (g.CurrentItemFlags & ImGuiItemFlags_Disabled) != 0;
-
-		ImU32 icon_tint = is_disabled ? IM_COL32(180, 180, 180, 130) : IM_COL32(255, 255, 255, 255);
-		window->DrawList->AddImage((ImTextureID)(intptr_t)icon, icon_min, icon_max, ImVec2(0, 0), ImVec2(1, 1),
-								   icon_tint);
-	}
-
-	if (text_size.x > 0.0f) {
-		float text_x = std::round(content_start_x + (icon ? (icon_sz + spacing) : 0.0f));
-		float text_y = std::round(bb.Min.y + (bb.GetHeight() - text_size.y) * 0.5f);
-		ImVec2 text_min(text_x, text_y);
-		ImVec2 text_max(bb.Max.x - style.FramePadding.x, bb.Max.y);
-		ImGui::RenderTextClipped(text_min, text_max, label, label_end, &text_size, ImVec2(0.0f, 0.5f), &bb);
-	}
-
-	return pressed;
+	return UIWidgets::button_with_icon(label, icon, size_arg);
 }
 
 bool UI::selectable_with_color(const char* label, const ImVec4& color, bool selected, ImGuiSelectableFlags flags,
 							   const ImVec2& size_arg, bool show_checkbox) {
-	ImGuiWindow* window = ImGui::GetCurrentWindow();
-	if (window->SkipItems)
-		return false;
-
-	ImGuiContext& g = *GImGui;
-	const ImGuiStyle& style = g.Style;
-
-	const char* label_end = ImGui::FindRenderedTextEnd(label);
-	const ImVec2 text_size = ImGui::CalcTextSize(label, label_end, false);
-
-	const float swatch_sz = 14.0f;
-	const float check_sz = 14.0f;
-	const float spacing = 6.0f;
-
-	float total_content_w =
-		(show_checkbox ? (check_sz + spacing) : 0.0f) + (color.w > 0.0f ? (swatch_sz + spacing) : 0.0f) + text_size.x;
-	float min_h = std::max(text_size.y, swatch_sz);
-	if (show_checkbox) {
-		min_h = std::max(min_h, check_sz);
-	}
-	float req_h = (size_arg.y != 0.0f) ? size_arg.y : (min_h + style.FramePadding.y * 0.5f);
-
-	ImGuiSelectableFlags actual_flags = flags;
-	ImVec2 actual_size;
-	if (size_arg.x != 0.0f) {
-		actual_size = ImVec2(size_arg.x, req_h);
-	} else {
-		actual_size = ImVec2(total_content_w, req_h);
-		actual_flags |= ImGuiSelectableFlags_SpanAvailWidth;
-	}
-
-	std::string id_str = "##sel_col_" + std::string(label);
-	bool pressed = ImGui::Selectable(id_str.c_str(), selected, actual_flags, actual_size);
-
-	ImVec2 min = ImGui::GetItemRectMin();
-	ImVec2 max = ImGui::GetItemRectMax();
-	float center_y = std::round(min.y + (max.y - min.y) * 0.5f);
-	float cur_x = min.x + std::max(6.0f, style.FramePadding.x);
-
-	if (show_checkbox) {
-		ImVec2 check_min(cur_x, std::round(center_y - check_sz * 0.5f));
-		ImVec2 check_max(cur_x + check_sz, check_min.y + check_sz);
-		ImU32 check_bg = ImGui::GetColorU32(selected ? ImGuiCol_FrameBgActive : ImGuiCol_FrameBg);
-		ImGui::RenderFrame(check_min, check_max, check_bg, true, style.FrameRounding);
-		if (selected) {
-			float pad = std::max(1.0f, IM_TRUNC(check_sz / 6.0f));
-			ImGui::RenderCheckMark(window->DrawList, ImVec2(check_min.x + pad, check_min.y + pad),
-								   ImGui::GetColorU32(ImGuiCol_CheckMark), check_sz - pad * 2.0f);
-		}
-		cur_x = check_max.x + spacing;
-	}
-
-	if (color.w > 0.0f) {
-		ImVec2 swatch_min(cur_x, std::round(center_y - swatch_sz * 0.5f));
-		ImVec2 swatch_max(cur_x + swatch_sz, swatch_min.y + swatch_sz);
-		window->DrawList->AddRectFilled(swatch_min, swatch_max, ImGui::GetColorU32(color), 2.0f);
-		window->DrawList->AddRect(swatch_min, swatch_max, IM_COL32(255, 255, 255, 45), 2.0f);
-		window->DrawList->AddRect(swatch_min, swatch_max, ImGui::GetColorU32(style.Colors[ImGuiCol_Border]), 2.0f);
-		cur_x = swatch_max.x + spacing;
-	}
-
-	if (text_size.x > 0.0f) {
-		ImVec2 text_min(cur_x, min.y);
-		ImVec2 text_max(max.x - style.FramePadding.x, max.y);
-		ImRect clip_rect(min, max);
-		ImGui::RenderTextClipped(text_min, text_max, label, label_end, &text_size, ImVec2(0.0f, 0.5f), &clip_rect);
-	}
-
-	return pressed;
+	return UIWidgets::selectable_with_color(label, color, selected, flags, size_arg, show_checkbox);
 }
 
-bool UI::custom_checkbox(const char* label, bool* val, IconID icon_id, const char* tooltip, const ImVec2& size_arg) {
-	if (*val) {
-		const ImVec4& active_col = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-		ImVec4 hover_col = ImVec4(std::min(1.0f, active_col.x * 1.30f), std::min(1.0f, active_col.y * 1.30f),
-								  std::min(1.0f, active_col.z * 1.30f), 1.0f);
-		ImVec4 act_col = ImVec4(active_col.x * 0.85f, active_col.y * 0.85f, active_col.z * 0.85f, 1.0f);
-		ImGui::PushStyleColor(ImGuiCol_Button, active_col);
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hover_col);
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, act_col);
-	} else {
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.25f, 0.25f, 0.28f, 0.50f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.35f, 0.35f, 0.38f, 0.8f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.20f, 0.20f, 0.22f, 1.0f));
-	}
-
-	SDL_Texture* tex = (icon_id != IconID::Count) ? IconManager::get(icon_id) : nullptr;
-	bool clicked = button_with_icon(label, tex, size_arg);
-	ImGui::PopStyleColor(3);
-
-	if (clicked) {
-		*val = !*val;
-	}
-	if (tooltip && tooltip[0] != '\0' && ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("%s", tooltip);
-	}
-	return clicked;
+bool UI::custom_checkbox(const char* label, bool* val, IconID icon_id, const char* tooltip, const ImVec2& size) {
+	return UIWidgets::custom_checkbox(label, val, icon_id, tooltip, size);
 }
 
 bool UI::gradient_editor(const char* label, ColorGradient& gradient, float min_val, float max_val, float width) {
-	if (max_val <= min_val) {
-		max_val = min_val + 1.0f;
-	}
-	float range_span = max_val - min_val;
-
-	if (gradient.stops.empty()) {
-		gradient.stops = {{min_val, {0.0f, 0.0f, 0.0f, 1.0f}}, {max_val, {1.0f, 1.0f, 1.0f, 1.0f}}};
-		gradient.selected_stop = 0;
-	} else {
-		// If stops are still in 0-1 range and attribute range is different, scale them to [min_val, max_val]
-		bool all_01 = true;
-		for (const auto& s : gradient.stops) {
-			if (s.pos < 0.0f || s.pos > 1.0f) {
-				all_01 = false;
-				break;
-			}
-		}
-		if (all_01 && range_span > 1.5f) {
-			for (auto& s : gradient.stops) {
-				s.pos = min_val + s.pos * range_span;
-			}
-			gradient.sort_stops();
-		}
-	}
-
-	bool changed = false;
-	ImGui::PushID(label);
-
-	float avail_w = (width > 0.0f) ? width : ImGui::GetContentRegionAvail().x;
-	if (avail_w < 120.0f)
-		avail_w = 120.0f;
-
-	const float swatch_w = 26.0f;
-	const float spacing = 6.0f;
-	const float bar_h = 30.0f;
-	const float bar_w = std::max(60.0f, avail_w - swatch_w - spacing);
-
-	ImVec2 bar_p0 = ImGui::GetCursorScreenPos();
-	ImVec2 bar_p1(bar_p0.x + bar_w, bar_p0.y + bar_h);
-
-	ImGui::InvisibleButton("grad_bar", ImVec2(bar_w, bar_h));
-	bool is_hovered = ImGui::IsItemHovered();
-	ImGuiIO& io = ImGui::GetIO();
-	ImDrawList* draw_list = ImGui::GetWindowDrawList();
-
-	if (gradient.selected_stop < 0 || gradient.selected_stop >= static_cast<int>(gradient.stops.size())) {
-		gradient.selected_stop = 0;
-	}
-
-	static int s_drag_stop_idx = -1;
-	static ImGuiID s_active_grad_id = 0;
-	ImGuiID current_grad_id = ImGui::GetID("grad_bar");
-
-	const float handle_w = 8.0f;
-	const float handle_h = 16.0f;
-
-	auto pos_to_x = [&](float p) -> float {
-		float u = std::clamp((p - min_val) / range_span, 0.0f, 1.0f);
-		return bar_p0.x + u * bar_w;
-	};
-
-	auto x_to_pos = [&](float mx) -> float {
-		float u = std::clamp((mx - bar_p0.x) / bar_w, 0.0f, 1.0f);
-		return min_val + u * range_span;
-	};
-
-	// Mouse interaction on the bar
-	if (is_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-		int clicked_stop = -1;
-		float mouse_x = io.MousePos.x;
-		for (int i = 0; i < static_cast<int>(gradient.stops.size()); ++i) {
-			float sx = pos_to_x(gradient.stops[i].pos);
-			if (std::abs(mouse_x - sx) <= (handle_w + 2.0f)) {
-				clicked_stop = i;
-				break;
-			}
-		}
-
-		if (clicked_stop >= 0) {
-			gradient.selected_stop = clicked_stop;
-			s_drag_stop_idx = clicked_stop;
-			s_active_grad_id = current_grad_id;
-		} else {
-			// Clicked empty area on the bar -> add new stop sampled from current gradient
-			float new_pos = x_to_pos(mouse_x);
-			auto sampled = gradient.sample(new_pos);
-			int new_idx = gradient.add_stop(new_pos, sampled);
-			gradient.selected_stop = new_idx;
-			s_drag_stop_idx = new_idx;
-			s_active_grad_id = current_grad_id;
-			changed = true;
-		}
-	}
-
-	// Right-click on a pin handle to delete it
-	if (is_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right) && gradient.stops.size() > 1) {
-		float mouse_x = io.MousePos.x;
-		for (int i = 0; i < static_cast<int>(gradient.stops.size()); ++i) {
-			float sx = pos_to_x(gradient.stops[i].pos);
-			if (std::abs(mouse_x - sx) <= (handle_w + 2.0f)) {
-				gradient.remove_stop(i);
-				changed = true;
-				break;
-			}
-		}
-	}
-
-	// Dragging an existing stop
-	if (s_active_grad_id == current_grad_id && s_drag_stop_idx >= 0) {
-		if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-			float new_pos = x_to_pos(io.MousePos.x);
-			if (s_drag_stop_idx < static_cast<int>(gradient.stops.size())) {
-				if (gradient.stops[s_drag_stop_idx].pos != new_pos) {
-					gradient.stops[s_drag_stop_idx].pos = new_pos;
-					gradient.sort_stops();
-					s_drag_stop_idx = gradient.selected_stop;
-					changed = true;
-				}
-			}
-		} else {
-			s_drag_stop_idx = -1;
-			s_active_grad_id = 0;
-		}
-	}
-
-	// --- RENDER GRADIENT BAR ---
-	draw_list->PushClipRect(bar_p0, bar_p1, true);
-
-	// 1. Checkerboard background for alpha visibility
-	const float check_sz = 6.0f;
-	for (float y = bar_p0.y; y < bar_p1.y; y += check_sz) {
-		for (float x = bar_p0.x; x < bar_p1.x; x += check_sz) {
-			int xi = static_cast<int>((x - bar_p0.x) / check_sz);
-			int yi = static_cast<int>((y - bar_p0.y) / check_sz);
-			ImU32 bg_col = ((xi + yi) % 2 == 0) ? IM_COL32(90, 90, 90, 255) : IM_COL32(50, 50, 50, 255);
-			draw_list->AddRectFilled(
-				ImVec2(x, y), ImVec2(std::min(x + check_sz, bar_p1.x), std::min(y + check_sz, bar_p1.y)), bg_col);
-		}
-	}
-
-	auto to_imu32 = [](const std::array<float, 4>& c) -> ImU32 {
-		return IM_COL32(static_cast<int>(std::clamp(c[0], 0.0f, 1.0f) * 255.0f),
-						static_cast<int>(std::clamp(c[1], 0.0f, 1.0f) * 255.0f),
-						static_cast<int>(std::clamp(c[2], 0.0f, 1.0f) * 255.0f),
-						static_cast<int>(std::clamp(c[3], 0.0f, 1.0f) * 255.0f));
-	};
-
-	// 2. Leftmost fill
-	if (gradient.stops.front().pos > min_val) {
-		float x0 = bar_p0.x;
-		float x1 = pos_to_x(gradient.stops.front().pos);
-		ImU32 col = to_imu32(gradient.stops.front().color);
-		draw_list->AddRectFilled(ImVec2(x0, bar_p0.y), ImVec2(x1, bar_p1.y), col);
-	}
-
-	// 3. Multi-color linear gradient segments
-	for (size_t i = 0; i + 1 < gradient.stops.size(); ++i) {
-		float x0 = pos_to_x(gradient.stops[i].pos);
-		float x1 = pos_to_x(gradient.stops[i + 1].pos);
-		ImU32 col0 = to_imu32(gradient.stops[i].color);
-		ImU32 col1 = to_imu32(gradient.stops[i + 1].color);
-		draw_list->AddRectFilledMultiColor(ImVec2(x0, bar_p0.y), ImVec2(x1, bar_p1.y), col0, col1, col1, col0);
-	}
-
-	// 4. Rightmost fill
-	if (gradient.stops.back().pos < max_val) {
-		float x0 = pos_to_x(gradient.stops.back().pos);
-		float x1 = bar_p1.x;
-		ImU32 col = to_imu32(gradient.stops.back().color);
-		draw_list->AddRectFilled(ImVec2(x0, bar_p0.y), ImVec2(x1, bar_p1.y), col);
-	}
-
-	// 5. Pin handles
-	for (int i = 0; i < static_cast<int>(gradient.stops.size()); ++i) {
-		float px = pos_to_x(gradient.stops[i].pos);
-		bool is_sel = (i == gradient.selected_stop);
-
-		// Guide line with dark shadow so it is always visible on any background
-		draw_list->AddLine(ImVec2(px - 1.0f, bar_p0.y), ImVec2(px - 1.0f, bar_p1.y - handle_h), IM_COL32(0, 0, 0, 160),
-						   1.0f);
-		draw_list->AddLine(ImVec2(px + 1.0f, bar_p0.y), ImVec2(px + 1.0f, bar_p1.y - handle_h), IM_COL32(0, 0, 0, 160),
-						   1.0f);
-		draw_list->AddLine(ImVec2(px, bar_p0.y), ImVec2(px, bar_p1.y - handle_h),
-						   is_sel ? IM_COL32(255, 255, 255, 255) : IM_COL32(200, 200, 200, 200), 1.0f);
-
-		// Handle box
-		ImVec2 h_min(px - handle_w * 0.5f, bar_p1.y - handle_h);
-		ImVec2 h_max(px + handle_w * 0.5f, bar_p1.y - 1.0f);
-
-		// Handle fill
-		draw_list->AddRectFilled(h_min, h_max, to_imu32(gradient.stops[i].color));
-
-		// Outer black border so stop is always clearly visible even if handle is pure white
-		draw_list->AddRect(ImVec2(h_min.x - 1.0f, h_min.y - 1.0f), ImVec2(h_max.x + 1.0f, h_max.y + 1.0f),
-						   IM_COL32(0, 0, 0, 255), 1.0f, 0, 1.0f);
-
-		if (is_sel) {
-			// Red Godot-style highlight border
-			draw_list->AddRect(h_min, h_max, IM_COL32(255, 50, 40, 255), 1.0f, 0, 2.0f);
-			// Inner dark contrast stroke ensuring white fill never washes out the border
-			draw_list->AddRect(ImVec2(h_min.x + 1.0f, h_min.y + 1.0f), ImVec2(h_max.x - 1.0f, h_max.y - 1.0f),
-							   IM_COL32(0, 0, 0, 180), 0.0f, 0, 1.0f);
-		} else {
-			draw_list->AddRect(h_min, h_max, IM_COL32(60, 60, 60, 255), 1.0f, 0, 1.0f);
-		}
-	}
-
-	// Outline border
-	draw_list->AddRect(bar_p0, bar_p1, IM_COL32(70, 70, 70, 255), 0.0f, 0, 1.0f);
-	draw_list->PopClipRect();
-
-	// --- SELECTED STOP COLOR EDIT (Single Colored Square) ---
-	ImGui::SameLine(0.0f, spacing);
-	auto& sel_stop = gradient.stops[gradient.selected_stop];
-	ImGui::SetNextItemWidth(swatch_w);
-	if (ImGui::ColorEdit4("##stop_color", sel_stop.color.data(),
-						  ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf |
-							  ImGuiColorEditFlags_NoInputs)) {
-		changed = true;
-	}
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Edit selected stop RGBA color and alpha");
-	}
-
-	// --- SELECTED STOP CONTROLS ---
-	ImGui::Spacing();
-	ImGui::Text("Position:");
-	ImGui::SameLine(0.0f, 4.0f);
-	float del_btn_w = 26.0f;
-	float pos_w = std::max(60.0f, avail_w - 75.0f - del_btn_w);
-	ImGui::SetNextItemWidth(pos_w);
-	float pos_val = sel_stop.pos;
-	float drag_step = range_span * 0.005f;
-	const char* fmt = (range_span >= 50.0f) ? "%.0f" : (range_span >= 5.0f ? "%.1f" : "%.2f");
-	if (ImGui::DragFloat("##stop_pos", &pos_val, drag_step, min_val, max_val, fmt)) {
-		sel_stop.pos = std::clamp(pos_val, min_val, max_val);
-		gradient.sort_stops();
-		changed = true;
-	}
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Position of selected stop [%.1f - %.1f]", min_val, max_val);
-	}
-
-	ImGui::SameLine(0.0f, 6.0f);
-	bool can_delete = gradient.stops.size() > 1;
-	if (!can_delete) {
-		ImGui::BeginDisabled();
-	}
-	if (button_with_icon("##del_stop", IconManager::get(IconID::Delete), ImVec2(24.0f, 22.0f))) {
-		gradient.remove_stop(gradient.selected_stop);
-		changed = true;
-	}
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-		ImGui::SetTooltip(can_delete ? "Delete selected stop (or right-click stop)" : "Cannot delete last stop");
-	}
-	if (!can_delete) {
-		ImGui::EndDisabled();
-	}
-
-	ImGui::PopID();
-	return changed;
+	return UIWidgets::gradient_editor(label, gradient, min_val, max_val, width);
 }
 
 void UI::render_floating_toolbar() {
@@ -1789,7 +1310,6 @@ void UI::render_floating_toolbar() {
 			ImVec4(std::min(1.0f, btn_active_col.x * 1.15f + 0.05f), std::min(1.0f, btn_active_col.y * 1.15f + 0.05f),
 				   std::min(1.0f, btn_active_col.z * 1.15f + 0.05f), btn_active_col.w);
 
-		// Brush Button
 		if (is_brush) {
 			ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
@@ -1807,7 +1327,6 @@ void UI::render_floating_toolbar() {
 
 		ImGui::SameLine(0.0f, get_spacing(0.0f));
 
-		// Selection Button
 		if (is_select) {
 			ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, btn_active_hover);
@@ -1825,7 +1344,6 @@ void UI::render_floating_toolbar() {
 
 		ImGui::SameLine(0.0f, get_spacing(0.0f));
 
-		// Attribute Button (Disabled if set has no attributes!)
 		if (!has_attrs) {
 			ImGui::BeginDisabled();
 		}
@@ -1853,7 +1371,6 @@ void UI::render_floating_toolbar() {
 
 		ImGui::SameLine(0.0f, get_spacing(0.0f));
 
-		// Expandable Menu Button for Tool Options
 		bool was_options_expanded = s_options_expanded;
 		if (was_options_expanded) {
 			ImGui::PushStyleColor(ImGuiCol_Button, btn_active_col);
@@ -1870,7 +1387,6 @@ void UI::render_floating_toolbar() {
 			ImGui::SetTooltip("%s tool options drawer", s_options_expanded ? "Collapse" : "Expand");
 		}
 
-		// Expandable Tool Options Drawer
 		if (s_options_expanded) {
 			ImGui::Separator();
 			ImGui::Spacing();
@@ -1908,7 +1424,6 @@ void UI::render_floating_toolbar() {
 
 				ImVec2 act_btn_sz(28.0f, 28.0f);
 
-				// Row 1 of actions
 				if (!has_selection)
 					ImGui::BeginDisabled();
 				if (button_with_icon("##CopySel", IconManager::get(IconID::Copy), act_btn_sz))
@@ -1950,7 +1465,6 @@ void UI::render_floating_toolbar() {
 				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 					ImGui::SetTooltip("Delete (%s)", ShortcutManager::get_key_string(ShortcutAction::Delete).c_str());
 
-				// Row 2 of actions
 				if (!has_selection)
 					ImGui::BeginDisabled();
 				if (button_with_icon("##FillSel", IconManager::get(IconID::Fill), act_btn_sz))
@@ -2116,13 +1630,13 @@ void UI::render_mouse_overlay() {
 			for (int y = 0; y < bh; ++y) {
 				int x = 0;
 				while (x < bw) {
-					uint8_t m = floating_cells[y * bw + x];
+					uint8_t m = floating_cells[y * bw + x].material;
 					if (m == 0 && transparent_mode) {
 						x++;
 						continue;
 					}
 					int start_x = x;
-					while (x < bw && floating_cells[y * bw + x] == m) {
+					while (x < bw && floating_cells[y * bw + x].material == m) {
 						x++;
 					}
 					int len = x - start_x;
@@ -2149,13 +1663,13 @@ void UI::render_mouse_overlay() {
 			for (int y = 0; y < bh; ++y) {
 				int x = 0;
 				while (x < bw) {
-					uint8_t m = clipboard.cells[y * bw + x];
+					uint8_t m = clipboard.cells[y * bw + x].material;
 					if (m == 0 && transparent_mode) {
 						x++;
 						continue;
 					}
 					int start_x = x;
-					while (x < bw && clipboard.cells[y * bw + x] == m) {
+					while (x < bw && clipboard.cells[y * bw + x].material == m) {
 						x++;
 					}
 					int len = x - start_x;
@@ -2609,7 +2123,7 @@ void UI::handle_keyboard_shortcuts(ImGuiIO& io) {
 		} else if (selection_state == SelectionState::Pasting) {
 			selection_state = SelectionState::None;
 		} else {
-			show_exit_popup = true;
+			UIModals::open_exit();
 		}
 		return;
 	}
@@ -2715,9 +2229,9 @@ void UI::handle_canvas_interaction() {
 						int gy = current_floating_y + y;
 						if (gx >= 0 && gx < static_cast<int>(Grid::get_width()) && gy >= 0 &&
 							gy < static_cast<int>(Grid::get_height())) {
-							uint8_t cell = clipboard.cells[y * clipboard.width + x];
-							if (!transparent_mode || cell != 0) {
-								Grid::set_cell(gx, gy, cell);
+							const Cell& cell = clipboard.cells[y * clipboard.width + x];
+							if (!transparent_mode || cell.material != 0) {
+								Grid::set_cell_full(gx, gy, cell);
 							}
 						}
 					}
@@ -2907,6 +2421,11 @@ void UI::handle_canvas_interaction() {
 
 		if (left_clicked || right_clicked) {
 			UndoManager::set_pending_grid_snapshot();
+			s_attr_stroke_id++;
+			if (s_attr_stroke_id == 0) {
+				std::fill(s_attr_cell_stroke.begin(), s_attr_cell_stroke.end(), 0);
+				s_attr_stroke_id = 1;
+			}
 			if (is_shift && !is_alt) {
 				ImGuiMouseButton btn = left_clicked ? ImGuiMouseButton_Left : ImGuiMouseButton_Right;
 				s_line_brush_start_grid = screen_to_grid_pos(io.MouseClickedPos[btn]);
@@ -2931,6 +2450,11 @@ void UI::handle_canvas_interaction() {
 			ImGuiMouseButton btn = left_released ? ImGuiMouseButton_Left : ImGuiMouseButton_Right;
 			ImVec2 start_grid =
 				s_line_brush_active ? s_line_brush_start_grid : screen_to_grid_pos(io.MouseClickedPos[btn]);
+			s_attr_stroke_id++;
+			if (s_attr_stroke_id == 0) {
+				std::fill(s_attr_cell_stroke.begin(), s_attr_cell_stroke.end(), 0);
+				s_attr_stroke_id = 1;
+			}
 			paint_attribute_line(start_grid, grid_pos, mouse_size, target_attr, val, set_exact, brush_shape);
 			UndoManager::commit_grid_snapshot_if_changed("Draw Attribute Line");
 			s_line_brush_active = false;
@@ -2939,8 +2463,10 @@ void UI::handle_canvas_interaction() {
 			if (left_down || right_down) {
 				float val = left_down ? attr_tool_value : (set_exact ? def_val : -attr_tool_value);
 				if (s_is_canvas_dragging) {
-					paint_attribute_line(s_prev_canvas_grid, grid_pos, mouse_size, target_attr, val, set_exact,
-										 brush_shape);
+					if (s_prev_canvas_grid.x != grid_pos.x || s_prev_canvas_grid.y != grid_pos.y) {
+						paint_attribute_line(s_prev_canvas_grid, grid_pos, mouse_size, target_attr, val, set_exact,
+											 brush_shape);
+					}
 				} else {
 					GridRect brush = calculate_brush_bounds(grid_pos, mouse_size);
 					paint_attribute_brush_at(brush.x, brush.y, brush.w, target_attr, val, set_exact, brush_shape);
@@ -2996,7 +2522,9 @@ void UI::handle_canvas_interaction() {
 		if (left_down || right_down) {
 			uint8_t mat_id = left_down ? static_cast<uint8_t>(selected_id) : 0;
 			if (s_is_canvas_dragging) {
-				paint_line(s_prev_canvas_grid, grid_pos, mouse_size, mat_id, brush_shape);
+				if (s_prev_canvas_grid.x != grid_pos.x || s_prev_canvas_grid.y != grid_pos.y) {
+					paint_line(s_prev_canvas_grid, grid_pos, mouse_size, mat_id, brush_shape);
+				}
 			} else {
 				GridRect brush = calculate_brush_bounds(grid_pos, mouse_size);
 				paint_brush_at(brush.x, brush.y, brush.w, mat_id, brush_shape);
@@ -3244,90 +2772,22 @@ static bool s_is_dragging_paint = false;
 static bool s_is_dragging_clear = false;
 
 std::vector<UI::MaterialShortcutItem> UI::get_all_material_shortcuts() {
-	const auto& mats = MaterialManager::get_materials();
-	if (mats.empty())
-		return {};
-
-	const auto& meta = SetManager::get_current_metadata();
-
-	std::vector<size_t> order;
-	order.reserve(mats.size());
-	for (size_t i = 1; i < mats.size(); ++i) {
-		order.push_back(i);
+	auto raw = UIShortcuts::get_all_material_shortcuts();
+	std::vector<UI::MaterialShortcutItem> res;
+	res.reserve(raw.size());
+	for (const auto& item : raw) {
+		UI::MaterialShortcutItem m;
+		m.name = item.name;
+		m.id = item.id;
+		m.custom_shortcut = item.custom_shortcut;
+		m.effective_shortcut = item.effective_shortcut;
+		m.is_custom = item.is_custom;
+		res.push_back(std::move(m));
 	}
-	order.push_back(0);
-
-	std::vector<MaterialShortcutItem> result;
-	result.reserve(order.size());
-
-	std::unordered_set<std::string> used_shortcuts;
-	for (size_t idx : order) {
-		auto it = meta.shortcuts.find(mats[idx].name);
-		if (it != meta.shortcuts.end() && !it->second.empty()) {
-			used_shortcuts.insert(it->second);
-		}
-	}
-
-	int next_order_num = 1;
-
-	auto find_next_available_digit = [&](int start_num) -> int {
-		for (int n = start_num; n <= 9; ++n) {
-			if (!used_shortcuts.count(std::to_string(n))) {
-				return n;
-			}
-		}
-		for (int n = 1; n < start_num && n <= 9; ++n) {
-			if (!used_shortcuts.count(std::to_string(n))) {
-				return n;
-			}
-		}
-		return 0;
-	};
-
-	for (size_t idx : order) {
-		MaterialShortcutItem item;
-		item.name = mats[idx].name;
-		item.id = mats[idx].id;
-
-		auto it = meta.shortcuts.find(mats[idx].name);
-		if (it != meta.shortcuts.end() && !it->second.empty()) {
-			item.custom_shortcut = it->second;
-			item.effective_shortcut = it->second;
-			item.is_custom = true;
-
-			if (item.custom_shortcut.length() == 1 && item.custom_shortcut[0] >= '1' &&
-				item.custom_shortcut[0] <= '9') {
-				next_order_num = (item.custom_shortcut[0] - '0') + 1;
-			}
-		} else {
-			item.is_custom = false;
-
-			int chosen_digit = find_next_available_digit(next_order_num);
-			if (chosen_digit >= 1 && chosen_digit <= 9) {
-				std::string num_str = std::to_string(chosen_digit);
-				item.effective_shortcut = num_str;
-				used_shortcuts.insert(num_str);
-				next_order_num = chosen_digit + 1;
-			} else {
-				item.effective_shortcut = "";
-			}
-		}
-		result.push_back(item);
-	}
-
-	return result;
+	return res;
 }
 
-std::string UI::get_effective_material_shortcut(uint8_t id) {
-	auto all = get_all_material_shortcuts();
-	for (const auto& item : all) {
-		if (item.id == id) {
-			return item.effective_shortcut;
-		}
-	}
-	return "";
-}
-
+std::string UI::get_effective_material_shortcut(uint8_t id) { return UIShortcuts::get_effective_material_shortcut(id); }
 struct ExprBadgeRef {
 	int dx;
 	int dy;
@@ -3742,8 +3202,7 @@ void UI::render_material_editor() {
 									curr = p.inherits_from;
 								}
 								if (selected_id == 0 && target_has_rules) {
-									s_pending_empty_inherit_id = other_mat.id;
-									open_empty_rule_warning_popup = true;
+									UIModals::open_empty_rule_warning(other_mat.id);
 								} else {
 									UndoManager::push_snapshot("Set Inheritance");
 									MaterialManager::set_material_inheritance(selected_id, other_mat.id);
@@ -3837,8 +3296,7 @@ void UI::render_material_editor() {
 
 		if (button_with_icon("Add Rule", IconManager::get(IconID::Add))) {
 			if (selected_id == 0 && mat.rules.empty()) {
-				s_pending_empty_inherit_id = 255;
-				open_empty_rule_warning_popup = true;
+				UIModals::open_empty_rule_warning(255);
 			} else {
 				UndoManager::push_snapshot("Add Rule");
 				RuleDefinition new_rule;
@@ -3879,12 +3337,10 @@ void UI::render_material_editor() {
 				else
 					new_w++;
 				int new_total = new_w * new_h;
-				if (new_total > static_cast<int>(DEFAULT_NEIGHBOR_MAX_CELLS) &&
-					!ConfigManager::get_config().allow_large_neighborhoods) {
-					s_pending_expand_side = side;
-					s_pending_expand_mat_id = selected_id;
-					s_pending_expand_rule_idx = reference.is_inherited ? -1 : static_cast<int>(reference.index);
-					open_large_neighborhood_warning_popup = true;
+				if (new_total > 100 && !ConfigManager::get_config().allow_large_neighborhoods) {
+					UIModals::open_large_neighborhood_warning(
+						reference.is_inherited ? -1 : static_cast<int>(reference.index), selected_id,
+						static_cast<int>(side));
 					return;
 				}
 				UndoManager::push_snapshot("Expand Rule Neighborhood");
@@ -4168,8 +3624,8 @@ void UI::render_material_editor() {
 				if (hit) {
 					eq_click_consumed = true;
 					s_keep_eq_popup_open = true;
-					if (s_active_eq_cell_id < static_cast<int>(rule.then_actions.size()) &&
-						s_active_eq_attr_idx >= 0 && s_active_eq_attr_idx < 3) {
+					if (s_active_eq_cell_id < static_cast<int>(rule.then_actions.size()) && s_active_eq_attr_idx >= 0 &&
+						s_active_eq_attr_idx < 3) {
 						auto& cur_ta = rule.then_actions[s_active_eq_cell_id];
 						UndoManager::push_snapshot("Add Cell to Equation");
 						append_cell_to_equation(cur_ta.attr_exprs[s_active_eq_attr_idx], hit_dx, hit_dy);
@@ -5021,12 +4477,15 @@ void UI::render_material_editor() {
 													if (b.is_relative) {
 														int abs_x = dx + b.dx;
 														int abs_y = dy + b.dy;
-														ImGui::SetTooltip("Relative cell ~[%d, %d] (targets [%d, %d])\nRight-click: Make Absolute [%d, %d]\nShift+Click: Remove",
-																		  b.dx, b.dy, abs_x, abs_y, abs_x, abs_y);
+														ImGui::SetTooltip(
+															"Relative cell ~[%d, %d] (targets [%d, %d])\nRight-click: "
+															"Make Absolute [%d, %d]\nShift+Click: Remove",
+															b.dx, b.dy, abs_x, abs_y, abs_x, abs_y);
 													} else {
 														int rel_x = b.dx - dx;
 														int rel_y = b.dy - dy;
-														ImGui::SetTooltip("Absolute cell [%d, %d]\nRight-click: Make Relative ~[%d, %d]\nShift+Click: Remove",
+														ImGui::SetTooltip("Absolute cell [%d, %d]\nRight-click: Make "
+																		  "Relative ~[%d, %d]\nShift+Click: Remove",
 																		  b.dx, b.dy, rel_x, rel_y);
 													}
 												}
@@ -5076,7 +4535,8 @@ void UI::render_material_editor() {
 											ImGui::Image(reinterpret_cast<ImTextureID>(ok_icon), ImVec2(15.0f, 15.0f));
 										}
 										if (ImGui::IsItemHovered()) {
-											ImGui::SetTooltip("Valid expression (%zu ops)", test_ops.size());
+											ImGui::SetTooltip("Valid expression (%zu op%s)", test_ops.size(),
+															  test_ops.size() == 1 ? "" : "s");
 										}
 									} else {
 										SDL_Texture* err_icon = IconManager::get(IconID::Cross);
@@ -5239,238 +4699,35 @@ void UI::render_material_editor() {
 	}
 }
 
-namespace {
-	bool s_show_publish_modal = false;
-	int s_publish_type_idx = 0;
-	char s_publish_title[128] = "";
-	char s_publish_author[64] = "";
-	char s_publish_desc[512] = "";
-	bool s_publishing = false;
-	std::string s_publish_status;
-	bool s_pub_bundle_set = true;
-	std::string s_publish_target_set;
-	std::string s_publish_target_save;
-	std::string s_publish_target_stamp;
-	int s_publish_target_w = 0;
-	int s_publish_target_h = 0;
-	std::string s_publish_forked_from_id;
-	int s_publish_forked_from_version = 0;
-	bool s_publish_is_private = false;
+static std::vector<std::string> get_forked_sets_for(const std::string& set_name) {
+	std::vector<std::string> forked_sets;
+	if (set_name.empty())
+		return forked_sets;
 
-	bool s_show_versions_modal = false;
-	WorkshopItemClient s_versions_item;
-	std::vector<WorkshopItemVersion> s_current_item_versions;
-	bool s_loading_versions = false;
-	std::string s_versions_error;
-	bool open_fork_set_popup = false;
+	SetMetadata orig_meta = SetManager::load_set_metadata(set_name);
+	std::vector<std::string> all_sets = SetManager::get_sets();
 
-	void open_versions_modal(const WorkshopItemClient& item) {
-		s_versions_item = item;
-		s_current_item_versions.clear();
-		s_show_versions_modal = true;
-		s_loading_versions = true;
-		s_versions_error = "";
-		WorkshopClient::fetch_item_versions(item.id,
-											[](bool success, const std::vector<WorkshopItemVersion>& versions) {
-												s_loading_versions = false;
-												if (success) {
-													s_current_item_versions = versions;
-												} else {
-													s_versions_error = "Failed to load version history from server.";
-												}
-											});
-	}
-
-	void open_share_for_set(const std::string& set_name) {
-		s_publish_target_set = set_name;
-		s_publish_target_save = "";
-		s_publish_target_stamp = "";
-		s_publish_type_idx = 1;
-		s_show_publish_modal = true;
-		s_publish_status = "";
-		s_publish_is_private = false;
-		std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", set_name.c_str());
-		SetMetadata sm = SetManager::load_set_metadata(set_name);
-		s_publish_forked_from_id = sm.forked_from_id;
-		s_publish_forked_from_version = sm.forked_from_version;
-		std::string auth_user = WorkshopClient::is_logged_in() ? WorkshopClient::get_logged_in_username()
-															   : (sm.author.empty() ? "Player" : sm.author);
-		std::snprintf(s_publish_author, sizeof(s_publish_author), "%s", auth_user.c_str());
-		std::snprintf(s_publish_desc, sizeof(s_publish_desc), "%s", sm.description.c_str());
-	}
-
-	void open_share_for_save(const std::string& filename, const std::string& name, const std::string& parent_set, int w,
-							 int h) {
-		s_publish_target_set = parent_set;
-		s_publish_target_save = filename;
-		s_publish_target_stamp = "";
-		s_publish_target_w = w;
-		s_publish_target_h = h;
-		s_publish_type_idx = 0;
-		s_show_publish_modal = true;
-		s_publish_status = "";
-		s_publish_is_private = false;
-		SaveFileInfo sinfo;
-		if (SaveManager::inspect_save_file(filename, parent_set, sinfo)) {
-			s_publish_forked_from_id = sinfo.forked_from_id;
-			s_publish_forked_from_version = sinfo.forked_from_version;
-		} else {
-			s_publish_forked_from_id = "";
-			s_publish_forked_from_version = 0;
-		}
-		std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", name.c_str());
-		SetMetadata sm = SetManager::load_set_metadata(parent_set);
-		std::string auth_user = WorkshopClient::is_logged_in() ? WorkshopClient::get_logged_in_username()
-															   : (sm.author.empty() ? "Player" : sm.author);
-		std::snprintf(s_publish_author, sizeof(s_publish_author), "%s", auth_user.c_str());
-		std::string desc = "Save from set '" + parent_set + "'";
-		std::snprintf(s_publish_desc, sizeof(s_publish_desc), "%s", desc.c_str());
-	}
-
-	void open_share_for_stamp(const std::string& filename, const std::string& name, const std::string& parent_set,
-							  int w, int h) {
-		s_publish_target_set = parent_set;
-		s_publish_target_save = "";
-		s_publish_target_stamp = filename;
-		s_publish_target_w = w;
-		s_publish_target_h = h;
-		s_publish_type_idx = 2;
-		s_show_publish_modal = true;
-		s_publish_status = "";
-		s_publish_is_private = false;
-		StampFileInfo stinfo;
-		if (SaveManager::inspect_stamp_file(filename, parent_set, stinfo)) {
-			s_publish_forked_from_id = stinfo.forked_from_id;
-			s_publish_forked_from_version = stinfo.forked_from_version;
-		} else {
-			s_publish_forked_from_id = "";
-			s_publish_forked_from_version = 0;
-		}
-		std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", name.c_str());
-		SetMetadata sm = SetManager::load_set_metadata(parent_set);
-		std::string auth_user = WorkshopClient::is_logged_in() ? WorkshopClient::get_logged_in_username()
-															   : (sm.author.empty() ? "Player" : sm.author);
-		std::snprintf(s_publish_author, sizeof(s_publish_author), "%s", auth_user.c_str());
-		std::string desc = "Stamp from set '" + parent_set + "'";
-		std::snprintf(s_publish_desc, sizeof(s_publish_desc), "%s", desc.c_str());
-	}
-
-	void open_share_for_theme() {
-		s_publish_target_set = "";
-		s_publish_target_save = "";
-		s_publish_target_stamp = "";
-		s_publish_forked_from_id = "";
-		s_publish_forked_from_version = 0;
-		s_publish_type_idx = 3;
-		s_show_publish_modal = true;
-		s_publish_status = "";
-		s_publish_is_private = false;
-		std::snprintf(s_publish_title, sizeof(s_publish_title), "My Custom Theme");
-		std::string auth_user = WorkshopClient::is_logged_in() ? WorkshopClient::get_logged_in_username() : "Player";
-		std::snprintf(s_publish_author, sizeof(s_publish_author), "%s", auth_user.c_str());
-		std::snprintf(s_publish_desc, sizeof(s_publish_desc), "Custom UI theme for Sand3");
-	}
-
-	std::vector<std::string> get_forked_sets_for(const std::string& set_name) {
-		std::vector<std::string> forked_sets;
-		if (set_name.empty())
-			return forked_sets;
-
-		SetMetadata orig_meta = SetManager::load_set_metadata(set_name);
-		std::vector<std::string> all_sets = SetManager::get_sets();
-
-		for (const auto& s : all_sets) {
-			if (s == set_name)
-				continue;
-			SetMetadata s_meta = SetManager::load_set_metadata(s);
-			bool is_forked = false;
-			if (!s_meta.forked_from_id.empty()) {
-				if (s_meta.forked_from_id == set_name ||
-					(!orig_meta.workshop_id.empty() && s_meta.forked_from_id == orig_meta.workshop_id) ||
-					(!orig_meta.forked_from_id.empty() && s_meta.forked_from_id == orig_meta.forked_from_id)) {
-					is_forked = true;
-				}
-			}
-			if (!is_forked && s.rfind(set_name + "_fork", 0) == 0) {
+	for (const auto& s : all_sets) {
+		if (s == set_name)
+			continue;
+		SetMetadata s_meta = SetManager::load_set_metadata(s);
+		bool is_forked = false;
+		if (!s_meta.forked_from_id.empty()) {
+			if (s_meta.forked_from_id == set_name ||
+				(!orig_meta.workshop_id.empty() && s_meta.forked_from_id == orig_meta.workshop_id) ||
+				(!orig_meta.forked_from_id.empty() && s_meta.forked_from_id == orig_meta.forked_from_id)) {
 				is_forked = true;
 			}
-			if (is_forked) {
-				forked_sets.push_back(s);
-			}
 		}
-		return forked_sets;
-	}
-
-	bool s_show_migrate_modal = false;
-	bool s_migrate_is_save = true;
-	std::string s_migrate_filename;
-	std::string s_migrate_item_name;
-	std::string s_migrate_source_set;
-	std::vector<std::string> s_migrate_forked_sets;
-	int s_selected_migrate_set_idx = 0;
-
-	void check_and_render_migrate_modal() {
-		if (s_show_migrate_modal) {
-			ImGui::OpenPopup("Migrate to Forked Set##Modal");
+		if (!is_forked && s.rfind(set_name + "_fork", 0) == 0) {
+			is_forked = true;
 		}
-		ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-		ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-		if (ImGui::BeginPopupModal("Migrate to Forked Set##Modal", &s_show_migrate_modal,
-								   ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::Text("Migrate %s: %s", s_migrate_is_save ? "Save" : "Stamp", s_migrate_item_name.c_str());
-			ImGui::TextDisabled("Source Set: %s", s_migrate_source_set.c_str());
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			ImGui::Text("Target Forked Set:");
-			if (!s_migrate_forked_sets.empty()) {
-				std::vector<const char*> set_names;
-				for (const auto& f : s_migrate_forked_sets) {
-					set_names.push_back(f.c_str());
-				}
-				ImGui::SetNextItemWidth(250.0f);
-				ImGui::Combo("##target_forked_set", &s_selected_migrate_set_idx, set_names.data(),
-							 static_cast<int>(set_names.size()));
-			}
-
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Migrate", ImVec2(90, 24))) {
-				if (s_selected_migrate_set_idx >= 0 &&
-					s_selected_migrate_set_idx < static_cast<int>(s_migrate_forked_sets.size())) {
-					std::string target_set = s_migrate_forked_sets[s_selected_migrate_set_idx];
-					bool ok = false;
-					if (s_migrate_is_save) {
-						ok = SaveManager::migrate_save_file(s_migrate_filename, s_migrate_source_set, target_set);
-					} else {
-						ok = SaveManager::migrate_stamp_file(s_migrate_filename, s_migrate_source_set, target_set);
-					}
-					if (ok) {
-						ToastManager::success("Successfully migrated " +
-											  std::string(s_migrate_is_save ? "save" : "stamp") + " to '" + target_set +
-											  "'!");
-					} else {
-						ToastManager::error("Failed to migrate file.");
-					}
-				}
-				s_show_migrate_modal = false;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(90, 24))) {
-				s_show_migrate_modal = false;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
+		if (is_forked) {
+			forked_sets.push_back(s);
 		}
 	}
-
-	void check_item_existence(const std::string& item_id, const std::string& type, const std::string& name_or_file,
-							  const std::string& set_context = "", bool force = false);
-	void validate_all_online_and_cached_items(bool force = false);
-}  // namespace
+	return forked_sets;
+}
 
 void UI::render_manage_sets() {
 	const std::string& current_set = SetManager::get_current_set();
@@ -5501,7 +4758,7 @@ void UI::render_manage_sets() {
 
 			if (is_online) {
 				if (!s_meta.workshop_id.empty()) {
-					check_item_existence(s_meta.workshop_id, "set", s, current_set, false);
+					UIWorkshop::check_item_existence(s_meta.workshop_id, "set", s, current_set, false);
 				}
 				if (is_transient) {
 					display_name += " [Cached]";
@@ -5522,8 +4779,7 @@ void UI::render_manage_sets() {
 								  ImVec2(selectable_w, 0.0f))) {
 				if (s != current_set) {
 					if (unsaved_changes) {
-						pending_set_switch = s;
-						open_switch_popup = true;
+						UIModals::open_unsaved_switch(s, "");
 					} else {
 						SetManager::set_current_set(s);
 						selected_id = 0;
@@ -5542,7 +4798,7 @@ void UI::render_manage_sets() {
 				ImGui::SameLine(0, btn_gap);
 				ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 				if (UI::button_with_icon("##share_set", IconManager::get(IconID::Transmit), ImVec2(sel_h, sel_h))) {
-					open_share_for_set(s);
+					UIModals::open_workshop_share_set(s);
 				}
 				if (ImGui::IsItemHovered()) {
 					ImGui::SetTooltip("Share set '%s' to Community Workshop", s.c_str());
@@ -5572,7 +4828,7 @@ void UI::render_manage_sets() {
 							}
 						});
 					} else {
-						open_share_for_set(s);
+						UIModals::open_workshop_share_set(s);
 					}
 				}
 				if (ImGui::IsItemHovered()) {
@@ -5650,8 +4906,7 @@ void UI::render_manage_sets() {
 
 		ImGui::Spacing();
 		if (button_with_icon("New", IconManager::get(IconID::Add), ImVec2(80, 25))) {
-			open_create_set_popup = true;
-			duplicate_set_checkbox = false;
+			UIModals::open_create_set(false);
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Create a new empty material set.");
@@ -5659,8 +4914,7 @@ void UI::render_manage_sets() {
 
 		ImGui::SameLine();
 		if (button_with_icon("Copy", IconManager::get(IconID::Copy), ImVec2(80, 25))) {
-			open_create_set_popup = true;
-			duplicate_set_checkbox = true;
+			UIModals::open_create_set(true);
 		}
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Create a duplicate copy of the current set.");
@@ -5669,7 +4923,7 @@ void UI::render_manage_sets() {
 		if (is_logged_in) {
 			ImGui::SameLine();
 			if (button_with_icon("Fork", IconManager::get(IconID::Branch), ImVec2(80, 25))) {
-				open_fork_set_popup = true;
+				UIModals::open_fork_set();
 				std::string def_name = current_set + "_fork";
 				std::strncpy(save_as_buf, def_name.c_str(), sizeof(save_as_buf));
 				save_as_buf[sizeof(save_as_buf) - 1] = '\0';
@@ -5685,7 +4939,7 @@ void UI::render_manage_sets() {
 			ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
 			ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
 			if (button_with_icon("Delete", IconManager::get(IconID::Clear), ImVec2(80, 25))) {
-				open_delete_set_popup = true;
+				UIModals::open_delete_set();
 			}
 			ImGui::PopStyleColor(3);
 			if (ImGui::IsItemHovered()) {
@@ -5799,7 +5053,7 @@ void UI::render_manage_sets() {
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(65.0f);
 				if (attr.type == AttributeType::Float) {
-					float f_min = static_cast<float>(attr.min_val);
+					auto f_min = static_cast<float>(attr.min_val);
 					if (ImGui::InputFloat("##attr_min", &f_min, 0.0f, 0.0f, "%.1f")) {
 						attr.min_val = f_min;
 						SetManager::update_current_metadata(meta);
@@ -5819,7 +5073,7 @@ void UI::render_manage_sets() {
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(65.0f);
 				if (attr.type == AttributeType::Float) {
-					float f_max = static_cast<float>(attr.max_val);
+					auto f_max = static_cast<float>(attr.max_val);
 					if (ImGui::InputFloat("##attr_max", &f_max, 0.0f, 0.0f, "%.1f")) {
 						attr.max_val = f_max;
 						SetManager::update_current_metadata(meta);
@@ -5839,7 +5093,7 @@ void UI::render_manage_sets() {
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(65.0f);
 				if (attr.type == AttributeType::Float) {
-					float f_def = static_cast<float>(attr.default_val);
+					auto f_def = static_cast<float>(attr.default_val);
 					if (ImGui::InputFloat("##attr_def", &f_def, 0.0f, 0.0f, "%.1f")) {
 						attr.default_val = f_def;
 						SetManager::update_current_metadata(meta);
@@ -5892,11 +5146,32 @@ void UI::render_manage_sets() {
 			ImGui::Separator();
 			ImGui::Spacing();
 			ImGui::Text("Heatmap Gradient Palette:");
-			float hm_min = static_cast<float>(meta.attributes[0].min_val);
-			float hm_max = static_cast<float>(meta.attributes[0].max_val);
+			ImGui::SameLine();
+			float reset_btn_sz = ImGui::GetFrameHeight();
+			float avail_w = ImGui::GetContentRegionAvail().x;
+			if (avail_w > reset_btn_sz) {
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail_w - reset_btn_sz);
+			}
+			auto hm_min = static_cast<float>(meta.attributes[0].min_val);
+			auto hm_max = static_cast<float>(meta.attributes[0].max_val);
+			if (button_with_icon("##reset_heatmap_grad", IconManager::get(IconID::ColorWheel),
+								 ImVec2(reset_btn_sz, reset_btn_sz))) {
+				meta.heatmap_gradient = ColorGradient::default_heatmap(hm_min, hm_max);
+				SetManager::update_current_metadata(meta);
+				Vulkan::update_rules();
+				Grid::draw();
+				Grid::refresh_gpu_display();
+				unsaved_changes = true;
+			}
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("Reset to default heatmap colors");
+			}
+
 			if (gradient_editor("##cfg_heatmap_grad", meta.heatmap_gradient, hm_min, hm_max)) {
 				SetManager::update_current_metadata(meta);
 				Vulkan::update_rules();
+				Grid::draw();
+				Grid::refresh_gpu_display();
 				unsaved_changes = true;
 			}
 		}
@@ -5932,14 +5207,58 @@ void UI::render_save_load() {
 					ImGui::SetTooltip("Input a name for the save file.");
 				}
 
+				const char* comp_quality_items[] = {"Low (Fast, uncompressed attributes)", "Medium (Balanced)",
+													"High (Best, compresses attributes)"};
+				int comp_idx = std::clamp(static_cast<int>(cfg.compression_quality), 0, 2);
+				if (ImGui::Combo("Compression##save_comp", &comp_idx, comp_quality_items,
+								 IM_ARRAYSIZE(comp_quality_items))) {
+					cfg.compression_quality = comp_idx;
+					ConfigManager::save();
+				}
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Compression quality for saves. High compression compresses attribute values "
+									  "too, ideal for online sharing.");
+				}
+
+				static size_t cached_save_orig_size = 0;
+				static size_t cached_save_final_size = 0;
+				static double last_save_est_time = -2.0;
+				static int last_save_comp_quality = -1;
+				static bool last_save_was_focused = false;
+
+				bool ui_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+				double cur_time = ImGui::GetTime();
+				if (ui_focused) {
+					bool comp_changed = (comp_idx != last_save_comp_quality);
+					bool just_focused = (!last_save_was_focused);
+					bool timer_expired = (cur_time - last_save_est_time) > 2.0;
+					if (cached_save_orig_size == 0 || comp_changed || just_focused || timer_expired) {
+						SaveManager::estimate_save_size(Grid::get_width(), Grid::get_height(),
+														static_cast<CompressionQuality>(comp_idx), cached_save_orig_size,
+														cached_save_final_size);
+						last_save_est_time = cur_time;
+						last_save_comp_quality = comp_idx;
+					}
+				}
+				last_save_was_focused = ui_focused;
+
+				float save_reduction = cached_save_orig_size > 0
+										   ? (100.0f * (1.0f - static_cast<float>(cached_save_final_size) /
+																   static_cast<float>(cached_save_orig_size)))
+										   : 0.0f;
+				ImGui::TextDisabled("Estimated Size: %s -> %s (-%.1f%%)", format_bytes(cached_save_orig_size).c_str(),
+									format_bytes(cached_save_final_size).c_str(), save_reduction);
+
 				if (button_with_icon("Save Simulation", IconManager::get(IconID::Save), ImVec2(-1, 30))) {
 					std::string s_name = save_file_name_buf;
 					if (!s_name.empty()) {
-						SaveManager::save_to_file_async(s_name, current_set, [](bool success) {
-							if (success) {
-								save_file_name_buf[0] = '\0';
-							}
-						});
+						SaveManager::save_to_file_async(s_name, current_set,
+														static_cast<CompressionQuality>(cfg.compression_quality),
+														[](bool success) {
+															if (success) {
+																save_file_name_buf[0] = '\0';
+															}
+														});
 					}
 				}
 				if (ImGui::IsItemHovered()) {
@@ -5973,7 +5292,8 @@ void UI::render_save_load() {
 					std::string tag;
 					if (is_online) {
 						if (!sfile.workshop_id.empty()) {
-							check_item_existence(sfile.workshop_id, "save", sfile.filename, current_set, false);
+							UIWorkshop::check_item_existence(sfile.workshop_id, "save", sfile.filename, current_set,
+															 false);
 						}
 						tag = is_transient ? " [Cached]" : " [Online]";
 					} else if (sfile.dimensions_differ) {
@@ -5998,12 +5318,10 @@ void UI::render_save_load() {
 					}
 					if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
 						if (sfile.dimensions_differ) {
-							pending_diff_save = sfile;
-							open_diff_size_save_popup = true;
+							UIModals::open_diff_size_save(sfile);
 						} else {
 							if (unsaved_changes) {
-								pending_save_load = sfile.filename;
-								open_switch_popup = true;
+								UIModals::open_unsaved_switch("", sfile.filename);
 							} else {
 								SaveManager::load_from_file_async(sfile.filename, current_set, LoadPlacement::Center,
 																  [](bool success, const std::string&) {
@@ -6027,7 +5345,8 @@ void UI::render_save_load() {
 						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##share_save", IconManager::get(IconID::Transmit),
 												 ImVec2(sel_h, sel_h))) {
-							open_share_for_save(sfile.filename, sfile.name, current_set, sfile.width, sfile.height);
+							UIModals::open_workshop_share_save(sfile.filename, sfile.name, current_set, sfile.width,
+															   sfile.height);
 						}
 						if (ImGui::IsItemHovered()) {
 							ImGui::SetTooltip("Share save '%s' to Community Workshop", sfile.name.c_str());
@@ -6063,7 +5382,8 @@ void UI::render_save_load() {
 									}
 								});
 							} else {
-								open_share_for_save(sfile.filename, sfile.name, current_set, sfile.width, sfile.height);
+								UIModals::open_workshop_share_save(sfile.filename, sfile.name, current_set, sfile.width,
+																   sfile.height);
 							}
 						}
 						if (ImGui::IsItemHovered()) {
@@ -6107,13 +5427,7 @@ void UI::render_save_load() {
 						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##migrate_save", IconManager::get(IconID::Branch),
 												 ImVec2(sel_h, sel_h))) {
-							s_migrate_filename = sfile.filename;
-							s_migrate_item_name = sfile.name;
-							s_migrate_source_set = current_set;
-							s_migrate_is_save = true;
-							s_migrate_forked_sets = forked_sets;
-							s_selected_migrate_set_idx = 0;
-							s_show_migrate_modal = true;
+							UIModals::open_migrate(true, sfile.filename, sfile.name, current_set, forked_sets);
 						}
 						if (ImGui::IsItemHovered()) {
 							ImGui::SetTooltip("Migrate save '%s' to a forked version of '%s'", sfile.name.c_str(),
@@ -6167,12 +5481,10 @@ void UI::render_save_load() {
 				if (selected_save_id >= 0 && selected_save_id < static_cast<int>(save_files.size())) {
 					if (button_with_icon("Load", IconManager::get(IconID::Folder), ImVec2(80, 25))) {
 						if (save_files[selected_save_id].dimensions_differ) {
-							pending_diff_save = save_files[selected_save_id];
-							open_diff_size_save_popup = true;
+							UIModals::open_diff_size_save(save_files[selected_save_id]);
 						} else {
 							if (unsaved_changes) {
-								pending_save_load = save_files[selected_save_id].filename;
-								open_switch_popup = true;
+								UIModals::open_unsaved_switch("", save_files[selected_save_id].filename);
 							} else {
 								SaveManager::load_from_file_async(save_files[selected_save_id].filename, current_set,
 																  LoadPlacement::Center,
@@ -6225,25 +5537,89 @@ void UI::render_save_load() {
 					ImGui::Text("Save Active Selection as Stamp Prefab:");
 					static char stamp_tab_name[64] = "";
 					ImGui::InputText("Stamp Name##tab_stamp", stamp_tab_name, sizeof(stamp_tab_name));
+
+					const char* comp_quality_items[] = {"Low (Fast, uncompressed attributes)", "Medium (Balanced)",
+														"High (Best, compresses attributes)"};
+					int stamp_comp_idx = std::clamp(static_cast<int>(cfg.compression_quality), 0, 2);
+					if (ImGui::Combo("Compression##stamp_comp", &stamp_comp_idx, comp_quality_items,
+									 IM_ARRAYSIZE(comp_quality_items))) {
+						cfg.compression_quality = stamp_comp_idx;
+						ConfigManager::save();
+					}
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("Compression quality for stamps. High compression compresses attribute "
+										  "values too, ideal for online sharing.");
+					}
+
+					static size_t cached_stamp_orig_size = 0;
+					static size_t cached_stamp_final_size = 0;
+					static double last_stamp_est_time = -2.0;
+					static int last_stamp_comp_quality = -1;
+					static int last_sel_w = 0;
+					static int last_sel_h = 0;
+
+					int sw = selection_box.width();
+					int sh = selection_box.height();
+					int sx = selection_box.min_x();
+					int sy = selection_box.min_y();
+
+					static bool last_stamp_was_focused = false;
+					bool stamp_ui_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+					double cur_stamp_time = ImGui::GetTime();
+					if (stamp_ui_focused) {
+						bool stamp_comp_changed = (stamp_comp_idx != last_stamp_comp_quality);
+						bool stamp_just_focused = (!last_stamp_was_focused);
+						bool stamp_dim_changed = (sw != last_sel_w || sh != last_sel_h);
+						bool stamp_timer_expired = (cur_stamp_time - last_stamp_est_time) > 2.0;
+						if (cached_stamp_orig_size == 0 || stamp_comp_changed || stamp_just_focused ||
+							stamp_dim_changed || stamp_timer_expired) {
+							if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+								Grid::sync_from_gpu();
+							}
+							std::vector<Cell> est_cells(sw * sh);
+							for (int y = 0; y < sh; ++y) {
+								for (int x = 0; x < sw; ++x) {
+									est_cells[y * sw + x] = Grid::get_cell_full_const(sx + x, sy + y);
+								}
+							}
+							SaveManager::estimate_stamp_size(est_cells, sw, sh,
+															 static_cast<CompressionQuality>(stamp_comp_idx),
+															 cached_stamp_orig_size, cached_stamp_final_size);
+							last_stamp_est_time = cur_stamp_time;
+							last_stamp_comp_quality = stamp_comp_idx;
+							last_sel_w = sw;
+							last_sel_h = sh;
+						}
+					}
+					last_stamp_was_focused = stamp_ui_focused;
+
+					float stamp_reduction = cached_stamp_orig_size > 0
+												? (100.0f * (1.0f - static_cast<float>(cached_stamp_final_size) /
+																		static_cast<float>(cached_stamp_orig_size)))
+												: 0.0f;
+					ImGui::TextDisabled("Estimated Size: %s -> %s (-%.1f%%)",
+										format_bytes(cached_stamp_orig_size).c_str(),
+										format_bytes(cached_stamp_final_size).c_str(), stamp_reduction);
+
 					if (button_with_icon("Save Selection as Stamp", IconManager::get(IconID::Save), ImVec2(-1, 28))) {
 						std::string sname = stamp_tab_name;
 						if (!sname.empty()) {
-							int sx = selection_box.min_x();
-							int sy = selection_box.min_y();
-							int sw = selection_box.width();
-							int sh = selection_box.height();
-							std::vector<uint8_t> stamp_cells(sw * sh);
+							if (Grid::get_processing_mode() == ProcessingMode::GPU) {
+								Grid::sync_from_gpu();
+							}
+							std::vector<Cell> stamp_cells(sw * sh);
 							for (int y = 0; y < sh; ++y) {
 								for (int x = 0; x < sw; ++x) {
-									stamp_cells[y * sw + x] = Grid::get_cell(sx + x, sy + y);
+									stamp_cells[y * sw + x] = Grid::get_cell_full_const(sx + x, sy + y);
 								}
 							}
-							SaveManager::save_stamp_to_file_async(sname, current_set, stamp_cells, sw, sh,
-																  [](bool success) {
-																	  if (success) {
-																		  stamp_tab_name[0] = '\0';
-																	  }
-																  });
+							SaveManager::save_stamp_to_file_async(
+								sname, current_set, stamp_cells, sw, sh,
+								static_cast<CompressionQuality>(cfg.compression_quality), [](bool success) {
+									if (success) {
+										stamp_tab_name[0] = '\0';
+									}
+								});
 						}
 					}
 					ImGui::Separator();
@@ -6273,7 +5649,8 @@ void UI::render_save_load() {
 					std::string tag;
 					if (is_online) {
 						if (!stfile.workshop_id.empty()) {
-							check_item_existence(stfile.workshop_id, "stamp", stfile.filename, current_set, false);
+							UIWorkshop::check_item_existence(stfile.workshop_id, "stamp", stfile.filename, current_set,
+															 false);
 						}
 						tag = is_transient ? " [Cached]" : " [Online]";
 					}
@@ -6297,7 +5674,7 @@ void UI::render_save_load() {
 					if (is_selected && ImGui::IsMouseDoubleClicked(0)) {
 						SaveManager::load_stamp_from_file_async(
 							stfile.filename, current_set,
-							[](bool success, const std::vector<uint8_t>& cells, uint32_t sw, uint32_t sh) {
+							[](bool success, const std::vector<Cell>& cells, uint32_t sw, uint32_t sh) {
 								if (success) {
 									load_stamp(cells, sw, sh);
 								}
@@ -6315,8 +5692,8 @@ void UI::render_save_load() {
 						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##share_stamp", IconManager::get(IconID::Transmit),
 												 ImVec2(sel_h, sel_h))) {
-							open_share_for_stamp(stfile.filename, stfile.name, current_set, stfile.width,
-												 stfile.height);
+							UIModals::open_workshop_share_stamp(stfile.filename, stfile.name, current_set, stfile.width,
+																stfile.height);
 						}
 						if (ImGui::IsItemHovered()) {
 							ImGui::SetTooltip("Share stamp '%s' to Community Workshop", stfile.name.c_str());
@@ -6352,8 +5729,8 @@ void UI::render_save_load() {
 									}
 								});
 							} else {
-								open_share_for_stamp(stfile.filename, stfile.name, current_set, stfile.width,
-													 stfile.height);
+								UIModals::open_workshop_share_stamp(stfile.filename, stfile.name, current_set,
+																	stfile.width, stfile.height);
 							}
 						}
 						if (ImGui::IsItemHovered()) {
@@ -6397,13 +5774,7 @@ void UI::render_save_load() {
 						ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, sel_min.y));
 						if (UI::button_with_icon("##migrate_stamp", IconManager::get(IconID::Branch),
 												 ImVec2(sel_h, sel_h))) {
-							s_migrate_filename = stfile.filename;
-							s_migrate_item_name = stfile.name;
-							s_migrate_source_set = current_set;
-							s_migrate_is_save = false;
-							s_migrate_forked_sets = forked_sets;
-							s_selected_migrate_set_idx = 0;
-							s_show_migrate_modal = true;
+							UIModals::open_migrate(false, stfile.filename, stfile.name, current_set, forked_sets);
 						}
 						if (ImGui::IsItemHovered()) {
 							ImGui::SetTooltip("Migrate stamp '%s' to a forked version of '%s'", stfile.name.c_str(),
@@ -6458,7 +5829,7 @@ void UI::render_save_load() {
 					if (button_with_icon("Stamp", IconManager::get(IconID::Paste), ImVec2(100, 25))) {
 						SaveManager::load_stamp_from_file_async(
 							stamp_files[selected_stamp_id].filename, current_set,
-							[](bool success, const std::vector<uint8_t>& cells, uint32_t sw, uint32_t sh) {
+							[](bool success, const std::vector<Cell>& cells, uint32_t sw, uint32_t sh) {
 								if (success) {
 									load_stamp(cells, sw, sh);
 								}
@@ -6487,4373 +5858,18 @@ void UI::render_save_load() {
 			ImGui::EndTabBar();
 		}
 
-		if (open_diff_size_save_popup) {
-			ImGui::OpenPopup("Differently Sized Save Detected");
-			open_diff_size_save_popup = false;
-		}
-
-		if (ImGui::BeginPopupModal("Differently Sized Save Detected", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::Text("Save file: '%s'", pending_diff_save.name.c_str());
-			ImGui::Text("Save Dimensions: %u x %u", pending_diff_save.width, pending_diff_save.height);
-			ImGui::Text("Current Grid: %u x %u", Grid::get_width(), Grid::get_height());
-			ImGui::Spacing();
-			ImGui::Text("Choose how to load this save into the simulation:");
-			ImGui::Spacing();
-
-			if (ImGui::Button("Place in Center", ImVec2(180, 32))) {
-				SaveManager::load_from_file_async(pending_diff_save.filename, current_set, LoadPlacement::Center,
-												  [](bool success, const std::string&) {
-													  if (success) {
-														  selected_id = 0;
-														  unsaved_changes = false;
-													  }
-												  });
-				ImGui::CloseCurrentPopup();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Places the saved content centered in the current canvas.");
-			}
-
-			ImGui::SameLine();
-			if (ImGui::Button("Crop / Top-Left", ImVec2(180, 32))) {
-				SaveManager::load_from_file_async(pending_diff_save.filename, current_set, LoadPlacement::TopLeft,
-												  [](bool success, const std::string&) {
-													  if (success) {
-														  selected_id = 0;
-														  unsaved_changes = false;
-													  }
-												  });
-				ImGui::CloseCurrentPopup();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Places at (0,0), cropping if larger or leaving air if smaller.");
-			}
-
-			ImGui::Spacing();
-			if (ImGui::Button("Resize Grid to Match Save", ImVec2(368, 32))) {
-				SaveManager::load_from_file_async(pending_diff_save.filename, current_set, LoadPlacement::ResizeGrid,
-												  [](bool success, const std::string&) {
-													  if (success) {
-														  selected_id = 0;
-														  unsaved_changes = false;
-													  }
-												  });
-				ImGui::CloseCurrentPopup();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Resizes canvas to %u x %u.", pending_diff_save.width, pending_diff_save.height);
-			}
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Warning: Resizing grid resets undo/redo history!");
-
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Cancel", ImVec2(100, 25))) {
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
-
 		ImGui::EndTabItem();
 	}
 }
 
-namespace {
-	std::vector<WorkshopItemClient> s_workshop_items;
-	bool s_workshop_loading = false;
-	bool s_workshop_loaded_once = false;
-	std::string s_workshop_error;
-	bool s_workshop_my_items = false;
-	bool s_workshop_favorites = false;
+void UI::refresh_workshop_items() { UIWorkshop::refresh_workshop_items(); }
 
-	char s_workshop_search[128] = "";
-	int s_workshop_type_filter = 0;
-	int s_workshop_sort_idx = 0;
-	bool s_force_workshop_tab_selected = false;
+void UI::remove_workshop_item(const std::string& item_id) { UIWorkshop::remove_workshop_item(item_id); }
 
-	bool s_show_auth_modal = false;
-	char s_auth_username[64] = "";
-	char s_auth_password[64] = "";
-	std::string s_auth_status;
-	bool s_auth_is_register = false;
+void UI::validate_online_items(bool force) { UIWorkshop::validate_online_items(force); }
 
-	std::unordered_map<std::string, SDL_Texture*> s_workshop_textures;
-	std::unordered_set<std::string> s_thumbnails_downloading;
-	std::unordered_set<std::string> s_items_activating;
-
-	bool s_show_report_modal = false;
-	std::string s_report_item_id;
-	std::string s_report_item_title;
-	int s_report_reason_idx = 0;
-	char s_report_details[256] = "";
-	std::string s_report_status;
-
-	std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_item_last_checked;
-	std::unordered_set<std::string> s_item_checking_in_flight;
-
-	void check_item_existence(const std::string& item_id, const std::string& type, const std::string& name_or_file,
-							  const std::string& set_context, bool force) {
-		if (item_id.empty()) {
-			return;
-		}
-
-		auto now = std::chrono::steady_clock::now();
-		if (!force) {
-			auto it = s_item_last_checked.find(item_id);
-			if (it != s_item_last_checked.end()) {
-				auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count();
-				if (elapsed < 10) {
-					return;
-				}
-			}
-		}
-
-		if (s_item_checking_in_flight.find(item_id) != s_item_checking_in_flight.end()) {
-			return;
-		}
-
-		s_item_checking_in_flight.insert(item_id);
-		s_item_last_checked[item_id] = now;
-
-		WorkshopClient::check_item_exists(
-			item_id, [item_id, type, name_or_file, set_context](bool exists, int http_status) {
-				s_item_checking_in_flight.erase(item_id);
-				if (!exists && http_status == 404) {
-					if (type == "set") {
-						SetManager::clear_workshop_info(name_or_file);
-						ToastManager::warning(
-							fmt::format("Set '{}' was deleted from the workshop. Converted to local.", name_or_file));
-					} else if (type == "save") {
-						SaveManager::clear_save_workshop_info(name_or_file, set_context);
-						ToastManager::warning(
-							fmt::format("Save '{}' was deleted from the workshop. Converted to local.", name_or_file));
-					} else if (type == "stamp") {
-						SaveManager::clear_stamp_workshop_info(name_or_file, set_context);
-						ToastManager::warning(
-							fmt::format("Stamp '{}' was deleted from the workshop. Converted to local.", name_or_file));
-					}
-					WorkshopCache::remove_transient_by_id(item_id);
-
-					for (auto it = s_workshop_items.begin(); it != s_workshop_items.end();) {
-						if (it->id == item_id) {
-							it = s_workshop_items.erase(it);
-						} else {
-							++it;
-						}
-					}
-				}
-			});
-	}
-
-	void validate_all_online_and_cached_items(bool force) {
-		std::string cur_set = SetManager::get_current_set();
-
-		for (const auto& s : SetManager::get_sets()) {
-			SetMetadata sm = SetManager::load_set_metadata(s);
-			if ((sm.is_online || SetManager::is_set_online(s)) && !sm.workshop_id.empty()) {
-				check_item_existence(sm.workshop_id, "set", s, cur_set, force);
-			}
-		}
-
-		auto saves = SaveManager::get_save_files(cur_set);
-		for (const auto& sf : saves) {
-			if (sf.is_online && !sf.workshop_id.empty()) {
-				check_item_existence(sf.workshop_id, "save", sf.filename, cur_set, force);
-			}
-		}
-
-		auto stamps = SaveManager::get_stamp_files(cur_set);
-		for (const auto& st : stamps) {
-			if (st.is_online && !st.workshop_id.empty()) {
-				check_item_existence(st.workshop_id, "stamp", st.filename, cur_set, force);
-			}
-		}
-
-		for (const auto& path : WorkshopCache::get_transient_paths()) {
-			size_t slash = path.find_last_of("/\\");
-			std::string fname = (slash != std::string::npos) ? path.substr(slash + 1) : path;
-			size_t underscore = fname.find('_');
-			if (underscore != std::string::npos) {
-				std::string tid = fname.substr(0, underscore);
-				if (tid.length() >= 8) {
-					check_item_existence(tid, "cache", fname, cur_set, force);
-				}
-			}
-		}
-	}
-
-	void refresh_workshop_items() {
-		validate_all_online_and_cached_items(true);
-		s_workshop_loading = true;
-		s_workshop_error = "";
-
-		std::string type_str = "all";
-		if (s_workshop_type_filter == 1)
-			type_str = "set";
-		else if (s_workshop_type_filter == 2)
-			type_str = "save";
-		else if (s_workshop_type_filter == 3)
-			type_str = "stamp";
-		else if (s_workshop_type_filter == 4)
-			type_str = "theme";
-
-		std::string sort_str = "popular";
-		if (s_workshop_sort_idx == 1)
-			sort_str = "liked";
-		else if (s_workshop_sort_idx == 2)
-			sort_str = "favorites";
-		else if (s_workshop_sort_idx == 3)
-			sort_str = "newest";
-		else if (s_workshop_sort_idx == 4)
-			sort_str = "downloads";
-
-		std::string author_str;
-		if (s_workshop_my_items && WorkshopClient::is_logged_in()) {
-			author_str = WorkshopClient::get_logged_in_username();
-		}
-
-		WorkshopClient::fetch_items(
-			type_str, sort_str, s_workshop_search, author_str, s_workshop_favorites,
-			[](bool success, const std::vector<WorkshopItemClient>& items, int total) {
-				s_workshop_loading = false;
-				s_workshop_loaded_once = true;
-				if (success) {
-					s_workshop_items = items;
-					s_workshop_error = "";
-				} else {
-					s_workshop_error =
-						"Could not reach workshop server. Please ensure you are connected to the internet.";
-				}
-			});
-	}
-
-	SDL_Texture* get_or_load_thumbnail(const WorkshopItemClient& item) {
-		if (item.thumbnail_path.empty())
-			return nullptr;
-		auto it = s_workshop_textures.find(item.id);
-		if (it != s_workshop_textures.end())
-			return it->second;
-
-		if (s_thumbnails_downloading.find(item.id) == s_thumbnails_downloading.end()) {
-			s_thumbnails_downloading.insert(item.id);
-			std::string cache_dir = WorkshopCache::get_cache_root() + "thumbnails/";
-			std::filesystem::create_directories(cache_dir);
-			std::string dest_path = cache_dir + item.id + ".png";
-
-			WorkshopClient::download_thumbnail(
-				item.id, dest_path, [item_id = item.id](bool success, const std::string& path) {
-					s_thumbnails_downloading.erase(item_id);
-					if (success && std::filesystem::exists(path)) {
-						SDL_IOStream* io = SDL_IOFromFile(path.c_str(), "rb");
-						if (io) {
-							SDL_Surface* surf = SDL_LoadPNG_IO(io, true);
-							if (surf) {
-								SDL_Texture* tex = SDL_CreateTextureFromSurface(Window::get_renderer(), surf);
-								SDL_DestroySurface(surf);
-								if (tex) {
-									s_workshop_textures[item_id] = tex;
-								}
-							}
-						}
-					}
-				});
-		}
-		return nullptr;
-	}
-
-	struct SimpleMaterialInfo {
-		std::string name;
-		uint8_t id = 0;
-		std::array<uint8_t, 3> color = {255, 255, 255};
-	};
-
-	std::vector<SimpleMaterialInfo> get_materials_for_set(const std::string& set_name) {
-		std::vector<SimpleMaterialInfo> result;
-		if (set_name.empty() || set_name == SetManager::get_current_set()) {
-			for (const auto& m : MaterialManager::get_materials()) {
-				result.push_back({m.name, m.id, m.color});
-			}
-			return result;
-		}
-
-		std::string set_dir = std::string(SETS_DIRECTORY) + set_name;
-		if (!std::filesystem::exists(set_dir) || !std::filesystem::is_directory(set_dir)) {
-			return result;
-		}
-
-		SimpleMaterialInfo empty_mat{"empty", 0, {64, 64, 64}};
-		std::vector<SimpleMaterialInfo> loaded;
-
-		for (const auto& entry : std::filesystem::directory_iterator(set_dir)) {
-			if (entry.is_regular_file() && entry.path().extension().string() == ".mat") {
-				std::ifstream file(entry.path());
-				if (!file.is_open())
-					continue;
-				try {
-					nlohmann::json j = nlohmann::json::parse(file);
-					SimpleMaterialInfo info;
-					info.name = j.value("name", entry.path().stem().string());
-					info.id = j.value("id", (uint8_t)0);
-					if (j.contains("color") && j["color"].is_array() && j["color"].size() >= 3) {
-						info.color[0] = j["color"][0].get<uint8_t>();
-						info.color[1] = j["color"][1].get<uint8_t>();
-						info.color[2] = j["color"][2].get<uint8_t>();
-					}
-					if (info.id == 0) {
-						empty_mat = info;
-					} else {
-						loaded.push_back(info);
-					}
-				} catch (...) {}
-			}
-		}
-
-		std::sort(loaded.begin(), loaded.end(),
-				  [](const SimpleMaterialInfo& a, const SimpleMaterialInfo& b) { return a.id < b.id; });
-
-		result.push_back(empty_mat);
-		result.insert(result.end(), loaded.begin(), loaded.end());
-		return result;
-	}
-
-	std::string generate_thumbnail_base64(int type_idx, const std::string& target_set,
-										  const std::string& target_file = "") {
-		SDL_Surface* surf = SDL_CreateSurface(128, 128, SDL_PIXELFORMAT_RGBA32);
-		if (!surf)
-			return "";
-
-		uint32_t* pixels = static_cast<uint32_t*>(surf->pixels);
-		uint32_t bg_col = SDL_MapRGBA(SDL_GetPixelFormatDetails(surf->format), nullptr, 13, 17, 23, 255);
-		for (int i = 0; i < 128 * 128; ++i) {
-			pixels[i] = bg_col;
-		}
-
-		auto mats = get_materials_for_set(target_set);
-		std::array<std::array<uint8_t, 3>, 256> id_to_color{};
-		for (int i = 0; i < 256; ++i) {
-			id_to_color[i] = {64, 64, 64};
-		}
-		for (const auto& m : mats) {
-			id_to_color[m.id] = m.color;
-		}
-
-		if (type_idx == 0) {
-			std::vector<uint8_t> grid_cells;
-			uint32_t gw = 0, gh = 0;
-
-			if (!target_file.empty()) {
-				std::string fname = target_file;
-				if (fname.length() < 5 || fname.substr(fname.length() - 5) != ".save") {
-					fname += ".save";
-				}
-				std::string fpath = SaveManager::get_saves_directory(target_set) + fname;
-				std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
-				if (fin.is_open()) {
-					std::string set_str;
-					std::getline(fin, set_str);
-					fin.read(reinterpret_cast<char*>(&gw), sizeof(gw));
-					fin.read(reinterpret_cast<char*>(&gh), sizeof(gh));
-					uint32_t num_blocks = 0;
-					fin.read(reinterpret_cast<char*>(&num_blocks), sizeof(num_blocks));
-					if (gw > 0 && gh > 0 && gw <= 4096 && gh <= 4096) {
-						grid_cells.resize(gw * gh);
-						if (!SaveManager::read_chunked_data(fin, num_blocks, grid_cells.size(), grid_cells.data())) {
-							grid_cells.clear();
-						}
-					}
-				}
-			}
-
-			if (grid_cells.empty() && target_set == SetManager::get_current_set()) {
-				gw = Grid::get_width();
-				gh = Grid::get_height();
-				if (gw > 0 && gh > 0) {
-					grid_cells.resize(gw * gh);
-					for (uint32_t y = 0; y < gh; ++y) {
-						for (uint32_t x = 0; x < gw; ++x) {
-							grid_cells[y * gw + x] = Grid::get_cell(x, y);
-						}
-					}
-				}
-			}
-
-			if (!grid_cells.empty() && gw > 0 && gh > 0) {
-				for (int ty = 0; ty < 128; ++ty) {
-					int gy = (ty * gh) / 128;
-					for (int tx = 0; tx < 128; ++tx) {
-						int gx = (tx * gw) / 128;
-						uint8_t mid = grid_cells[gy * gw + gx];
-						if (mid != 0) {
-							pixels[ty * 128 + tx] =
-								SDL_MapRGBA(SDL_GetPixelFormatDetails(surf->format), nullptr, id_to_color[mid][0],
-											id_to_color[mid][1], id_to_color[mid][2], 255);
-						}
-					}
-				}
-			}
-		} else if (type_idx == 1) {
-			std::vector<SimpleMaterialInfo> valid_mats;
-			for (const auto& m : mats) {
-				if (m.id != 0) {
-					valid_mats.push_back(m);
-				}
-			}
-			int count = static_cast<int>(valid_mats.size());
-			if (count > 0) {
-				int cols = std::clamp(static_cast<int>(std::ceil(std::sqrt(count))), 2, 8);
-				int rows = (count + cols - 1) / cols;
-				int cell_w = 128 / cols;
-				int cell_h = 128 / rows;
-				for (int idx = 0; idx < count; ++idx) {
-					const auto& mat = valid_mats[idx];
-					uint32_t c = SDL_MapRGBA(SDL_GetPixelFormatDetails(surf->format), nullptr, mat.color[0],
-											 mat.color[1], mat.color[2], 255);
-					int cx = (idx % cols) * cell_w;
-					int cy = (idx / cols) * cell_h;
-					for (int y = cy + 2; y < cy + cell_h - 2 && y < 128; ++y) {
-						for (int x = cx + 2; x < cx + cell_w - 2 && x < 128; ++x) {
-							pixels[y * 128 + x] = c;
-						}
-					}
-				}
-			}
-		} else if (type_idx == 2) {
-			std::vector<uint8_t> stamp_cells;
-			uint32_t sw = 0, sh = 0;
-			if (!target_file.empty()) {
-				SaveManager::load_stamp_from_file(target_file, target_set, stamp_cells, sw, sh);
-			}
-			if (stamp_cells.empty()) {
-				const auto& clip = UI::get_clipboard();
-				if (!clip.empty() && clip.width > 0 && clip.height > 0) {
-					stamp_cells = clip.cells;
-					sw = clip.width;
-					sh = clip.height;
-				}
-			}
-
-			if (!stamp_cells.empty() && sw > 0 && sh > 0) {
-				for (int ty = 0; ty < 128; ++ty) {
-					int sy = (ty * sh) / 128;
-					for (int tx = 0; tx < 128; ++tx) {
-						int sx = (tx * sw) / 128;
-						uint8_t mid = stamp_cells[sy * sw + sx];
-						if (mid != 0) {
-							pixels[ty * 128 + tx] =
-								SDL_MapRGBA(SDL_GetPixelFormatDetails(surf->format), nullptr, id_to_color[mid][0],
-											id_to_color[mid][1], id_to_color[mid][2], 255);
-						}
-					}
-				}
-			}
-		} else if (type_idx == 3) {
-			const auto& style = ImGui::GetStyle();
-			const auto& cfg = ConfigManager::get_config();
-			ImVec4 bg_col = cfg.ui.background_color;
-			ImVec4 win_col = style.Colors[ImGuiCol_WindowBg];
-			ImVec4 btn_col = style.Colors[ImGuiCol_Button];
-			ImVec4 act_col = style.Colors[ImGuiCol_ButtonActive];
-			ImVec4 text_col = style.Colors[ImGuiCol_Text];
-
-			for (int ty = 0; ty < 128; ++ty) {
-				for (int tx = 0; tx < 128; ++tx) {
-					ImVec4 col = (ty < 54)	 ? win_col
-								 : (ty < 64) ? bg_col
-								 : (tx < 42) ? btn_col
-								 : (tx < 85) ? act_col
-											 : text_col;
-					pixels[ty * 128 + tx] =
-						SDL_MapRGBA(SDL_GetPixelFormatDetails(surf->format), nullptr,
-									static_cast<uint8_t>(std::clamp(col.x, 0.0f, 1.0f) * 255.0f),
-									static_cast<uint8_t>(std::clamp(col.y, 0.0f, 1.0f) * 255.0f),
-									static_cast<uint8_t>(std::clamp(col.z, 0.0f, 1.0f) * 255.0f), 255);
-				}
-			}
-		}
-
-		std::string b64;
-		SDL_IOStream* io = SDL_IOFromDynamicMem();
-		if (io) {
-			if (SDL_SavePNG_IO(surf, io, false)) {
-				Sint64 size = SDL_TellIO(io);
-				SDL_PropertiesID props = SDL_GetIOProperties(io);
-				const uint8_t* mem = static_cast<const uint8_t*>(
-					SDL_GetPointerProperty(props, SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER, nullptr));
-				if (mem && size > 0) {
-					static const char b64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-					std::string enc;
-					enc.reserve(((size + 2) / 3) * 4);
-					for (Sint64 i = 0; i < size; i += 3) {
-						uint32_t val = (static_cast<uint32_t>(mem[i]) << 16);
-						if (i + 1 < size)
-							val |= (static_cast<uint32_t>(mem[i + 1]) << 8);
-						if (i + 2 < size)
-							val |= static_cast<uint32_t>(mem[i + 2]);
-						enc.push_back(b64_chars[(val >> 18) & 0x3F]);
-						enc.push_back(b64_chars[(val >> 12) & 0x3F]);
-						enc.push_back((i + 1 < size) ? b64_chars[(val >> 6) & 0x3F] : '=');
-						enc.push_back((i + 2 < size) ? b64_chars[val & 0x3F] : '=');
-					}
-					b64 = "data:image/png;base64," + enc;
-				}
-			}
-			SDL_CloseIO(io);
-		} else {
-			std::error_code tec;
-			std::filesystem::path temp_dir = std::filesystem::temp_directory_path(tec);
-			if (!tec) {
-				std::filesystem::path temp_png =
-					temp_dir / ("sand3_thumb_" +
-								std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".png");
-				if (SDL_SavePNG(surf, temp_png.string().c_str())) {
-					std::ifstream fin(temp_png, std::ios::binary);
-					if (fin.is_open()) {
-						std::vector<uint8_t> png_bytes((std::istreambuf_iterator<char>(fin)),
-													   std::istreambuf_iterator<char>());
-						fin.close();
-						std::filesystem::remove(temp_png, tec);
-						if (!png_bytes.empty()) {
-							static const char b64_chars[] =
-								"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-							std::string enc;
-							enc.reserve(((png_bytes.size() + 2) / 3) * 4);
-							for (size_t i = 0; i < png_bytes.size(); i += 3) {
-								uint32_t val = (static_cast<uint32_t>(png_bytes[i]) << 16);
-								if (i + 1 < png_bytes.size())
-									val |= (static_cast<uint32_t>(png_bytes[i + 1]) << 8);
-								if (i + 2 < png_bytes.size())
-									val |= static_cast<uint32_t>(png_bytes[i + 2]);
-								enc.push_back(b64_chars[(val >> 18) & 0x3F]);
-								enc.push_back(b64_chars[(val >> 12) & 0x3F]);
-								enc.push_back((i + 1 < png_bytes.size()) ? b64_chars[(val >> 6) & 0x3F] : '=');
-								enc.push_back((i + 2 < png_bytes.size()) ? b64_chars[val & 0x3F] : '=');
-							}
-							b64 = "data:image/png;base64," + enc;
-						}
-					}
-				}
-			}
-		}
-		SDL_DestroySurface(surf);
-		return b64;
-	}
-
-	std::string get_item_local_path(const WorkshopItemClient& item) {
-		if (item.type == "set") {
-			std::string dir = std::string(SETS_DIRECTORY) + item.title;
-			if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir) &&
-				!WorkshopCache::is_transient(dir)) {
-				return dir;
-			}
-		} else if (item.type == "save") {
-			std::string parent_name =
-				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
-			if (!std::filesystem::exists(parent_dir)) {
-				return "";
-			}
-			std::string path = std::string(SETS_DIRECTORY) + parent_name + "/saves/" + item.title + ".save";
-			if (std::filesystem::exists(path) && !WorkshopCache::is_transient(path)) {
-				return path;
-			}
-			for (const auto& sf : SaveManager::get_save_files(parent_name)) {
-				if (!sf.workshop_id.empty() && sf.workshop_id == item.id) {
-					std::string p = std::string(SETS_DIRECTORY) + parent_name + "/saves/" + sf.filename;
-					if (std::filesystem::exists(p) && !WorkshopCache::is_transient(p)) {
-						return p;
-					}
-				}
-			}
-		} else if (item.type == "stamp") {
-			std::string parent_name =
-				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
-			if (!std::filesystem::exists(parent_dir)) {
-				return "";
-			}
-			std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".stamp";
-			if (std::filesystem::exists(path) && !WorkshopCache::is_transient(path)) {
-				return path;
-			}
-			for (const auto& st : SaveManager::get_stamp_files(parent_name)) {
-				if (!st.workshop_id.empty() && st.workshop_id == item.id) {
-					std::string p = SaveManager::get_saves_directory(parent_name) + st.filename;
-					if (std::filesystem::exists(p) && !WorkshopCache::is_transient(p)) {
-						return p;
-					}
-				}
-			}
-		}
-		return "";
-	}
-
-	std::string get_item_cache_path(const WorkshopItemClient& item) {
-		if (item.type == "set") {
-			std::string dir = std::string(SETS_DIRECTORY) + item.title;
-			if (std::filesystem::exists(dir) && WorkshopCache::is_transient(dir)) {
-				return dir;
-			}
-			std::string p = WorkshopCache::get_cache_path(item.id, "set", "set.zip");
-			if (std::filesystem::exists(p)) {
-				return p;
-			}
-		} else if (item.type == "save") {
-			std::string parent_name =
-				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
-			if (std::filesystem::exists(parent_dir)) {
-				std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".save";
-				if (std::filesystem::exists(path) && WorkshopCache::is_transient(path)) {
-					return path;
-				}
-				for (const auto& sf : SaveManager::get_save_files(parent_name)) {
-					if (!sf.workshop_id.empty() && sf.workshop_id == item.id) {
-						std::string p = SaveManager::get_saves_directory(parent_name) + sf.filename;
-						if (std::filesystem::exists(p) && WorkshopCache::is_transient(p)) {
-							return p;
-						}
-					}
-				}
-			}
-			std::string p = WorkshopCache::get_cache_path(item.id, "save", "item.save");
-			if (std::filesystem::exists(p)) {
-				return p;
-			}
-		} else if (item.type == "stamp") {
-			std::string parent_name =
-				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
-			if (std::filesystem::exists(parent_dir)) {
-				std::string path = SaveManager::get_saves_directory(parent_name) + item.title + ".stamp";
-				if (std::filesystem::exists(path) && WorkshopCache::is_transient(path)) {
-					return path;
-				}
-				for (const auto& st : SaveManager::get_stamp_files(parent_name)) {
-					if (!st.workshop_id.empty() && st.workshop_id == item.id) {
-						std::string p = SaveManager::get_saves_directory(parent_name) + st.filename;
-						if (std::filesystem::exists(p) && WorkshopCache::is_transient(p)) {
-							return p;
-						}
-					}
-				}
-			}
-			std::string p = WorkshopCache::get_cache_path(item.id, "stamp", "item.stamp");
-			if (std::filesystem::exists(p)) {
-				return p;
-			}
-		} else if (item.type == "theme") {
-			std::string p = WorkshopCache::get_cache_path(item.id, "theme", "item.theme");
-			if (std::filesystem::exists(p)) {
-				return p;
-			}
-		}
-		return "";
-	}
-
-	bool is_item_present_locally(const WorkshopItemClient& item) {
-		if (item.type == "theme") {
-			return false;
-		}
-		return !get_item_local_path(item).empty();
-	}
-
-	bool is_item_modified_locally(const WorkshopItemClient& item, const std::string& target_version_hash = "") {
-		if (item.type == "set") {
-			if (SetManager::get_current_set() == item.title && UI::has_unsaved_changes()) {
-				return true;
-			}
-
-			std::string set_dir = std::string(SETS_DIRECTORY) + item.title;
-			std::error_code ec;
-			if (!std::filesystem::exists(std::filesystem::path(set_dir), ec) ||
-				!std::filesystem::is_directory(std::filesystem::path(set_dir), ec)) {
-				return false;
-			}
-			if (WorkshopCache::is_transient(set_dir)) {
-				return false;
-			}
-
-			std::string current_hash = SetManager::compute_set_hash(item.title);
-			if (current_hash.empty()) {
-				return false;
-			}
-
-			if (!target_version_hash.empty() && current_hash == target_version_hash) {
-				return false;
-			}
-
-			SetMetadata meta = SetManager::load_set_metadata(item.title);
-			if (!meta.workshop_hash.empty()) {
-				return current_hash != meta.workshop_hash;
-			}
-
-			if (!item.set_hash.empty()) {
-				return current_hash != item.set_hash;
-			}
-
-			return true;
-		} else if (item.type == "save") {
-			std::string local_path = get_item_local_path(item);
-			if (local_path.empty()) {
-				return false;
-			}
-			std::error_code ec;
-			if (!std::filesystem::exists(std::filesystem::path(local_path), ec)) {
-				return false;
-			}
-			if (WorkshopCache::is_transient(local_path)) {
-				return false;
-			}
-
-			std::string parent_name =
-				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			SaveFileInfo info;
-			if (!SaveManager::inspect_save_file(local_path, parent_name, info)) {
-				return true;
-			}
-
-			std::string current_fhash = SaveManager::compute_file_hash(local_path);
-			if (!info.file_hash.empty()) {
-				return current_fhash != info.file_hash;
-			}
-
-			std::string cache_p = get_item_cache_path(item);
-			if (!cache_p.empty() && std::filesystem::exists(std::filesystem::path(cache_p), ec)) {
-				std::string cache_fhash = SaveManager::compute_file_hash(cache_p);
-				if (!cache_fhash.empty()) {
-					return current_fhash != cache_fhash;
-				}
-			}
-
-			if (info.workshop_id.empty()) {
-				return true;
-			}
-			return false;
-		} else if (item.type == "stamp") {
-			std::string local_path = get_item_local_path(item);
-			if (local_path.empty()) {
-				return false;
-			}
-			std::error_code ec;
-			if (!std::filesystem::exists(std::filesystem::path(local_path), ec)) {
-				return false;
-			}
-			if (WorkshopCache::is_transient(local_path)) {
-				return false;
-			}
-
-			std::string parent_name =
-				!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-			StampFileInfo info;
-			if (!SaveManager::inspect_stamp_file(local_path, parent_name, info)) {
-				return true;
-			}
-
-			std::string current_fhash = SaveManager::compute_file_hash(local_path);
-			if (!info.file_hash.empty()) {
-				return current_fhash != info.file_hash;
-			}
-
-			std::string cache_p = get_item_cache_path(item);
-			if (!cache_p.empty() && std::filesystem::exists(std::filesystem::path(cache_p), ec)) {
-				std::string cache_fhash = SaveManager::compute_file_hash(cache_p);
-				if (!cache_fhash.empty()) {
-					return current_fhash != cache_fhash;
-				}
-			}
-
-			if (info.workshop_id.empty()) {
-				return true;
-			}
-			return false;
-		}
-		return false;
-	}
-}  // namespace
-
-void UI::refresh_workshop_items() { ::refresh_workshop_items(); }
-void UI::remove_workshop_item(const std::string& item_id) {
-	for (auto it = s_workshop_items.begin(); it != s_workshop_items.end();) {
-		if (it->id == item_id) {
-			it = s_workshop_items.erase(it);
-		} else {
-			++it;
-		}
-	}
-}
-void UI::validate_online_items(bool force) { ::validate_all_online_and_cached_items(force); }
-
-void UI::handle_uri(const std::string& uri) {
-	std::string item_id;
-	std::string item_type;
-
-	std::string s = uri;
-	while (!s.empty() && (s.front() == '"' || s.front() == '\'' || s.front() == ' '))
-		s.erase(0, 1);
-	while (!s.empty() &&
-		   (s.back() == '"' || s.back() == '\'' || s.back() == ' ' || s.back() == '\n' || s.back() == '\r'))
-		s.pop_back();
-
-	size_t qmark = s.find('?');
-	if (qmark != std::string::npos) {
-		std::string query = s.substr(qmark + 1);
-		size_t pos = 0;
-		while (pos < query.size()) {
-			size_t next_amp = query.find('&', pos);
-			std::string param = (next_amp == std::string::npos) ? query.substr(pos) : query.substr(pos, next_amp - pos);
-			size_t eq = param.find('=');
-			if (eq != std::string::npos) {
-				std::string key = param.substr(0, eq);
-				std::string val = param.substr(eq + 1);
-				if (key == "id") {
-					item_id = val;
-				} else if (key == "type") {
-					item_type = val;
-				}
-			}
-			if (next_amp == std::string::npos)
-				break;
-			pos = next_amp + 1;
-		}
-	}
-
-	if (item_id.empty()) {
-		std::string path_part = (qmark != std::string::npos) ? s.substr(0, qmark) : s;
-		if (path_part.rfind("sand3://", 0) == 0) {
-			path_part = path_part.substr(8);
-		}
-		if (path_part.rfind("open/", 0) == 0 || path_part.rfind("item/", 0) == 0)
-			path_part = path_part.substr(5);
-		else if (path_part == "open")
-			path_part = "";
-		else if (path_part.rfind("items/", 0) == 0)
-			path_part = path_part.substr(6);
-
-		while (!path_part.empty() && path_part.back() == '/')
-			path_part.pop_back();
-		while (!path_part.empty() && path_part.front() == '/')
-			path_part.erase(0, 1);
-
-		if (!path_part.empty()) {
-			item_id = path_part;
-		}
-	}
-
-	if (!item_id.empty()) {
-		s_force_workshop_tab_selected = true;
-
-		std::memset(s_workshop_search, 0, sizeof(s_workshop_search));
-		std::strncpy(s_workshop_search, item_id.c_str(), sizeof(s_workshop_search) - 1);
-
-		if (item_type == "set") {
-			s_workshop_type_filter = 1;
-		} else if (item_type == "save") {
-			s_workshop_type_filter = 2;
-		} else if (item_type == "stamp") {
-			s_workshop_type_filter = 3;
-		} else if (item_type == "theme") {
-			s_workshop_type_filter = 4;
-		} else {
-			s_workshop_type_filter = 0;
-		}
-
-		s_workshop_my_items = false;
-		s_workshop_favorites = false;
-		s_workshop_sort_idx = 0;
-
-		refresh_workshop_items();
-
-		if (Window::get_window()) {
-			SDL_ShowWindow(Window::get_window());
-			SDL_RaiseWindow(Window::get_window());
-		}
-	}
-}
+void UI::handle_uri(const std::string& uri) { UIWorkshop::handle_uri(uri); }
 
 std::string UI::generate_thumbnail_base64(int type_idx, const std::string& target_set, const std::string& target_file) {
-	return ::generate_thumbnail_base64(type_idx, target_set, target_file);
-}
-
-namespace {
-	bool s_show_set_override_warning = false;
-	WorkshopItemClient s_pending_override_item;
-	uint32_t s_pending_local_version = 1;
-	uint32_t s_pending_target_version = 1;
-	bool s_pending_is_update = false;
-	bool s_pending_is_version_load = false;
-	bool s_pending_is_switch = false;
-	std::function<void()> s_pending_override_confirm = nullptr;
-	std::function<void()> s_pending_override_keep_local = nullptr;
-
-	bool apply_theme_from_file(const std::string& theme_path, const std::string& title = "") {
-		std::ifstream fin(theme_path);
-		if (!fin.is_open())
-			return false;
-		try {
-			nlohmann::json tj = nlohmann::json::parse(fin);
-			auto& cfg = ConfigManager::get_config();
-			auto& style = ImGui::GetStyle();
-			if (tj.contains("window_rounding")) {
-				cfg.ui.window_rounding = tj["window_rounding"].get<float>();
-				style.WindowRounding = cfg.ui.window_rounding;
-			}
-			if (tj.contains("frame_rounding")) {
-				cfg.ui.frame_rounding = tj["frame_rounding"].get<float>();
-				style.FrameRounding = cfg.ui.frame_rounding;
-				style.ChildRounding = cfg.ui.frame_rounding;
-				style.PopupRounding = cfg.ui.frame_rounding;
-				style.GrabRounding = cfg.ui.frame_rounding;
-				style.TabRounding = cfg.ui.frame_rounding;
-			}
-			if (tj.contains("button_size"))
-				cfg.ui.button_size = tj["button_size"].get<int>();
-			if (tj.contains("icon_size"))
-				cfg.ui.icon_size = tj["icon_size"].get<int>();
-			if (tj.contains("sidebar_width"))
-				cfg.ui.sidebar_width = tj["sidebar_width"].get<int>();
-			if (tj.contains("material_list_height"))
-				cfg.ui.material_list_height = tj["material_list_height"].get<int>();
-			if (tj.contains("set_list_height"))
-				cfg.ui.set_list_height = tj["set_list_height"].get<int>();
-			if (tj.contains("save_list_height"))
-				cfg.ui.save_list_height = tj["save_list_height"].get<int>();
-			if (tj.contains("stamp_list_height"))
-				cfg.ui.stamp_list_height = tj["stamp_list_height"].get<int>();
-			if (tj.contains("background_color") && tj["background_color"].is_array() &&
-				tj["background_color"].size() >= 4) {
-				cfg.ui.background_color = ImVec4(tj["background_color"][0], tj["background_color"][1],
-												 tj["background_color"][2], tj["background_color"][3]);
-				Window::set_background_color(cfg.ui.background_color);
-			}
-			if (tj.contains("selection_box_color") && tj["selection_box_color"].is_array() &&
-				tj["selection_box_color"].size() >= 4) {
-				cfg.ui.selection_box_color = ImVec4(tj["selection_box_color"][0], tj["selection_box_color"][1],
-													tj["selection_box_color"][2], tj["selection_box_color"][3]);
-			}
-			if (tj.contains("selection_box_fill") && tj["selection_box_fill"].is_array() &&
-				tj["selection_box_fill"].size() >= 4) {
-				cfg.ui.selection_box_fill = ImVec4(tj["selection_box_fill"][0], tj["selection_box_fill"][1],
-												   tj["selection_box_fill"][2], tj["selection_box_fill"][3]);
-			}
-			if (tj.contains("colors") && tj["colors"].is_object()) {
-				for (auto& [cname, val] : tj["colors"].items()) {
-					if (val.is_string()) {
-						std::string hex = val.get<std::string>();
-						ConfigManager::get_color_overrides()[cname] = hex;
-						for (int ci = 0; ci < ImGuiCol_COUNT; ++ci) {
-							if (cname == ImGui::GetStyleColorName(ci)) {
-								ImVec4 parsed;
-								if (ConfigManager::parse_color_string(hex, parsed)) {
-									style.Colors[ci] = parsed;
-								}
-								break;
-							}
-						}
-					}
-				}
-			}
-			ConfigManager::save();
-			if (!title.empty()) {
-				ToastManager::success("Theme '" + title + "' applied!");
-			}
-			return true;
-		} catch (...) {
-			ToastManager::error("Failed to parse theme file.");
-			return false;
-		}
-	}
-
-	bool s_show_fork_item_modal = false;
-	WorkshopItemClient s_fork_item;
-	int s_fork_version = 1;
-	std::vector<std::string> s_fork_available_sets;
-	int s_selected_fork_set_idx = 0;
-
-	void open_fork_item_modal(const WorkshopItemClient& item, int version = 0) {
-		s_fork_item = item;
-		s_fork_version = (version > 0) ? version : item.version;
-
-		if (item.type == "set") {
-			auto do_fork_set = [item, ver = s_fork_version](const std::string& zip_file) {
-				std::string base_fork =
-					item.title + (ver > 0 && ver != item.version ? ("_v" + std::to_string(ver)) : "") + "_fork";
-				std::string fork_name = base_fork;
-				int fidx = 2;
-				while (std::filesystem::exists(std::string(SETS_DIRECTORY) + fork_name)) {
-					fork_name = base_fork + "_" + std::to_string(fidx++);
-				}
-				std::string target_dir = std::string(SETS_DIRECTORY) + fork_name;
-				ZipUtil::extract_zip(zip_file, target_dir);
-				SetMetadata sm = SetManager::load_set_metadata(fork_name);
-				sm.name = fork_name;
-				sm.workshop_id = "";
-				sm.workshop_hash = "";
-				sm.is_online = false;
-				sm.version = 1;
-				sm.forked_from_id = item.id;
-				sm.forked_from_author = item.author.empty() ? "Community" : item.author;
-				sm.forked_from_version = ver;
-				SetManager::save_set_metadata(fork_name, sm);
-				SetManager::set_current_set(fork_name);
-				ToastManager::success("Forked set created: '" + fork_name +
-									  "'! You can modify and publish it separately.");
-			};
-
-			std::string cache_path;
-			if (s_fork_version == item.version) {
-				cache_path = get_item_cache_path(item);
-			}
-			if (!cache_path.empty() && std::filesystem::exists(cache_path)) {
-				do_fork_set(cache_path);
-			} else {
-				std::string target_zip =
-					WorkshopCache::get_cache_path(item.id, "set", "set_v" + std::to_string(s_fork_version) + ".zip");
-				WorkshopClient::download_item_version(
-					item.id, s_fork_version, target_zip, [do_fork_set, target_zip](bool success, const std::string&) {
-						if (success) {
-							do_fork_set(target_zip);
-						} else {
-							ToastManager::error("Failed to download set for forking.");
-						}
-					});
-			}
-			return;
-		}
-
-		if (item.type == "theme") {
-			auto do_fork_theme = [item, ver = s_fork_version](const std::string& theme_file) {
-				std::string themes_dir = "themes/";
-				std::filesystem::create_directories(themes_dir);
-				std::string base_fork = item.title + "_fork";
-				std::string fork_name = base_fork;
-				int fidx = 2;
-				while (std::filesystem::exists(themes_dir + fork_name + ".theme")) {
-					fork_name = base_fork + "_" + std::to_string(fidx++);
-				}
-				std::ifstream fin(theme_file);
-				nlohmann::json tj;
-				if (fin.is_open()) {
-					try {
-						tj = nlohmann::json::parse(fin);
-					} catch (...) {}
-					fin.close();
-				}
-				tj["name"] = fork_name;
-				tj["forked_from_id"] = item.id;
-				tj["forked_from_author"] = item.author.empty() ? "Community" : item.author;
-				tj["forked_from_version"] = ver;
-				std::ofstream fout(themes_dir + fork_name + ".theme");
-				if (fout.is_open()) {
-					fout << tj.dump(2);
-					fout.close();
-				}
-				ToastManager::success("Forked theme created: '" + fork_name + "'!");
-			};
-
-			std::string cache_path =
-				WorkshopCache::get_cache_path(item.id, "theme", "theme_v" + std::to_string(s_fork_version) + ".theme");
-			if (std::filesystem::exists(cache_path)) {
-				do_fork_theme(cache_path);
-			} else {
-				WorkshopClient::download_item_version(
-					item.id, s_fork_version, cache_path, [do_fork_theme, cache_path](bool success, const std::string&) {
-						if (success) {
-							do_fork_theme(cache_path);
-						} else {
-							ToastManager::error("Failed to download theme for forking.");
-						}
-					});
-			}
-			return;
-		}
-
-		s_fork_available_sets.clear();
-		s_selected_fork_set_idx = 0;
-
-		std::string parent_set = !item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-		s_fork_available_sets.push_back(parent_set);
-		auto forked_sets = get_forked_sets_for(parent_set);
-		for (const auto& fs : forked_sets) {
-			s_fork_available_sets.push_back(fs);
-		}
-		if (s_fork_available_sets.size() > 1) {
-			s_selected_fork_set_idx = 1;
-		}
-		s_show_fork_item_modal = true;
-	}
-
-	void check_and_render_fork_item_modal() {
-		if (s_show_fork_item_modal) {
-			ImGui::OpenPopup("Fork Item##ModalDialog");
-		}
-		ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-		ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-		if (ImGui::BeginPopupModal("Fork Item##ModalDialog", &s_show_fork_item_modal,
-								   ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::TextColored(ImVec4(0.35f, 0.7f, 1.0f, 1.0f), "Fork %s: %s (v%d)", s_fork_item.type.c_str(),
-							   s_fork_item.title.c_str(), s_fork_version);
-			ImGui::TextDisabled("Original Author: %s", s_fork_item.author.c_str());
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			ImGui::Text("Assign to Set:");
-			if (!s_fork_available_sets.empty()) {
-				std::vector<const char*> set_names;
-				set_names.reserve(s_fork_available_sets.size());
-				for (const auto& s : s_fork_available_sets) {
-					set_names.push_back(s.c_str());
-				}
-				ImGui::SetNextItemWidth(260.0f);
-				ImGui::Combo("##fork_assign_set", &s_selected_fork_set_idx, set_names.data(),
-							 static_cast<int>(set_names.size()));
-			}
-			if (s_fork_available_sets.size() > 1 && s_selected_fork_set_idx > 0) {
-				ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "Forked set selected!");
-			}
-
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Confirm Fork", ImVec2(110, 24))) {
-				std::string chosen_set = (s_selected_fork_set_idx >= 0 &&
-										  s_selected_fork_set_idx < static_cast<int>(s_fork_available_sets.size()))
-											 ? s_fork_available_sets[s_selected_fork_set_idx]
-											 : SetManager::get_current_set();
-
-				auto execute_fork = [item = s_fork_item, ver = s_fork_version,
-									 chosen_set](const std::string& file_path) {
-					std::string base_name = item.title + "_fork";
-					std::string fork_name = base_name;
-					int fidx = 2;
-					if (item.type == "save") {
-						std::string saves_dir = SaveManager::get_saves_directory(chosen_set);
-						while (std::filesystem::exists(saves_dir + fork_name + ".save")) {
-							fork_name = base_name + "_" + std::to_string(fidx++);
-						}
-						if (SaveManager::fork_save_to_set(file_path, chosen_set, fork_name, item.id, item.author,
-														  ver)) {
-							ToastManager::success("Forked save created in set '" + chosen_set + "': " + fork_name);
-						} else {
-							ToastManager::error("Failed to fork save.");
-						}
-					} else if (item.type == "stamp") {
-						std::string saves_dir = SaveManager::get_saves_directory(chosen_set);
-						while (std::filesystem::exists(saves_dir + fork_name + ".stamp")) {
-							fork_name = base_name + "_" + std::to_string(fidx++);
-						}
-						if (SaveManager::fork_stamp_to_set(file_path, chosen_set, fork_name, item.id, item.author,
-														   ver)) {
-							ToastManager::success("Forked stamp created in set '" + chosen_set + "': " + fork_name);
-						} else {
-							ToastManager::error("Failed to fork stamp.");
-						}
-					}
-				};
-
-				std::string ext = (s_fork_item.type == "save" ? ".save" : ".stamp");
-				std::string cache_path = WorkshopCache::get_cache_path(
-					s_fork_item.id, s_fork_item.type, s_fork_item.type + "_v" + std::to_string(s_fork_version) + ext);
-				if (std::filesystem::exists(cache_path)) {
-					execute_fork(cache_path);
-				} else {
-					WorkshopClient::download_item_version(s_fork_item.id, s_fork_version, cache_path,
-														  [execute_fork, cache_path](bool success, const std::string&) {
-															  if (success) {
-																  execute_fork(cache_path);
-															  } else {
-																  ToastManager::error(
-																	  "Failed to download item for forking.");
-															  }
-														  });
-				}
-
-				s_show_fork_item_modal = false;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(80, 24))) {
-				s_show_fork_item_modal = false;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
-	}
-
-	void render_workshop_item_card(const WorkshopItemClient& item) {
-		ImGui::PushID(item.id.c_str());
-
-		bool is_owner = WorkshopClient::is_logged_in() && !item.author.empty() &&
-						(WorkshopClient::get_logged_in_username() == item.author);
-		bool is_local = is_item_present_locally(item);
-		bool is_cached = !is_local && !get_item_cache_path(item).empty();
-		uint32_t local_version = 1;
-		bool is_update = false;
-		if (item.type == "set" && is_local) {
-			SetMetadata local_m = SetManager::load_set_metadata(item.title);
-			local_version = local_m.version;
-			if (item.version > static_cast<int>(local_version)) {
-				is_update = true;
-			}
-		}
-
-		ImVec4 border_col = ImVec4(0.22f, 0.27f, 0.35f, 0.7f);
-		ImGui::PushStyleColor(ImGuiCol_Border, border_col);
-		ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.14f, 0.17f, 0.6f));
-		ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
-
-		ImGui::BeginChild(("CardChild_" + item.id).c_str(), ImVec2(0, 0),
-						  ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
-
-		float card_top_y = ImGui::GetCursorPosY();
-		ImVec2 thumb_sz(62, 62);
-		SDL_Texture* tex = get_or_load_thumbnail(item);
-		if (tex) {
-			ImGui::Image((ImTextureID)tex, thumb_sz);
-		} else {
-			ImDrawList* dl = ImGui::GetWindowDrawList();
-			ImVec2 p_min = ImGui::GetCursorScreenPos();
-			ImVec2 p_max(p_min.x + thumb_sz.x, p_min.y + thumb_sz.y);
-			dl->AddRectFilled(p_min, p_max, IM_COL32(16, 22, 30, 255), 4.0f);
-			dl->AddRect(p_min, p_max, IM_COL32(48, 54, 61, 255), 4.0f);
-
-			IconID ph_icon = IconID::Save;
-			if (item.type == "set")
-				ph_icon = IconID::Package;
-			else if (item.type == "stamp")
-				ph_icon = IconID::Select;
-			else if (item.type == "theme")
-				ph_icon = IconID::Fill;
-			SDL_Texture* ph_tex = IconManager::get(ph_icon);
-			if (ph_tex) {
-				dl->AddImage((ImTextureID)ph_tex,
-							 ImVec2(p_min.x + thumb_sz.x * 0.5f - 12, p_min.y + thumb_sz.y * 0.5f - 12),
-							 ImVec2(p_min.x + thumb_sz.x * 0.5f + 12, p_min.y + thumb_sz.y * 0.5f + 12));
-			}
-			ImGui::Dummy(thumb_sz);
-		}
-
-		ImGui::SameLine(0, 10);
-		ImGui::BeginGroup();
-
-		IconID type_icon = IconID::Save;
-		ImVec4 type_col = ImVec4(0.3f, 0.8f, 0.4f, 1.0f);
-		const char* type_str = "SAVE";
-		if (item.type == "set") {
-			type_icon = IconID::Package;
-			type_col = ImVec4(0.4f, 0.65f, 1.0f, 1.0f);
-			type_str = "SET";
-		} else if (item.type == "stamp") {
-			type_icon = IconID::Select;
-			type_col = ImVec4(0.9f, 0.75f, 0.2f, 1.0f);
-			type_str = "STAMP";
-		} else if (item.type == "theme") {
-			type_icon = IconID::Fill;
-			type_col = ImVec4(0.8f, 0.45f, 0.95f, 1.0f);
-			type_str = "THEME";
-		}
-
-		SDL_Texture* t_tex = IconManager::get(type_icon);
-		if (t_tex) {
-			ImGui::Image((ImTextureID)t_tex, ImVec2(13, 13));
-			ImGui::SameLine(0, 4);
-		}
-		ImGui::TextColored(type_col, "[%s]", type_str);
-		ImGui::SameLine(0, 5);
-		if (item.version > 1) {
-			ImGui::TextColored(ImVec4(0.6f, 0.65f, 0.75f, 1.0f), "v%d", item.version);
-			ImGui::SameLine(0, 5);
-		}
-		if (item.is_private) {
-			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "[Private]");
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("This item is private and only visible to you.");
-			}
-			ImGui::SameLine(0, 5);
-		}
-		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.98f, 0.98f, 1.0f));
-		ImGui::TextWrapped("%s", item.title.c_str());
-		ImGui::PopStyleColor();
-
-		if (is_update) {
-			ImGui::SameLine(0, 5);
-			SDL_Texture* upd_tex = IconManager::get(IconID::Update);
-			if (upd_tex) {
-				ImGui::Image((ImTextureID)upd_tex, ImVec2(13, 13));
-				ImGui::SameLine(0, 3);
-			}
-			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "[New v%d!]", item.version);
-			if (ImGui::IsItemHovered()) {
-				std::string tip =
-					fmt::format("Newer version v{} available (local is v{})", item.version, local_version);
-				if (item.meta.contains("changelog") && item.meta["changelog"].is_array() &&
-					!item.meta["changelog"].empty()) {
-					const auto& cl = item.meta["changelog"];
-					if (cl[0].contains("notes") && cl[0]["notes"].is_string()) {
-						tip += "\nNotes: " + cl[0]["notes"].get<std::string>();
-					}
-				}
-				ImGui::SetTooltip("%s", tip.c_str());
-			}
-		}
-
-		ImGui::TextColored(ImVec4(0.55f, 0.6f, 0.68f, 1.0f), "by %s", item.author.c_str());
-
-		if (!item.forked_from_author.empty() || !item.forked_from_title.empty()) {
-			ImGui::SameLine(0, 6);
-			SDL_Texture* br_tex = IconManager::get(IconID::Branch);
-			if (br_tex) {
-				ImGui::Image((ImTextureID)br_tex, ImVec2(12, 12));
-				ImGui::SameLine(0, 3);
-			}
-			std::string fa = item.forked_from_author.empty() ? "Community" : item.forked_from_author;
-			ImGui::TextColored(ImVec4(0.45f, 0.7f, 0.95f, 1.0f), "fork of %s", fa.c_str());
-			if (ImGui::IsItemHovered()) {
-				std::string ft = !item.forked_from_title.empty() ? item.forked_from_title : "original item";
-				ImGui::SetTooltip("Forked from '%s' by %s (version %d)", ft.c_str(), fa.c_str(),
-								  item.forked_from_version);
-			}
-		}
-
-		if (!item.parent_set_title.empty()) {
-			ImGui::SameLine(0, 6);
-			ImGui::TextColored(ImVec4(0.5f, 0.75f, 0.95f, 1.0f), "• Set: %s", item.parent_set_title.c_str());
-		}
-
-		if (item.type == "set") {
-			int mat_count = 0;
-			if (item.meta.contains("materials_count") && item.meta["materials_count"].is_number()) {
-				mat_count = item.meta["materials_count"].get<int>();
-			}
-			if (mat_count > 0) {
-				ImGui::SameLine(0, 6);
-				ImGui::TextColored(ImVec4(0.5f, 0.75f, 0.5f, 1.0f), "• %d materials", mat_count);
-			}
-		} else {
-			int w = 0, h = 0;
-			if (item.meta.contains("width") && item.meta["width"].is_number()) {
-				w = item.meta["width"].get<int>();
-			}
-			if (item.meta.contains("height") && item.meta["height"].is_number()) {
-				h = item.meta["height"].get<int>();
-			}
-			if (w > 0 && h > 0) {
-				ImGui::SameLine(0, 6);
-				ImGui::TextColored(ImVec4(0.5f, 0.7f, 0.9f, 1.0f), "• %d×%d px", w, h);
-			}
-		}
-
-		if (!item.description.empty()) {
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.75f, 0.8f, 1.0f));
-			if (item.description.length() > 300) {
-				std::string preview = item.description.substr(0, 297) + "...";
-				ImGui::TextWrapped("%s", preview.c_str());
-				if (ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("%s", item.description.c_str());
-				}
-			} else {
-				ImGui::TextWrapped("%s", item.description.c_str());
-			}
-			ImGui::PopStyleColor();
-		}
-
-		ImGui::EndGroup();
-
-		if (ImGui::GetCursorPosY() < card_top_y + thumb_sz.y) {
-			ImGui::SetCursorPosY(card_top_y + thumb_sz.y);
-		}
-		ImGui::Spacing();
-
-		auto place_btn = [](float needed_w) {
-			if (ImGui::GetContentRegionAvail().x >= needed_w + 4.0f) {
-				ImGui::SameLine(0, 4);
-			}
-		};
-
-		bool is_activating = s_items_activating.find(item.id) != s_items_activating.end();
-		std::string try_label = is_activating			 ? "Loading..."
-								: (item.type == "set")	 ? (is_local ? (is_update ? "Update" : "Switch") : "Switch")
-								: (item.type == "stamp") ? "Use"
-								: (item.type == "theme") ? "Apply"
-														 : "Load";
-		IconID btn_icon = is_activating			   ? IconID::RotateCW
-						  : (item.type == "set")   ? (is_update ? IconID::Update : IconID::RotateCW)
-						  : (item.type == "stamp") ? IconID::Select
-						  : (item.type == "theme") ? IconID::Fill
-												   : IconID::Folder;
-		if (is_activating) {
-			ImGui::BeginDisabled();
-		}
-		if (UI::button_with_icon(try_label.c_str(), IconManager::get(btn_icon), ImVec2(0, 22))) {
-			s_items_activating.insert(item.id);
-			if (item.type == "set") {
-				if (is_local) {
-					bool has_modifications = is_item_modified_locally(item, item.set_hash);
-					if (has_modifications) {
-						s_pending_override_item = item;
-						s_pending_local_version = local_version;
-						s_pending_target_version = item.version;
-						s_pending_is_update = is_update;
-						s_pending_is_version_load = false;
-						s_pending_is_switch = true;
-
-						s_pending_override_confirm = [item]() {
-							auto apply_update = [item](const std::string& p) {
-								std::string dest_dir = std::string(SETS_DIRECTORY) + item.title;
-								ZipUtil::extract_zip(p, dest_dir);
-								SetManager::set_workshop_info(item.title, item.id, item.set_hash, item.version,
-															  item.author);
-								SetManager::mark_set_online(item.title, true);
-								SetManager::set_current_set(item.title);
-								s_items_activating.erase(item.id);
-								ToastManager::success("Set '" + item.title + "' loaded from Workshop (v" +
-													  std::to_string(item.version) + ")!");
-							};
-							std::string cache_p = get_item_cache_path(item);
-							if (!cache_p.empty()) {
-								apply_update(cache_p);
-							} else {
-								std::string zip_path = WorkshopCache::get_cache_path(item.id, "set", "set.zip");
-								WorkshopClient::download_item(
-									item.id, zip_path,
-									[apply_update, item_id = item.id](bool success, const std::string& p) {
-										if (success) {
-											apply_update(p);
-										} else {
-											s_items_activating.erase(item_id);
-											ToastManager::error("Failed to download set.");
-										}
-									});
-							}
-						};
-
-						s_pending_override_keep_local = [item]() {
-							if (SetManager::get_current_set() != item.title) {
-								SetManager::set_current_set(item.title);
-							}
-							s_items_activating.erase(item.id);
-							ToastManager::info("Switched to local set '" + item.title + "'!");
-						};
-
-						s_show_set_override_warning = true;
-					} else {
-						if (is_update) {
-							auto apply_update = [item](const std::string& p) {
-								std::string dest_dir = std::string(SETS_DIRECTORY) + item.title;
-								ZipUtil::extract_zip(p, dest_dir);
-								SetManager::set_workshop_info(item.title, item.id, item.set_hash, item.version,
-															  item.author);
-								SetManager::mark_set_online(item.title, true);
-								SetManager::set_current_set(item.title);
-								s_items_activating.erase(item.id);
-								ToastManager::success("Set '" + item.title + "' updated to v" +
-													  std::to_string(item.version) + "!");
-							};
-							std::string cache_p = get_item_cache_path(item);
-							if (!cache_p.empty()) {
-								apply_update(cache_p);
-							} else {
-								std::string zip_path = WorkshopCache::get_cache_path(item.id, "set", "set.zip");
-								WorkshopClient::download_item(
-									item.id, zip_path,
-									[apply_update, item_id = item.id](bool success, const std::string& p) {
-										if (success) {
-											apply_update(p);
-										} else {
-											s_items_activating.erase(item_id);
-											ToastManager::error("Failed to download set update.");
-										}
-									});
-							}
-						} else {
-							if (SetManager::get_current_set() != item.title) {
-								SetManager::set_current_set(item.title);
-							}
-							s_items_activating.erase(item.id);
-							ToastManager::info("Switched to local set '" + item.title + "'!");
-						}
-					}
-				} else if (is_cached) {
-					std::string target_set_dir = std::string(SETS_DIRECTORY) + item.title;
-					std::string cached_path = get_item_cache_path(item);
-					if (!std::filesystem::exists(target_set_dir)) {
-						ZipUtil::extract_zip(cached_path, target_set_dir);
-					}
-					WorkshopCache::register_transient(target_set_dir);
-					SetManager::set_workshop_info(item.title, item.id, item.set_hash, item.version, item.author);
-					SetManager::mark_set_online(item.title, true);
-					SetManager::set_current_set(item.title);
-					s_items_activating.erase(item.id);
-					ToastManager::info("Set '" + item.title + "' activated! (Loaded from cache)");
-				} else {
-					std::string cache_path = WorkshopCache::get_cache_path(item.id, "set", "set.zip");
-					WorkshopClient::download_item(item.id, cache_path, [item](bool success, const std::string& path) {
-						s_items_activating.erase(item.id);
-						if (success) {
-							std::string target_set_dir = std::string(SETS_DIRECTORY) + item.title;
-							ZipUtil::extract_zip(path, target_set_dir);
-							WorkshopCache::register_transient(target_set_dir);
-							SetManager::set_workshop_info(item.title, item.id, item.set_hash, item.version,
-														  item.author);
-							SetManager::mark_set_online(item.title, true);
-							SetManager::set_current_set(item.title);
-							ToastManager::info("Set '" + item.title + "' activated! (Cached until exit)");
-						} else {
-							ToastManager::error("Failed to download set from workshop.");
-						}
-					});
-				}
-			} else if (item.type == "save" || item.type == "stamp") {
-				auto ensure_parent_set_and_run = [item](std::function<void()> on_ready) {
-					if (!item.parent_set_id.empty() && !item.parent_set_title.empty()) {
-						std::string parent_name = item.parent_set_title;
-						std::string parent_dir = std::string(SETS_DIRECTORY) + parent_name;
-						if (!std::filesystem::exists(parent_dir) ||
-							!std::filesystem::exists(parent_dir + "/set_config.ini")) {
-							std::string parent_zip =
-								WorkshopCache::get_cache_path(item.parent_set_id, "set", "set.zip");
-							if (std::filesystem::exists(parent_zip)) {
-								ZipUtil::extract_zip(parent_zip, parent_dir);
-								WorkshopCache::register_transient(parent_dir);
-								SetManager::set_workshop_info(parent_name, item.parent_set_id, item.set_hash, 1);
-								SetManager::mark_set_online(parent_name, true);
-								SetManager::set_current_set(parent_name);
-								on_ready();
-							} else {
-								WorkshopClient::download_item(
-									item.parent_set_id, parent_zip,
-									[parent_name, parent_dir, item, on_ready](bool set_ok, const std::string& zpath) {
-										if (set_ok) {
-											ZipUtil::extract_zip(zpath, parent_dir);
-											WorkshopCache::register_transient(parent_dir);
-											SetManager::set_workshop_info(parent_name, item.parent_set_id,
-																		  item.set_hash, 1);
-											SetManager::mark_set_online(parent_name, true);
-											SetManager::set_current_set(parent_name);
-											on_ready();
-										} else {
-											s_items_activating.erase(item.id);
-											ToastManager::error("Failed to download required set '" + parent_name +
-																"'.");
-										}
-									});
-							}
-							return;
-						} else {
-							if (SetManager::get_current_set() != parent_name) {
-								SetManager::set_current_set(parent_name);
-							}
-						}
-					}
-					on_ready();
-				};
-
-				ensure_parent_set_and_run([item]() {
-					std::string parent_name =
-						!item.parent_set_title.empty() ? item.parent_set_title : SetManager::get_current_set();
-					std::string saves_dir = SaveManager::get_saves_directory(parent_name);
-					std::error_code ec;
-					std::filesystem::create_directories(saves_dir, ec);
-
-					std::string ext = (item.type == "save") ? ".save" : ".stamp";
-					std::string target_file = saves_dir + item.title + ext;
-
-					bool exists_on_disk = std::filesystem::exists(target_file);
-
-					if (exists_on_disk) {
-						bool is_transient = WorkshopCache::is_transient(target_file);
-						if (item.type == "save") {
-							SaveManager::load_from_file_async(
-								target_file, parent_name, LoadPlacement::Center,
-								[is_transient, item_id = item.id](bool s_ok, const std::string&) {
-									s_items_activating.erase(item_id);
-									if (s_ok) {
-										ToastManager::info(is_transient ? "Save loaded from cache!"
-																		: "Save loaded from local storage!");
-									} else {
-										ToastManager::error("Failed to load save file.");
-									}
-								});
-						} else {
-							SaveManager::load_stamp_from_file_async(
-								target_file, parent_name,
-								[is_transient, item_id = item.id](bool s_ok, const std::vector<uint8_t>& cells,
-																  uint32_t w, uint32_t h) {
-									s_items_activating.erase(item_id);
-									if (s_ok) {
-										UI::load_stamp(cells, w, h);
-										ToastManager::info(is_transient ? "Stamp loaded into brush (cache)!"
-																		: "Stamp loaded into brush (local file)!");
-									} else {
-										ToastManager::error("Failed to load stamp file.");
-									}
-								});
-						}
-					} else {
-						WorkshopClient::download_item(
-							item.id, target_file,
-							[item, parent_name, target_file](bool success, const std::string& path) {
-								if (success) {
-									WorkshopCache::register_transient(target_file);
-									if (item.type == "save") {
-										SaveManager::set_save_workshop_info(item.title, parent_name, item.id,
-																			item.set_hash, item.author, item.version);
-										SaveManager::load_from_file_async(
-											target_file, parent_name, LoadPlacement::Center,
-											[item_id = item.id](bool s_ok, const std::string&) {
-												s_items_activating.erase(item_id);
-												if (s_ok) {
-													ToastManager::info("Save loaded into sandbox!");
-												} else {
-													ToastManager::error("Failed to load downloaded save.");
-												}
-											});
-									} else {
-										SaveManager::set_stamp_workshop_info(item.title, parent_name, item.id,
-																			 item.set_hash, item.author, item.version);
-										SaveManager::load_stamp_from_file_async(
-											target_file, parent_name,
-											[item_id = item.id](bool s_ok, const std::vector<uint8_t>& cells,
-																uint32_t w, uint32_t h) {
-												s_items_activating.erase(item_id);
-												if (s_ok) {
-													UI::load_stamp(cells, w, h);
-													ToastManager::info("Stamp loaded into brush!");
-												} else {
-													ToastManager::error("Failed to load downloaded stamp.");
-												}
-											});
-									}
-								} else {
-									s_items_activating.erase(item.id);
-									ToastManager::error("Failed to download " + item.type + " from workshop server.");
-								}
-							});
-					}
-				});
-			} else if (item.type == "theme") {
-				std::string theme_path = WorkshopCache::get_cache_path(item.id, "theme", "item.theme");
-				if (std::filesystem::exists(theme_path)) {
-					s_items_activating.erase(item.id);
-					apply_theme_from_file(theme_path, item.title);
-				} else {
-					WorkshopClient::download_item(item.id, theme_path, [item](bool success, const std::string& p) {
-						s_items_activating.erase(item.id);
-						if (success) {
-							WorkshopCache::register_transient(p);
-							apply_theme_from_file(p, item.title);
-						} else {
-							ToastManager::error("Failed to download theme.");
-						}
-					});
-				}
-			}
-		}
-		if (is_activating) {
-			ImGui::EndDisabled();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Loads item into game.");
-		}
-
-		if (WorkshopClient::is_logged_in()) {
-			place_btn(56.0f);
-			if (UI::button_with_icon("Fork", IconManager::get(IconID::Branch), ImVec2(0, 22))) {
-				open_fork_item_modal(item, item.version);
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Fork this %s into a personal copy that you can modify and publish separately.",
-								  item.type.c_str());
-			}
-		}
-
-		place_btn(74.0f);
-		if (UI::button_with_icon("Versions", IconManager::get(IconID::Tag), ImVec2(0, 22))) {
-			open_versions_modal(item);
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Browse past versions of this %s.", item.type.c_str());
-		}
-
-		char like_btn_lbl[32];
-		std::snprintf(like_btn_lbl, sizeof(like_btn_lbl), "%d##like_%s", item.likes_count, item.id.c_str());
-		bool pushed_like_col = item.is_liked;
-		if (pushed_like_col) {
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-		}
-		place_btn(64.0f);
-		if (UI::button_with_icon(like_btn_lbl, IconManager::get(IconID::Heart), ImVec2(0, 22))) {
-			if (!WorkshopClient::is_logged_in()) {
-				s_show_auth_modal = true;
-				s_auth_status = "Please log in to like workshop items.";
-				ToastManager::info("Please log in to like workshop items.");
-			} else {
-				std::string item_id = item.id;
-				bool prev_liked = item.is_liked;
-				int prev_count = item.likes_count;
-				bool opt_liked = !prev_liked;
-				int opt_count = std::max(0, prev_count + (opt_liked ? 1 : -1));
-
-				for (auto& it : s_workshop_items) {
-					if (it.id == item_id) {
-						it.is_liked = opt_liked;
-						it.likes_count = opt_count;
-						break;
-					}
-				}
-
-				WorkshopClient::toggle_like(item_id,
-											[item_id, prev_liked, prev_count](bool success, bool is_liked, int count) {
-												for (auto& it : s_workshop_items) {
-													if (it.id == item_id) {
-														if (success) {
-															it.is_liked = is_liked;
-															it.likes_count = count;
-														} else {
-															it.is_liked = prev_liked;
-															it.likes_count = prev_count;
-														}
-														break;
-													}
-												}
-											});
-			}
-		}
-		if (pushed_like_col) {
-			ImGui::PopStyleColor();
-		}
-
-		char fav_btn_lbl[32];
-		std::snprintf(fav_btn_lbl, sizeof(fav_btn_lbl), "%d##fav_%s", item.favorites_count, item.id.c_str());
-		bool pushed_fav_col = item.is_favorited;
-		if (pushed_fav_col) {
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.2f, 1.0f));
-		}
-		place_btn(64.0f);
-		if (UI::button_with_icon(fav_btn_lbl, IconManager::get(IconID::Star), ImVec2(0, 22))) {
-			if (!WorkshopClient::is_logged_in()) {
-				s_show_auth_modal = true;
-				s_auth_status = "Please log in to favorite workshop items.";
-				ToastManager::info("Please log in to favorite workshop items.");
-			} else {
-				std::string item_id = item.id;
-				bool prev_fav = item.is_favorited;
-				int prev_count = item.favorites_count;
-				bool opt_fav = !prev_fav;
-				int opt_count = std::max(0, prev_count + (opt_fav ? 1 : -1));
-
-				for (auto& it : s_workshop_items) {
-					if (it.id == item_id) {
-						it.is_favorited = opt_fav;
-						it.favorites_count = opt_count;
-						break;
-					}
-				}
-
-				WorkshopClient::toggle_favorite(item_id,
-												[item_id, prev_fav, prev_count](bool success, bool is_fav, int count) {
-													for (auto& it : s_workshop_items) {
-														if (it.id == item_id) {
-															if (success) {
-																it.is_favorited = is_fav;
-																it.favorites_count = count;
-															} else {
-																it.is_favorited = prev_fav;
-																it.favorites_count = prev_count;
-															}
-															break;
-														}
-													}
-												});
-			}
-		}
-		if (pushed_fav_col) {
-			ImGui::PopStyleColor();
-		}
-
-		if (is_owner) {
-			ImGui::Spacing();
-			const char* priv_lbl = item.is_private ? "Public##priv_" : "Private##priv_";
-			std::string priv_btn_id = priv_lbl + item.id;
-			if (UI::button_with_icon(priv_btn_id.c_str(),
-									 IconManager::get(item.is_private ? IconID::World : IconID::Lock), ImVec2(0, 22))) {
-				std::string item_id = item.id;
-				WorkshopClient::toggle_private(item_id, [item_id](bool success, int is_private) {
-					if (success) {
-						for (auto& it : s_workshop_items) {
-							if (it.id == item_id) {
-								it.is_private = is_private;
-								break;
-							}
-						}
-						ToastManager::info(is_private ? "Item is now private." : "Item is now public.");
-					} else {
-						ToastManager::error("Failed to update item privacy.");
-					}
-				});
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip(item.is_private ? "Make this item public for everyone"
-												  : "Make this item private (only visible to you)");
-			}
-
-			place_btn(54.0f);
-			if (UI::button_with_icon(("Edit##edit_" + item.id).c_str(), IconManager::get(IconID::Edit),
-									 ImVec2(0, 22))) {
-				WorkshopItemEditor::open_edit_modal(item, []() { ::refresh_workshop_items(); });
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Edit title and description");
-			}
-
-			place_btn(66.0f);
-			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-			if (UI::button_with_icon(("Delete##del_" + item.id).c_str(), IconManager::get(IconID::Delete),
-									 ImVec2(0, 22))) {
-				WorkshopItemEditor::open_delete_modal(item, []() { ::refresh_workshop_items(); });
-			}
-			ImGui::PopStyleColor();
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Delete this item from Workshop");
-			}
-		}
-
-		const float report_btn_w = 74.0f;
-		float current_avail = ImGui::GetContentRegionAvail().x;
-		if (current_avail >= report_btn_w + 4.0f) {
-			ImGui::SameLine();
-			float right_target_x = ImGui::GetWindowContentRegionMax().x - report_btn_w;
-			if (right_target_x > ImGui::GetCursorPosX()) {
-				ImGui::SetCursorPosX(right_target_x);
-			}
-		}
-		if (UI::button_with_icon(("Report##rep_" + item.id).c_str(), IconManager::get(IconID::Report),
-								 ImVec2(report_btn_w, 22))) {
-			if (!WorkshopClient::is_logged_in()) {
-				s_show_auth_modal = true;
-				s_auth_status = "Please log in to report items.";
-				ToastManager::info("Please log in to report items.");
-			} else {
-				s_show_report_modal = true;
-				s_report_item_id = item.id;
-				s_report_item_title = item.title;
-				s_report_status = "";
-				s_report_details[0] = '\0';
-			}
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Report this item");
-		}
-
-		ImGui::Dummy(ImVec2(0.0f, 4.0f));
-		ImGui::EndChild();
-		ImGui::PopStyleVar(2);
-		ImGui::PopStyleColor(2);
-		ImGui::PopID();
-	}
-}  // namespace
-
-void UI::render_workshop() {
-	ImGuiTabItemFlags tab_flags = 0;
-	if (s_force_workshop_tab_selected) {
-		tab_flags |= ImGuiTabItemFlags_SetSelected;
-		s_force_workshop_tab_selected = false;
-	}
-	if (ImGui::BeginTabItem("Workshop", nullptr, tab_flags)) {
-		ImGuiIO& io = ImGui::GetIO();
-
-		if (!s_workshop_loaded_once && !s_workshop_loading) {
-			refresh_workshop_items();
-		}
-
-		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(0.35f, 0.65f, 1.0f, 1.0f), "Community Workshop");
-		ImGui::TextDisabled("Browse, load, and share community items.");
-
-		if (WorkshopClient::is_logged_in()) {
-			SDL_Texture* u_icon = IconManager::get(IconID::User);
-			if (u_icon) {
-				ImGui::Image((ImTextureID)u_icon, ImVec2(14, 14));
-				ImGui::SameLine(0, 4);
-			}
-			ImGui::Text("User: %s", WorkshopClient::get_logged_in_username().c_str());
-			ImGui::SameLine(0, 8);
-			if (ImGui::SmallButton("Log out")) {
-				WorkshopClient::logout();
-				ConfigManager::get_config().workshop.token = "";
-				ConfigManager::get_config().workshop.username = "";
-				ConfigManager::save();
-				s_workshop_my_items = false;
-				s_workshop_favorites = false;
-				refresh_workshop_items();
-			}
-
-			ImGui::Spacing();
-			float filter_row_w = ImGui::GetContentRegionAvail().x;
-			float half_btn_w = (filter_row_w - 4.0f) * 0.5f;
-
-			bool my_items_active = s_workshop_my_items;
-			if (my_items_active) {
-				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.45f, 0.7f, 1.0f));
-				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.55f, 0.8f, 1.0f));
-			}
-			if (ImGui::Button("My Items", ImVec2(half_btn_w, 22.0f))) {
-				s_workshop_my_items = !s_workshop_my_items;
-				refresh_workshop_items();
-			}
-			if (my_items_active) {
-				ImGui::PopStyleColor(2);
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Show only items created by you");
-			}
-
-			ImGui::SameLine(0, 4.0f);
-
-			bool fav_active = s_workshop_favorites;
-			if (fav_active) {
-				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.4f, 0.15f, 1.0f));
-				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.5f, 0.2f, 1.0f));
-			}
-			if (UI::button_with_icon("Favorites##fav_filter", IconManager::get(IconID::Star),
-									 ImVec2(half_btn_w, 22.0f))) {
-				s_workshop_favorites = !s_workshop_favorites;
-				refresh_workshop_items();
-			}
-			if (fav_active) {
-				ImGui::PopStyleColor(2);
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Show items you have favorited");
-			}
-		} else {
-			if (UI::button_with_icon("Log in##login_guest", IconManager::get(IconID::User), ImVec2(0, 20.0f))) {
-				s_show_auth_modal = true;
-				s_auth_status = "";
-			}
-			ImGui::SameLine(0, 8);
-			bool fav_active = s_workshop_favorites;
-			if (fav_active) {
-				ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.4f, 0.15f, 1.0f));
-				ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.5f, 0.2f, 1.0f));
-			}
-			if (UI::button_with_icon("Favorites##fav_guest", IconManager::get(IconID::Star), ImVec2(0, 20.0f))) {
-				s_workshop_favorites = !s_workshop_favorites;
-				refresh_workshop_items();
-			}
-			if (fav_active) {
-				ImGui::PopStyleColor(2);
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Show items you have favorited");
-			}
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		float avail_w = ImGui::GetContentRegionAvail().x;
-		ImGui::SetNextItemWidth(avail_w - 28.0f);
-		if (ImGui::InputTextWithHint("##ws_sidebar_search", "Search items...", s_workshop_search,
-									 sizeof(s_workshop_search))) {
-			refresh_workshop_items();
-		}
-		ImGui::SameLine(0, 4.0f);
-		if (UI::button_with_icon("##ws_refresh_btn", IconManager::get(IconID::Refresh), ImVec2(28, 28))) {
-			refresh_workshop_items();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Refresh workshop items");
-		}
-
-		const char* type_labels[] = {"All Types", "Sets", "Saves", "Stamps", "Themes"};
-		float half_w = (avail_w - 6.0f) * 0.5f;
-		ImGui::SetNextItemWidth(half_w);
-		if (ImGui::Combo("##ws_type_filter", &s_workshop_type_filter, type_labels, IM_ARRAYSIZE(type_labels))) {
-			refresh_workshop_items();
-		}
-		ImGui::SameLine(0, 6.0f);
-		const char* sort_labels[] = {"Popular", "Most Liked", "Favorites", "Newest", "Downloads"};
-		ImGui::SetNextItemWidth(half_w);
-		if (ImGui::Combo("##ws_sort_filter", &s_workshop_sort_idx, sort_labels, IM_ARRAYSIZE(sort_labels))) {
-			refresh_workshop_items();
-		}
-
-		ImGui::Spacing();
-		ImGui::BeginChild("WorkshopSidebarScroll", ImVec2(0, -25), true);
-		if (s_workshop_loading) {
-			ImGui::TextDisabled("Loading items...");
-		} else if (!s_workshop_error.empty()) {
-			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", s_workshop_error.c_str());
-			if (ImGui::Button("Retry")) {
-				refresh_workshop_items();
-			}
-		} else if (s_workshop_items.empty()) {
-			ImGui::TextDisabled("No items found.");
-		} else {
-			for (const auto& it : s_workshop_items) {
-				render_workshop_item_card(it);
-				ImGui::Spacing();
-			}
-		}
-		ImGui::EndChild();
-
-		ImGui::EndTabItem();
-	}
-}
-
-void UI::render_workshop_auth_modal() {
-	if (!s_show_auth_modal)
-		return;
-
-	ImGui::OpenPopup("Workshop Authentication##Modal");
-	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSize(ImVec2(400, 380), ImGuiCond_Appearing);
-
-	if (ImGui::BeginPopupModal("Workshop Authentication##Modal", &s_show_auth_modal,
-							   ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::TextColored(ImVec4(0.35f, 0.65f, 1.0f, 1.0f),
-						   s_auth_is_register ? "Create Workshop Account" : "Log In to Workshop");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		if (!s_auth_status.empty()) {
-			ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "%s", s_auth_status.c_str());
-			ImGui::Spacing();
-		}
-
-		ImGui::Text("Username:");
-		ImGui::SetNextItemWidth(-1.0f);
-		ImGui::InputText("##auth_user", s_auth_username, sizeof(s_auth_username));
-
-		ImGui::Spacing();
-		ImGui::Text("Password:");
-		ImGui::SetNextItemWidth(-1.0f);
-		ImGui::InputText("##auth_pass", s_auth_password, sizeof(s_auth_password), ImGuiInputTextFlags_Password);
-
-		ImGui::Spacing();
-		if (s_auth_is_register) {
-			if (ImGui::SmallButton("Already have an account? Log in instead")) {
-				s_auth_is_register = false;
-				s_auth_status = "";
-			}
-		} else {
-			if (ImGui::SmallButton("Don't have an account? Register new account")) {
-				s_auth_is_register = true;
-				s_auth_status = "";
-			}
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		std::string submit_label = s_auth_is_register ? "Create Account" : "Log In";
-		if (ImGui::Button(submit_label.c_str(), ImVec2(140, 28))) {
-			std::string u = s_auth_username;
-			std::string p = s_auth_password;
-			if (u.empty() || p.empty()) {
-				s_auth_status = "Please provide both username and password.";
-			} else {
-				if (s_auth_is_register) {
-					WorkshopClient::register_user(u, p, [u](bool success, const std::string& err) {
-						if (success) {
-							s_show_auth_modal = false;
-							s_auth_password[0] = '\0';
-							ConfigManager::get_config().workshop.token = WorkshopClient::get_auth_token();
-							ConfigManager::get_config().workshop.username = u;
-							ConfigManager::save();
-							ToastManager::success("Welcome, " + u + "! Registered and logged in.");
-						} else {
-							s_auth_status = err;
-						}
-					});
-				} else {
-					WorkshopClient::login(u, p, [u](bool success, const std::string& err) {
-						if (success) {
-							s_show_auth_modal = false;
-							s_auth_password[0] = '\0';
-							ConfigManager::get_config().workshop.token = WorkshopClient::get_auth_token();
-							ConfigManager::get_config().workshop.username = u;
-							ConfigManager::save();
-							ToastManager::success("Welcome back, " + u + "!");
-						} else {
-							s_auth_status = err;
-						}
-					});
-				}
-			}
-		}
-
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(100, 28))) {
-			s_show_auth_modal = false;
-			s_auth_password[0] = '\0';
-			ImGui::CloseCurrentPopup();
-		}
-
-		ImGui::EndPopup();
-	}
-}
-
-namespace {
-	void check_and_render_report_modal() {
-		if (s_show_report_modal) {
-			ImGui::OpenPopup("Report Item##ModalDialog");
-		}
-		if (ImGui::BeginPopupModal("Report Item##ModalDialog", &s_show_report_modal,
-								   ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::Text("Report item: \"%s\"", s_report_item_title.c_str());
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (!s_report_status.empty()) {
-				ImGui::TextColored(ImVec4(0.4f, 0.85f, 0.5f, 1.0f), "%s", s_report_status.c_str());
-				ImGui::Spacing();
-				if (ImGui::Button("Close", ImVec2(100, 24))) {
-					s_show_report_modal = false;
-					ImGui::CloseCurrentPopup();
-				}
-			} else {
-				ImGui::Text("Reason:");
-				const char* reasons[] = {"Broken simulation / Game crashes", "Inappropriate or offensive content",
-										 "Spam or duplicate", "Other"};
-				ImGui::Combo("##report_reason", &s_report_reason_idx, reasons, IM_ARRAYSIZE(reasons));
-
-				ImGui::Spacing();
-				auto filterNewline = [](ImGuiInputTextCallbackData* data) -> int {
-					if (data->EventChar == '\r' || data->EventChar == '\n') {
-						return true;
-					}
-					return false;
-				};
-
-				ImGui::Text("Details (optional):");
-				ImGui::InputTextMultiline(
-					"##report_details", s_report_details, sizeof(s_report_details), ImVec2(-1.0f, 70.0f),
-					ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter, filterNewline);
-
-				ImGui::Spacing();
-				ImGui::Separator();
-				ImGui::Spacing();
-
-				if (UI::button_with_icon("Submit Report", IconManager::get(IconID::Report), ImVec2(130, 26))) {
-					const char* reason_keys[] = {"broken", "offensive", "spam", "other"};
-					WorkshopClient::submit_report(
-						s_report_item_id, reason_keys[s_report_reason_idx], s_report_details,
-						[](bool success, const std::string& msg) {
-							if (success) {
-								s_report_status = "Thank you! Report received.";
-							} else {
-								s_report_status = "Failed to submit report. Please check internet connection.";
-							}
-						});
-				}
-				ImGui::SameLine();
-				if (ImGui::Button("Cancel", ImVec2(90, 24))) {
-					s_show_report_modal = false;
-					ImGui::CloseCurrentPopup();
-				}
-			}
-			ImGui::EndPopup();
-		}
-	}
-
-	void check_and_render_publish_modal() {
-		if (s_show_publish_modal) {
-			ImGui::OpenPopup("Share to Workshop##ModalDialog");
-		}
-		if (ImGui::BeginPopupModal("Share to Workshop##ModalDialog", &s_show_publish_modal,
-								   ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::TextColored(ImVec4(0.35f, 0.7f, 1.0f, 1.0f), "Publish Item to Community Workshop");
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (!s_publish_status.empty()) {
-				ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "%s", s_publish_status.c_str());
-				ImGui::Spacing();
-				if (ImGui::Button("Done", ImVec2(100, 24))) {
-					s_show_publish_modal = false;
-					ImGui::CloseCurrentPopup();
-					refresh_workshop_items();
-				}
-			} else {
-				switch (s_publish_type_idx) {
-					case 0: {
-						if (!s_publish_target_save.empty()) {
-							ImGui::TextDisabled("Target Save: %s (Set: %s)", s_publish_target_save.c_str(),
-												s_publish_target_set.c_str());
-						} else {
-							ImGui::TextDisabled("Target Save: [Current Simulation Grid] (Set: %s)",
-												(s_publish_target_set.empty() ? SetManager::get_current_set().c_str()
-																			  : s_publish_target_set.c_str()));
-						}
-						break;
-					}
-					case 1: {
-						auto all_sets = SetManager::get_sets();
-						if (s_publish_target_set.empty() && !all_sets.empty()) {
-							s_publish_target_set = SetManager::get_current_set();
-						}
-						int current_set_idx = 0;
-						std::vector<const char*> set_cstrs;
-						for (size_t i = 0; i < all_sets.size(); ++i) {
-							set_cstrs.push_back(all_sets[i].c_str());
-							if (all_sets[i] == s_publish_target_set) {
-								current_set_idx = static_cast<int>(i);
-							}
-						}
-						break;
-					}
-					case 2: {
-						std::string target_s =
-							s_publish_target_set.empty() ? SetManager::get_current_set() : s_publish_target_set;
-						auto stamp_files = SaveManager::get_stamp_files(target_s);
-						std::vector<std::string> stamp_names;
-						stamp_names.push_back("[Current Selection / Clipboard]");
-						int sel_idx = 0;
-						for (size_t i = 0; i < stamp_files.size(); ++i) {
-							stamp_names.push_back(stamp_files[i].filename);
-							if (stamp_files[i].filename == s_publish_target_stamp ||
-								stamp_files[i].name == s_publish_target_stamp) {
-								sel_idx = static_cast<int>(i + 1);
-							}
-						}
-						std::vector<const char*> stamp_cstrs;
-						for (const auto& sn : stamp_names) {
-							stamp_cstrs.push_back(sn.c_str());
-						}
-						ImGui::Text("Target Stamp:");
-						ImGui::SameLine();
-						if (ImGui::Combo("##pub_target_stamp", &sel_idx, stamp_cstrs.data(),
-										 static_cast<int>(stamp_cstrs.size()))) {
-							if (sel_idx == 0) {
-								s_publish_target_stamp = "";
-							} else {
-								s_publish_target_stamp = stamp_files[sel_idx - 1].filename;
-								std::snprintf(s_publish_title, sizeof(s_publish_title), "%s",
-											  stamp_files[sel_idx - 1].name.c_str());
-								s_publish_target_w = stamp_files[sel_idx - 1].width;
-								s_publish_target_h = stamp_files[sel_idx - 1].height;
-							}
-						}
-						break;
-					}
-					case 3: {
-						ImGui::TextDisabled(
-							"Includes your current UI colors, window/frame rounding, button sizes, etc.");
-						break;
-					}
-				}
-
-				ImGui::Spacing();
-				ImGui::Text("Item Title *");
-				ImGui::InputText("##pub_title", s_publish_title, sizeof(s_publish_title));
-
-				ImGui::Spacing();
-				ImGui::Text("Author / Creator *");
-				ImGui::InputText("##pub_author", s_publish_author, sizeof(s_publish_author));
-
-				ImGui::Spacing();
-				ImGui::Text("Description:");
-				auto filterNewline = [](ImGuiInputTextCallbackData* data) -> int {
-					if (data->EventChar == '\r' || data->EventChar == '\n') {
-						return true;
-					}
-					return false;
-				};
-
-				ImGui::InputTextMultiline("##pub_desc", s_publish_desc, sizeof(s_publish_desc), ImVec2(-1.0f, 60.0f),
-										  ImGuiInputTextFlags_WordWrap | ImGuiInputTextFlags_CallbackCharFilter,
-										  filterNewline);
-
-				ImGui::Spacing();
-				UI::custom_checkbox("Private Item", &s_publish_is_private, IconID::Lock,
-									"Make this item private so only you can see and download it.");
-
-				ImGui::Spacing();
-
-				std::string cur_set =
-					s_publish_target_set.empty() ? SetManager::get_current_set() : s_publish_target_set;
-				SetMetadata cur_m = SetManager::load_set_metadata(cur_set);
-				std::string cur_hash = SetManager::compute_set_hash(cur_set);
-				bool can_publish = true;
-
-				if (s_publish_type_idx == 0 || s_publish_type_idx == 2) {
-					const char* item_kind = (s_publish_type_idx == 0) ? "save" : "stamp";
-					if (cur_m.workshop_id.empty()) {
-						can_publish = false;
-						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.2f, 1.0f));
-						ImGui::TextWrapped("The set '%s' is not shared to the Workshop. To publish a %s, you must "
-										   "share this set first.",
-										   cur_set.c_str(), item_kind);
-						ImGui::PopStyleColor();
-						ImGui::Spacing();
-						std::string share_btn_lbl = "Share Set '" + cur_set + "' First";
-						if (UI::button_with_icon(share_btn_lbl.c_str(), IconManager::get(IconID::Transmit),
-												 ImVec2(0, 24))) {
-							s_publish_target_set = cur_set;
-							s_publish_type_idx = 1;
-							std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", cur_set.c_str());
-							std::snprintf(s_publish_desc, sizeof(s_publish_desc), "%s", cur_m.description.c_str());
-						}
-					} else {
-						bool set_changed = (!cur_m.workshop_hash.empty() && cur_hash != cur_m.workshop_hash);
-						if (set_changed) {
-							can_publish = false;
-							bool is_owner = WorkshopClient::is_logged_in() && !cur_m.author.empty() &&
-											(WorkshopClient::get_logged_in_username() == cur_m.author);
-							if (is_owner) {
-								ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.2f, 1.0f));
-								ImGui::TextWrapped("Local changes detected in your set '%s'. You must update the set "
-												   "on the Workshop before publishing %ss for it.",
-												   cur_set.c_str(), item_kind);
-								ImGui::PopStyleColor();
-								ImGui::Spacing();
-								if (UI::button_with_icon("Update Set on Workshop", IconManager::get(IconID::Update),
-														 ImVec2(0, 24))) {
-									s_show_publish_modal = false;
-									WorkshopItemClient set_item;
-									set_item.id = cur_m.workshop_id;
-									set_item.title = cur_set;
-									set_item.description = cur_m.description;
-									set_item.type = "set";
-									set_item.version = cur_m.version;
-									set_item.author = cur_m.author;
-									WorkshopItemEditor::open_update_modal(set_item, []() { refresh_workshop_items(); });
-								}
-							} else {
-								ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.2f, 1.0f));
-								ImGui::TextWrapped("Set '%s' belongs to %s and has local changes. You must fork this "
-												   "set to your own set before publishing %ss for it.",
-												   cur_set.c_str(), cur_m.author.c_str(), item_kind);
-								ImGui::PopStyleColor();
-								ImGui::Spacing();
-								if (UI::button_with_icon("Fork Set as Your Own", IconManager::get(IconID::Branch),
-														 ImVec2(0, 24))) {
-									std::string base_fork = cur_set + "_fork";
-									std::string fork_name = base_fork;
-									int fidx = 2;
-									while (std::filesystem::exists(std::string(SETS_DIRECTORY) + fork_name)) {
-										fork_name = base_fork + "_" + std::to_string(fidx++);
-									}
-									SetManager::fork_set(cur_set, fork_name);
-									SetManager::set_current_set(fork_name);
-									s_publish_target_set = fork_name;
-									s_publish_type_idx = 1;
-									std::snprintf(s_publish_title, sizeof(s_publish_title), "%s", fork_name.c_str());
-									std::string fdesc = "Fork of '" + cur_set + "' by " + cur_m.author;
-									std::snprintf(s_publish_desc, sizeof(s_publish_desc), "%s", fdesc.c_str());
-									ToastManager::info("Fork created: '" + fork_name +
-													   "'. Publish this set to Workshop first!");
-								}
-							}
-						} else {
-							ImGui::TextColored(ImVec4(0.35f, 0.85f, 0.45f, 1.0f), "Attached to Online Set: '%s' (v%d)",
-											   cur_set.c_str(), cur_m.version);
-						}
-					}
-				} else if (s_publish_type_idx == 1) {
-					if (!cur_m.forked_from_id.empty()) {
-						ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "Fork of: %s (v%d) by %s",
-										   cur_m.forked_from_id.c_str(), cur_m.forked_from_version,
-										   cur_m.forked_from_author.c_str());
-					}
-				}
-				if (!s_publish_forked_from_id.empty()) {
-					ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "Forked from Online Item: %s (v%d)",
-									   s_publish_forked_from_id.c_str(), s_publish_forked_from_version);
-				}
-
-				ImGui::Spacing();
-				ImGui::Separator();
-				ImGui::Spacing();
-
-				if (s_publishing) {
-					ImGui::Text("Uploading and publishing item...");
-				} else if (can_publish) {
-					if (UI::button_with_icon("Upload & Publish", IconManager::get(IconID::Transmit), ImVec2(150, 26))) {
-						s_publishing = true;
-						std::string cur_s =
-							s_publish_target_set.empty() ? SetManager::get_current_set() : s_publish_target_set;
-						SetMetadata set_meta = SetManager::load_set_metadata(cur_s);
-
-						if (s_publish_type_idx == 0) {
-							std::vector<uint8_t> bytes;
-							uint32_t sw = Grid::get_width();
-							uint32_t sh = Grid::get_height();
-							if (s_publish_target_w > 0)
-								sw = s_publish_target_w;
-							if (s_publish_target_h > 0)
-								sh = s_publish_target_h;
-
-							if (!s_publish_target_save.empty()) {
-								std::string fname = s_publish_target_save;
-								if (fname.length() < 5 || fname.substr(fname.length() - 5) != ".save") {
-									fname += ".save";
-								}
-								std::string fpath = SaveManager::get_saves_directory(cur_s) + fname;
-								std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
-								if (fin.is_open()) {
-									bytes.assign((std::istreambuf_iterator<char>(fin)),
-												 std::istreambuf_iterator<char>());
-									fin.close();
-								}
-							} else {
-								SaveManager::save_to_file("__ws_temp_pub", cur_s);
-								std::string fpath = SaveManager::get_saves_directory(cur_s) + "__ws_temp_pub.save";
-								std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
-								if (fin.is_open()) {
-									bytes.assign((std::istreambuf_iterator<char>(fin)),
-												 std::istreambuf_iterator<char>());
-									fin.close();
-								}
-								std::error_code rm_ec;
-								std::filesystem::remove(std::filesystem::path(fpath), rm_ec);
-							}
-
-							if (bytes.empty()) {
-								s_publishing = false;
-								ToastManager::error(
-									"No save data found to publish. Please check that the file exists.");
-								return;
-							}
-
-							std::string parent_id = set_meta.workshop_id;
-							std::string set_hash = SetManager::compute_set_hash(cur_s);
-
-							std::string thumb_b64 = generate_thumbnail_base64(0, cur_s, s_publish_target_save);
-							nlohmann::json meta;
-							meta["width"] = sw;
-							meta["height"] = sh;
-							meta["set_name"] = cur_s;
-
-							WorkshopClient::publish_item(
-								"save", s_publish_title, s_publish_desc, s_publish_author, parent_id, bytes, ".save",
-								meta.dump(), set_hash, thumb_b64,
-								[cur_s, s_target_save = std::string(s_publish_target_save),
-								 s_title = std::string(s_publish_title), set_hash,
-								 s_author = std::string(s_publish_author)](bool success, const std::string& created_id,
-																		   const std::string& err) {
-									s_publishing = false;
-									if (success) {
-										std::string save_name = s_target_save.empty() ? s_title : s_target_save;
-										SaveManager::set_save_workshop_info(save_name, cur_s, created_id, set_hash,
-																			s_author, 1);
-										s_publish_status = "Published successfully! Available in workshop.";
-										ToastManager::success("Save published to Workshop!");
-									} else {
-										s_publish_status = "Upload failed: " + err;
-									}
-								},
-								s_publish_forked_from_id, s_publish_forked_from_version, s_publish_is_private);
-						} else if (s_publish_type_idx == 1) {
-							if (cur_s == SetManager::get_current_set()) {
-								MaterialManager::save_all_materials(std::string(SETS_DIRECTORY) + cur_s);
-							}
-							std::string set_dir = std::string(SETS_DIRECTORY) + cur_s;
-							std::vector<std::pair<std::string, std::vector<uint8_t>>> set_files;
-							std::error_code dir_ec;
-							if (std::filesystem::exists(std::filesystem::path(set_dir), dir_ec)) {
-								for (const auto& entry :
-									 std::filesystem::directory_iterator(std::filesystem::path(set_dir), dir_ec)) {
-									if (entry.is_regular_file(dir_ec)) {
-										std::string fname = entry.path().filename().string();
-										std::string ext = entry.path().extension().string();
-										if (ext == ".mat" || fname == "set_config.ini") {
-											std::ifstream in(entry.path(), std::ios::binary);
-											if (in.is_open()) {
-												std::vector<uint8_t> fbytes((std::istreambuf_iterator<char>(in)),
-																			std::istreambuf_iterator<char>());
-												set_files.emplace_back(fname, fbytes);
-											}
-										}
-									}
-								}
-							}
-							if (set_files.empty()) {
-								s_publishing = false;
-								ToastManager::error("No material or config files found in set directory '" + cur_s +
-													"' to publish.");
-								return;
-							}
-							std::vector<uint8_t> zip_bytes = ZipUtil::create_zip(set_files);
-							if (zip_bytes.empty()) {
-								s_publishing = false;
-								ToastManager::error("Failed to generate zip file for set '" + cur_s + "'.");
-								return;
-							}
-							std::string set_hash = SetManager::compute_set_hash(cur_s);
-							std::string thumb_b64 = generate_thumbnail_base64(1, cur_s);
-
-							auto set_mats = get_materials_for_set(cur_s);
-							int non_empty_count = 0;
-							for (const auto& m : set_mats) {
-								if (m.id != 0) {
-									non_empty_count++;
-								}
-							}
-
-							nlohmann::json meta;
-							meta["materials_count"] = non_empty_count;
-							meta["set_name"] = cur_s;
-
-							WorkshopClient::publish_item(
-								"set", s_publish_title, s_publish_desc, s_publish_author, "", zip_bytes, ".zip",
-								meta.dump(), set_hash, thumb_b64,
-								[cur_s, set_hash, s_author = std::string(s_publish_author)](
-									bool success, const std::string& created_id, const std::string& err) {
-									s_publishing = false;
-									if (success) {
-										SetManager::set_workshop_info(cur_s, created_id, set_hash, 1, s_author);
-										SetManager::mark_set_online(cur_s, true);
-										s_publish_status = "Set published successfully and linked to workshop!";
-										ToastManager::success("Set published to Workshop!");
-									} else {
-										s_publish_status = "Upload failed: " + err;
-									}
-								},
-								set_meta.forked_from_id, set_meta.forked_from_version, s_publish_is_private);
-						} else if (s_publish_type_idx == 2) {
-							std::vector<uint8_t> stamp_bytes;
-							uint32_t sw = s_publish_target_w > 0 ? s_publish_target_w : 64;
-							uint32_t sh = s_publish_target_h > 0 ? s_publish_target_h : 64;
-
-							if (!s_publish_target_stamp.empty()) {
-								std::string fname = s_publish_target_stamp;
-								if (fname.length() < 6 || fname.substr(fname.length() - 6) != ".stamp") {
-									fname += ".stamp";
-								}
-								std::string fpath = SaveManager::get_saves_directory(cur_s) + fname;
-								std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
-								if (fin.is_open()) {
-									stamp_bytes.assign((std::istreambuf_iterator<char>(fin)),
-													   std::istreambuf_iterator<char>());
-									fin.close();
-								}
-							} else {
-								const auto& clip = UI::get_clipboard();
-								if (!clip.empty() && clip.width > 0 && clip.height > 0) {
-									sw = clip.width;
-									sh = clip.height;
-									SaveManager::save_stamp_to_file("__ws_temp_stamp", cur_s, clip.cells, sw, sh);
-									std::string fpath =
-										SaveManager::get_saves_directory(cur_s) + "__ws_temp_stamp.stamp";
-									std::ifstream fin(std::filesystem::path(fpath), std::ios::binary);
-									if (fin.is_open()) {
-										stamp_bytes.assign((std::istreambuf_iterator<char>(fin)),
-														   std::istreambuf_iterator<char>());
-										fin.close();
-									}
-									std::error_code rm_ec;
-									std::filesystem::remove(std::filesystem::path(fpath), rm_ec);
-								}
-							}
-
-							if (stamp_bytes.empty()) {
-								s_publishing = false;
-								ToastManager::error("No stamp file or clipboard selection found to publish.");
-								return;
-							}
-
-							std::string parent_id = set_meta.workshop_id;
-							std::string set_hash = SetManager::compute_set_hash(cur_s);
-
-							std::string thumb_b64 = generate_thumbnail_base64(2, cur_s, s_publish_target_stamp);
-							nlohmann::json meta;
-							meta["width"] = sw;
-							meta["height"] = sh;
-							meta["set_name"] = cur_s;
-
-							WorkshopClient::publish_item(
-								"stamp", s_publish_title, s_publish_desc, s_publish_author, parent_id, stamp_bytes,
-								".stamp", meta.dump(), set_hash, thumb_b64,
-								[cur_s, s_target_stamp = std::string(s_publish_target_stamp),
-								 s_title = std::string(s_publish_title), set_hash,
-								 s_author = std::string(s_publish_author)](bool success, const std::string& created_id,
-																		   const std::string& err) {
-									s_publishing = false;
-									if (success) {
-										std::string stamp_name = s_target_stamp.empty() ? s_title : s_target_stamp;
-										SaveManager::set_stamp_workshop_info(stamp_name, cur_s, created_id, set_hash,
-																			 s_author, 1);
-										s_publish_status = "Stamp published successfully!";
-										ToastManager::success("Stamp published to Workshop!");
-									} else {
-										s_publish_status = "Upload failed: " + err;
-									}
-								},
-								s_publish_forked_from_id, s_publish_forked_from_version, s_publish_is_private);
-						} else if (s_publish_type_idx == 3) {
-							auto& cfg = ConfigManager::get_config();
-							nlohmann::json tj;
-							tj["window_rounding"] = cfg.ui.window_rounding;
-							tj["frame_rounding"] = cfg.ui.frame_rounding;
-							tj["button_size"] = cfg.ui.button_size;
-							tj["icon_size"] = cfg.ui.icon_size;
-							tj["sidebar_width"] = cfg.ui.sidebar_width;
-							tj["material_list_height"] = cfg.ui.material_list_height;
-							tj["set_list_height"] = cfg.ui.set_list_height;
-							tj["save_list_height"] = cfg.ui.save_list_height;
-							tj["stamp_list_height"] = cfg.ui.stamp_list_height;
-							tj["background_color"] = {cfg.ui.background_color.x, cfg.ui.background_color.y,
-													  cfg.ui.background_color.z, cfg.ui.background_color.w};
-							tj["selection_box_color"] = {cfg.ui.selection_box_color.x, cfg.ui.selection_box_color.y,
-														 cfg.ui.selection_box_color.z, cfg.ui.selection_box_color.w};
-							tj["selection_box_fill"] = {cfg.ui.selection_box_fill.x, cfg.ui.selection_box_fill.y,
-														cfg.ui.selection_box_fill.z, cfg.ui.selection_box_fill.w};
-
-							nlohmann::json col_map = nlohmann::json::object();
-							for (const auto& [cname, hex] : ConfigManager::get_color_overrides()) {
-								col_map[cname] = hex;
-							}
-							tj["colors"] = col_map;
-
-							std::string dump_str = tj.dump(2);
-							std::vector<uint8_t> theme_bytes(dump_str.begin(), dump_str.end());
-							std::string thumb_b64 = generate_thumbnail_base64(3, "");
-
-							nlohmann::json meta;
-							meta["colors_count"] = col_map.size();
-
-							WorkshopClient::publish_item(
-								"theme", s_publish_title, s_publish_desc, s_publish_author, "", theme_bytes, ".theme",
-								meta.dump(), "", thumb_b64,
-								[](bool success, const std::string&, const std::string& err) {
-									s_publishing = false;
-									if (success) {
-										s_publish_status = "Custom theme published successfully!";
-										ToastManager::success("Custom theme published to Workshop!");
-									} else {
-										s_publish_status = "Upload failed: " + err;
-									}
-								},
-								"", 0, s_publish_is_private);
-						}
-					}
-
-					ImGui::SameLine();
-					if (ImGui::Button("Cancel", ImVec2(90, 26))) {
-						s_show_publish_modal = false;
-						ImGui::CloseCurrentPopup();
-					}
-				}
-			}
-			ImGui::EndPopup();
-		}
-	}
-
-	void check_and_render_versions_modal() {
-		if (s_show_versions_modal) {
-			ImGui::OpenPopup("Version History##ModalDialog");
-		}
-		ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-		ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-		ImGui::SetNextWindowSizeConstraints(ImVec2(520.0f, 360.0f), ImVec2(620.0f, 520.0f));
-
-		if (ImGui::BeginPopupModal("Version History##ModalDialog", &s_show_versions_modal,
-								   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-			ImGui::TextColored(ImVec4(0.35f, 0.7f, 1.0f, 1.0f), "Version History: %s", s_versions_item.title.c_str());
-			ImGui::TextDisabled("Type: %s | Author: %s | Latest Workshop Version: v%d", s_versions_item.type.c_str(),
-								s_versions_item.author.c_str(), s_versions_item.version);
-			if (!s_versions_item.forked_from_id.empty()) {
-				ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "Forked from: '%s' by %s (v%d)",
-								   s_versions_item.forked_from_title.empty()
-									   ? s_versions_item.forked_from_id.c_str()
-									   : s_versions_item.forked_from_title.c_str(),
-								   s_versions_item.forked_from_author.c_str(), s_versions_item.forked_from_version);
-			}
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (s_loading_versions) {
-				ImGui::Text("Loading version history from Workshop server...");
-			} else if (!s_versions_error.empty()) {
-				ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", s_versions_error.c_str());
-			} else if (s_current_item_versions.empty()) {
-				ImGui::TextDisabled("No prior versions recorded for this item.");
-			} else {
-				ImGui::BeginChild("versions_list", ImVec2(500, 260), true);
-				for (const auto& v : s_current_item_versions) {
-					ImGui::PushID(v.version);
-					ImGui::TextColored(ImVec4(0.45f, 0.8f, 1.0f, 1.0f), "Version %d", v.version);
-					if (v.version == s_versions_item.version) {
-						ImGui::SameLine();
-						ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.5f, 1.0f), "[Latest]");
-					}
-					if (!v.created_at.empty()) {
-						ImGui::SameLine();
-						ImGui::TextDisabled("(%s)", v.created_at.substr(0, 10).c_str());
-					}
-					if (!v.changelog.empty()) {
-						ImGui::TextWrapped("Changelog: %s", v.changelog.c_str());
-					}
-
-					ImGui::Spacing();
-					std::string use_btn = "Use v" + std::to_string(v.version) + "##use";
-					if (UI::button_with_icon(use_btn.c_str(), IconManager::get(IconID::Play), ImVec2(90, 22))) {
-						std::string ext = s_versions_item.type == "set"
-											  ? ".zip"
-											  : (s_versions_item.type == "theme"
-													 ? ".theme"
-													 : (s_versions_item.type == "stamp" ? ".stamp" : ".save"));
-						std::string cache_path = WorkshopCache::get_cache_path(s_versions_item.id, s_versions_item.type,
-																			   s_versions_item.type + "_v" +
-																				   std::to_string(v.version) + ext);
-						auto apply_ver = [cache_path, item = s_versions_item, ver = v.version, vhash = v.set_hash]() {
-							if (item.type == "set") {
-								std::string target_dir = std::string(SETS_DIRECTORY) + item.title;
-								ZipUtil::extract_zip(cache_path, target_dir);
-								SetManager::set_workshop_info(item.title, item.id, vhash, ver, item.author);
-								SetManager::mark_set_online(item.title, true);
-								SetManager::set_current_set(item.title);
-								ToastManager::success("Switched to version " + std::to_string(ver) + " of '" +
-													  item.title + "'!");
-							} else if (item.type == "theme") {
-								apply_theme_from_file(cache_path, item.title);
-								ToastManager::success("Loaded version " + std::to_string(ver) + " of theme '" +
-													  item.title + "'!");
-							} else if (item.type == "save") {
-								std::string parent_name = !item.parent_set_title.empty()
-															  ? item.parent_set_title
-															  : SetManager::get_current_set();
-								std::string target_file =
-									SaveManager::get_saves_directory(parent_name) + item.title + ".save";
-								std::error_code ec;
-								std::filesystem::copy_file(cache_path, target_file,
-														   std::filesystem::copy_options::overwrite_existing, ec);
-								SaveManager::set_save_workshop_info(item.title, parent_name, item.id, vhash,
-																	item.author, ver);
-								SaveManager::load_from_file_async(
-									target_file, parent_name, LoadPlacement::Center, [](bool ok, const std::string&) {
-										if (ok) {
-											ToastManager::info("Save version loaded into grid!");
-										} else {
-											ToastManager::error("Failed to load save version.");
-										}
-									});
-							} else if (item.type == "stamp") {
-								std::string parent_name = !item.parent_set_title.empty()
-															  ? item.parent_set_title
-															  : SetManager::get_current_set();
-								std::string target_file =
-									SaveManager::get_saves_directory(parent_name) + item.title + ".stamp";
-								std::error_code ec;
-								std::filesystem::copy_file(cache_path, target_file,
-														   std::filesystem::copy_options::overwrite_existing, ec);
-								SaveManager::set_stamp_workshop_info(item.title, parent_name, item.id, vhash,
-																	 item.author, ver);
-								SaveManager::load_stamp_from_file_async(
-									target_file, parent_name,
-									[](bool ok, const std::vector<uint8_t>& cells, uint32_t w, uint32_t h) {
-										if (ok) {
-											UI::load_stamp(cells, w, h);
-											ToastManager::info("Stamp version loaded into brush!");
-										} else {
-											ToastManager::error("Failed to load stamp version.");
-										}
-									});
-							}
-						};
-
-						auto execute_load = [cache_path, apply_ver, item_id = s_versions_item.id, ver = v.version]() {
-							if (std::filesystem::exists(cache_path)) {
-								apply_ver();
-							} else {
-								WorkshopClient::download_item_version(
-									item_id, ver, cache_path, [apply_ver](bool ok, const std::string&) {
-										if (ok) {
-											apply_ver();
-										} else {
-											ToastManager::error("Failed to download version.");
-										}
-									});
-							}
-						};
-
-						bool has_modifications = is_item_modified_locally(s_versions_item, v.set_hash);
-						if (has_modifications) {
-							uint32_t cur_ver = 1;
-							if (s_versions_item.type == "set") {
-								SetMetadata sm = SetManager::load_set_metadata(s_versions_item.title);
-								cur_ver = sm.version;
-							} else if (s_versions_item.type == "save") {
-								std::string lp = get_item_local_path(s_versions_item);
-								std::string pname = !s_versions_item.parent_set_title.empty()
-														? s_versions_item.parent_set_title
-														: SetManager::get_current_set();
-								SaveFileInfo fi;
-								if (SaveManager::inspect_save_file(lp, pname, fi)) {
-									cur_ver = fi.version;
-								}
-							} else if (s_versions_item.type == "stamp") {
-								std::string lp = get_item_local_path(s_versions_item);
-								std::string pname = !s_versions_item.parent_set_title.empty()
-														? s_versions_item.parent_set_title
-														: SetManager::get_current_set();
-								StampFileInfo fi;
-								if (SaveManager::inspect_stamp_file(lp, pname, fi)) {
-									cur_ver = fi.version;
-								}
-							}
-
-							s_pending_override_item = s_versions_item;
-							s_pending_local_version = cur_ver;
-							s_pending_target_version = v.version;
-							s_pending_is_update = false;
-							s_pending_is_version_load = true;
-							s_pending_is_switch = false;
-							s_pending_override_keep_local = nullptr;
-							s_pending_override_confirm = execute_load;
-							s_show_set_override_warning = true;
-							s_show_versions_modal = false;
-							ImGui::CloseCurrentPopup();
-						} else {
-							execute_load();
-							s_show_versions_modal = false;
-							ImGui::CloseCurrentPopup();
-						}
-					}
-					if (WorkshopClient::is_logged_in()) {
-						ImGui::SameLine();
-						std::string fork_btn = "Fork v" + std::to_string(v.version) + "##fork";
-						if (UI::button_with_icon(fork_btn.c_str(), IconManager::get(IconID::Branch), ImVec2(90, 22))) {
-							open_fork_item_modal(s_versions_item, v.version);
-							s_show_versions_modal = false;
-							ImGui::CloseCurrentPopup();
-						}
-					}
-
-					ImGui::Spacing();
-					ImGui::Separator();
-					ImGui::Spacing();
-					ImGui::PopID();
-				}
-				ImGui::EndChild();
-			}
-
-			ImGui::Spacing();
-			if (ImGui::Button("Close", ImVec2(100, 24))) {
-				s_show_versions_modal = false;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
-	}
-}  // namespace
-
-void UI::render_advanced_options() {
-	if (ImGui::BeginTabItem("Advanced")) {
-		ImGui::Spacing();
-		ImGui::Text("Advanced Options");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		bool vsync_enabled = Window::get_vsync();
-		if (custom_checkbox("VSync", &vsync_enabled, IconID::Monitor,
-							"Synchronizes the frame rate with the monitor's refresh rate.")) {
-			Window::set_vsync(vsync_enabled);
-			ConfigManager::save();
-		}
-
-		if (vsync_enabled) {
-			ImGui::BeginDisabled();
-		}
-		int target_fps = Window::get_target_fps();
-		const char* fps_format = (target_fps >= 500) ? "Unlimited" : "%d";
-		if (ImGui::SliderInt("Target FPS", &target_fps, 10, 500, fps_format)) {
-			Window::set_target_fps(target_fps);
-			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Sets the target frame rate (10 - 500, 500 = Unlimited).\nCtrl+Click to type exact value.");
-		}
-		if (vsync_enabled) {
-			ImGui::EndDisabled();
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::Text("Simulation Engine");
-		ProcessingMode q = Grid::get_processing_mode();
-
-		if (ImGui::RadioButton("CPU (Multithreaded)", q == ProcessingMode::CPU)) {
-			finalize_canvas_drag();
-			Grid::set_processing_mode(ProcessingMode::CPU);
-			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Multithreaded CPU simulation across configurable worker threads.");
-		}
-
-		bool gpu_avail = Vulkan::is_available();
-		if (!gpu_avail) {
-			ImGui::BeginDisabled();
-		}
-		if (ImGui::RadioButton("GPU (Vulkan)", q == ProcessingMode::GPU)) {
-			finalize_canvas_drag();
-			Grid::set_processing_mode(ProcessingMode::GPU);
-			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Hardware-accelerated simulation using Vulkan compute shaders.");
-		}
-		if (!gpu_avail) {
-			if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-				ImGui::SetTooltip(
-					"GPU is not available. Please ensure you have a Vulkan-compatible GPU and drivers installed.");
-			}
-			ImGui::EndDisabled();
-		}
-
-		if (q == ProcessingMode::CPU) {
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			int thread_count = static_cast<int>(Grid::get_thread_count());
-			int max_threads = std::max(1, static_cast<int>(Grid::get_num_strips_y() / 2));
-			if (ImGui::InputInt("Active Threads", &thread_count, 1, 2)) {
-				thread_count = std::clamp(thread_count, 1, max_threads);
-				Grid::configure_threads(static_cast<uint32_t>(thread_count));
-				ConfigManager::save();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip(
-					"Sets the size of the worker thread pool. Automatically set to the maximum number of\n"
-					"parallelizable strips.");
-			}
-		}
-
-		if (q == ProcessingMode::GPU && gpu_avail) {
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			bool prevent_downclock = Vulkan::is_prevent_downclock_enabled();
-			if (custom_checkbox("Prevent Downclocking", &prevent_downclock, IconID::Lightning,
-								"Stops the GPU from slowing down to save power when idle. Makes unpausing instant "
-								"after a few seconds of being paused.")) {
-				Vulkan::set_prevent_downclock(prevent_downclock);
-				ConfigManager::save();
-			}
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::Text("Simulation Canvas Size");
-		uint32_t current_w = Grid::get_width();
-		uint32_t current_h = Grid::get_height();
-		uint64_t current_cells = static_cast<uint64_t>(current_w) * current_h;
-		ImGui::TextDisabled("Current Size: %u x %u (%lu cells)", current_w, current_h, current_cells);
-
-		static int target_sim_w = static_cast<int>(current_w);
-		static int target_sim_h = static_cast<int>(current_h);
-		static bool resize_preserve_content = true;
-		static bool open_resize_confirm_popup = false;
-
-		static uint32_t last_known_w = current_w;
-		static uint32_t last_known_h = current_h;
-		if (last_known_w != current_w || last_known_h != current_h) {
-			target_sim_w = static_cast<int>(current_w);
-			target_sim_h = static_cast<int>(current_h);
-			last_known_w = current_w;
-			last_known_h = current_h;
-		}
-
-		ImGui::Text("Presets:");
-		if (ImGui::Button("256x256")) {
-			target_sim_w = 256;
-			target_sim_h = 256;
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("512x512")) {
-			target_sim_w = 512;
-			target_sim_h = 512;
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("1024x1024")) {
-			target_sim_w = 1024;
-			target_sim_h = 1024;
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("1536x1536")) {
-			target_sim_w = 1536;
-			target_sim_h = 1536;
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("2048x2048")) {
-			target_sim_w = 2048;
-			target_sim_h = 2048;
-		}
-
-		ImGui::InputInt("Width##SimW", &target_sim_w, 16, 64);
-		ImGui::InputInt("Height##SimH", &target_sim_h, 16, 64);
-		if (target_sim_w < 128)
-			target_sim_w = 128;
-		if (target_sim_w > 4096)
-			target_sim_w = 4096;
-		if (target_sim_h < 128)
-			target_sim_h = 128;
-		if (target_sim_h > 4096)
-			target_sim_h = 4096;
-		target_sim_w = ((target_sim_w + 15) / 16) * 16;
-		target_sim_h = ((target_sim_h + 15) / 16) * 16;
-
-		uint64_t target_cells = static_cast<uint64_t>(target_sim_w) * target_sim_h;
-		if (target_cells > 1024 * 1024) {
-			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-							   "Warning: Large canvas (>1024x1024 / >1M cells) can significantly reduce performance!");
-		}
-
-		custom_checkbox("Preserve Cells", &resize_preserve_content, IconID::Photo,
-						"Keeps existing cells when changing canvas dimensions.");
-
-		bool size_differs =
-			(target_sim_w != static_cast<int>(current_w) || target_sim_h != static_cast<int>(current_h));
-		if (!size_differs)
-			ImGui::BeginDisabled();
-		if (ImGui::Button("Apply Simulation Size", ImVec2(-1, 30))) {
-			open_resize_confirm_popup = true;
-		}
-		if (!size_differs)
-			ImGui::EndDisabled();
-
-		if (open_resize_confirm_popup) {
-			ImGui::OpenPopup("Confirm Canvas Resize");
-			open_resize_confirm_popup = false;
-		}
-
-		if (ImGui::BeginPopupModal("Confirm Canvas Resize", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::Text("Are you sure you want to resize the simulation canvas?");
-			ImGui::Text("Target size: %d x %d (%lu cells)", target_sim_w, target_sim_h, target_cells);
-			ImGui::Spacing();
-			if (target_cells > 1024 * 1024) {
-				ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.1f, 1.0f),
-								   "Performance Warning: Canvas exceeds 1,048,576 cells.\nFrame rates on CPU and GPU "
-								   "may drop.");
-				ImGui::Spacing();
-			}
-			ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
-							   "Warning: Resizing the simulation will reset undo/redo history!");
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Confirm Resize", ImVec2(130, 30))) {
-				deselect();
-				Grid::resize(static_cast<uint32_t>(target_sim_w), static_cast<uint32_t>(target_sim_h),
-							 resize_preserve_content);
-				UndoManager::clear();
-				UndoManager::init();
-				last_known_w = target_sim_w;
-				last_known_h = target_sim_h;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(100, 30))) {
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::Text("Rule Neighborhoods");
-		bool allow_large = ConfigManager::get_config().allow_large_neighborhoods;
-		if (custom_checkbox("Large Neighborhoods", &allow_large, IconID::Zoom,
-							"Allows rule neighborhoods to exceed 100 cells.\nWarning: Very large neighborhoods can "
-							"significantly impact simulation performance.")) {
-			ConfigManager::get_config().allow_large_neighborhoods = allow_large;
-			ConfigManager::save();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Allows rule neighborhoods to exceed 100 cells.\n"
-							  "Warning: Very large neighborhoods can significantly impact simulation performance.");
-		}
-
-		ImGui::EndTabItem();
-	}
-}
-
-static std::string trim_string(const std::string& s) {
-	size_t start = s.find_first_not_of(" \t\r\n");
-	if (start == std::string::npos)
-		return "";
-	size_t end = s.find_last_not_of(" \t\r\n");
-	return s.substr(start, end - start + 1);
-}
-
-struct MouseShortcutEntry {
-	std::string action;
-	std::string control;
-	std::string description;
-};
-
-static const MouseShortcutEntry MOUSE_SHORTCUTS[] = {
-	{"Paint Material", "Left Mouse Button (Click / Drag)", "Draw with active material on the simulation grid"},
-	{"Erase Cells", "Right Mouse Button (Click / Drag)", "Erase cells (draw empty material) under brush"},
-	{"Pan Camera", "Middle Mouse Button (Drag)", "Pan the camera viewport across the grid"},
-	{"Eyedropper", "Middle Mouse Button (Click)", "Sample material from the grid cell under cursor"},
-	{"Brush Size", "Mouse Scroll Wheel", "Adjust simulation brush size"},
-	{"Fast Brush Size", "Ctrl + Mouse Scroll Wheel", "Rapidly adjust brush size (4x step size)"},
-	{"Zoom Viewport", "Shift + Mouse Scroll Wheel", "Smoothly zoom canvas in or out"},
-	{"Draw Straight Line", "Shift + Left / Right Drag", "Draw or erase straight lines between points"},
-	{"Flood Fill Area", "Shift + Alt + Left / Right Click", "Fill or clear connected region of matching cells"},
-	{"Fast Camera Pan", "Shift + W / A / S / D", "Pan camera at 2.5x speed"},
-	{"Move Selection", "Left Click Drag inside box", "Reposition floating selection area"},
-	{"Resize Selection Box", "Drag Handles on box border", "Resize active selection bounding box"},
-	{"Nudge Selection", "Arrow Keys", "Nudge selection box 1 cell (Shift for 10 cells)"},
-	{"Alternative Redo", "Ctrl + Shift + Z", "Secondary shortcut to redo undone action"},
-	{"Alternative Clear", "Ctrl + Shift + Delete", "Secondary shortcut to clear entire grid"},
-	{"Alternative Zoom", "Keypad + / Keypad -", "Secondary shortcuts to zoom camera in or out"},
-};
-
-enum CustomThemeColor : int {
-	CustomCol_None = -100,
-	CustomCol_CanvasBackground = -1,
-	CustomCol_SelectionBoxBorder = -2,
-	CustomCol_SelectionBoxFill = -3,
-};
-
-struct CuratedColor {
-	int col;
-	const char* category;
-	const char* label;
-};
-
-static const CuratedColor CURATED_THEME_COLORS[] = {
-	{ImGuiCol_TitleBg, "Window Title Bar", "Title Bar Normal"},
-	{ImGuiCol_TitleBgActive, "Window Title Bar", "Title Bar Active (Focused)"},
-	{ImGuiCol_TitleBgCollapsed, "Window Title Bar", "Title Bar Collapsed"},
-
-	{CustomCol_CanvasBackground, "Windows & Backgrounds", "Canvas / Simulation Background"},
-	{ImGuiCol_WindowBg, "Windows & Backgrounds", "Window Background"},
-	{ImGuiCol_ChildBg, "Windows & Backgrounds", "Panel / Child Window Background"},
-	{ImGuiCol_PopupBg, "Windows & Backgrounds", "Popup & Tooltip Background"},
-	{ImGuiCol_Border, "Windows & Backgrounds", "Border Color"},
-	{ImGuiCol_BorderShadow, "Windows & Backgrounds", "Border Shadow"},
-	{ImGuiCol_MenuBarBg, "Windows & Backgrounds", "Menu Bar Background"},
-
-	{ImGuiCol_FrameBg, "Checkboxes, Inputs & Sliders", "Frame Background (Unchecked Checkbox / Input)"},
-	{ImGuiCol_FrameBgHovered, "Checkboxes, Inputs & Sliders", "Frame Background Hovered"},
-	{ImGuiCol_FrameBgActive, "Checkboxes, Inputs & Sliders", "Frame Background Active"},
-	{ImGuiCol_CheckboxSelectedBg, "Checkboxes, Inputs & Sliders", "Checkbox Background (Checked)"},
-	{ImGuiCol_CheckMark, "Checkboxes, Inputs & Sliders", "Checkmark Tick Color"},
-	{ImGuiCol_SliderGrab, "Checkboxes, Inputs & Sliders", "Slider Grabber"},
-	{ImGuiCol_SliderGrabActive, "Checkboxes, Inputs & Sliders", "Slider Grabber Active"},
-	{ImGuiCol_InputTextCursor, "Checkboxes, Inputs & Sliders", "Input Text Caret / Cursor"},
-
-	{ImGuiCol_Button, "Buttons & Accent", "Button Normal"},
-	{ImGuiCol_ButtonHovered, "Buttons & Accent", "Button Hovered"},
-	{ImGuiCol_ButtonActive, "Buttons & Accent", "Button Active / Pressed"},
-	{ImGuiCol_Header, "Buttons & Accent", "Header / List Selected"},
-	{ImGuiCol_HeaderHovered, "Buttons & Accent", "Header Hovered"},
-	{ImGuiCol_HeaderActive, "Buttons & Accent", "Header Active"},
-
-	{ImGuiCol_Text, "Text & Selection", "Main Text"},
-	{ImGuiCol_TextDisabled, "Text & Selection", "Disabled Text"},
-	{ImGuiCol_TextSelectedBg, "Text & Selection", "Text Selection Background"},
-	{ImGuiCol_TextLink, "Text & Selection", "Hyperlink Color"},
-	{CustomCol_SelectionBoxBorder, "Text & Selection", "Selection Box Border"},
-	{CustomCol_SelectionBoxFill, "Text & Selection", "Selection Box Background / Fill"},
-
-	{ImGuiCol_Tab, "Tabs", "Tab Inactive"},
-	{ImGuiCol_TabHovered, "Tabs", "Tab Hovered"},
-	{ImGuiCol_TabSelected, "Tabs", "Tab Active / Selected"},
-	{ImGuiCol_TabSelectedOverline, "Tabs", "Tab Active Overline"},
-	{ImGuiCol_TabDimmed, "Tabs", "Tab Unfocused Inactive"},
-	{ImGuiCol_TabDimmedSelected, "Tabs", "Tab Unfocused Selected"},
-	{ImGuiCol_TabDimmedSelectedOverline, "Tabs", "Tab Unfocused Overline"},
-
-	{ImGuiCol_Separator, "Dividers & Scrollbars", "Separator Line"},
-	{ImGuiCol_SeparatorHovered, "Dividers & Scrollbars", "Separator Line Hovered"},
-	{ImGuiCol_SeparatorActive, "Dividers & Scrollbars", "Separator Line Active"},
-	{ImGuiCol_ScrollbarBg, "Dividers & Scrollbars", "Scrollbar Track"},
-	{ImGuiCol_ScrollbarGrab, "Dividers & Scrollbars", "Scrollbar Thumb"},
-	{ImGuiCol_ScrollbarGrabHovered, "Dividers & Scrollbars", "Scrollbar Thumb Hovered"},
-	{ImGuiCol_ScrollbarGrabActive, "Dividers & Scrollbars", "Scrollbar Thumb Active"},
-	{ImGuiCol_ResizeGrip, "Dividers & Scrollbars", "Window Resize Grip"},
-	{ImGuiCol_ResizeGripHovered, "Dividers & Scrollbars", "Window Resize Grip Hovered"},
-	{ImGuiCol_ResizeGripActive, "Dividers & Scrollbars", "Window Resize Grip Active"},
-
-	{ImGuiCol_TableHeaderBg, "Tables", "Table Header Background"},
-	{ImGuiCol_TableBorderStrong, "Tables", "Table Border Strong"},
-	{ImGuiCol_TableBorderLight, "Tables", "Table Border Light"},
-	{ImGuiCol_TableRowBg, "Tables", "Table Row Background"},
-	{ImGuiCol_TableRowBgAlt, "Tables", "Table Row Alt Background"},
-
-	{ImGuiCol_ModalWindowDimBg, "Modals & Highlights", "Modal Background Dim"},
-	{ImGuiCol_NavCursor, "Modals & Highlights", "Navigation Focus Border"},
-	{ImGuiCol_NavWindowingHighlight, "Modals & Highlights", "Windowing (Ctrl+Tab) Highlight"},
-	{ImGuiCol_NavWindowingDimBg, "Modals & Highlights", "Windowing Dim Background"},
-	{ImGuiCol_DragDropTarget, "Modals & Highlights", "Drag & Drop Target Border"},
-	{ImGuiCol_DragDropTargetBg, "Modals & Highlights", "Drag & Drop Target Background"},
-	{ImGuiCol_UnsavedMarker, "Modals & Highlights", "Unsaved Marker"},
-	{ImGuiCol_PlotLines, "Modals & Highlights", "Plot Lines"},
-	{ImGuiCol_PlotLinesHovered, "Modals & Highlights", "Plot Lines Hovered"},
-	{ImGuiCol_PlotHistogram, "Modals & Highlights", "Plot Histogram"},
-	{ImGuiCol_PlotHistogramHovered, "Modals & Highlights", "Plot Histogram Hovered"},
-	{ImGuiCol_TreeLines, "Modals & Highlights", "Tree Lines"},
-};
-
-void UI::render_shortcuts() {
-	if (ImGui::BeginTabItem("Shortcuts")) {
-		ImGui::Spacing();
-		if (ImGui::Button("Reset All Shortcuts to Default", ImVec2(240, 26))) {
-			ShortcutManager::reset_all_to_defaults();
-			ConfigManager::save();
-		}
-		ImGui::SameLine();
-		static char shortcut_filter_buf[64] = "";
-		ImGui::SetNextItemWidth(180);
-		ImGui::InputTextWithHint("##shortcut_filter", "Search shortcuts...", shortcut_filter_buf,
-								 sizeof(shortcut_filter_buf));
-
-		ImGui::Spacing();
-		ImGui::BeginChild("ShortcutsEditorScroll", ImVec2(0, -1), true);
-
-		std::string filter = shortcut_filter_buf;
-		std::transform(filter.begin(), filter.end(), filter.begin(),
-					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-		std::string last_cat;
-		for (const auto& s : ShortcutManager::get_all()) {
-			if (s.action >= ShortcutAction::QuickSelect1 && s.action <= ShortcutAction::QuickSelect9) {
-				continue;
-			}
-			std::string name_lower = s.display_name;
-			std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string cat_lower = s.category;
-			std::transform(cat_lower.begin(), cat_lower.end(), cat_lower.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string key_lower = s.current_key;
-			std::transform(key_lower.begin(), key_lower.end(), key_lower.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string def_lower = s.default_key;
-			std::transform(def_lower.begin(), def_lower.end(), def_lower.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-			if (!filter.empty() && name_lower.find(filter) == std::string::npos &&
-				cat_lower.find(filter) == std::string::npos && key_lower.find(filter) == std::string::npos &&
-				def_lower.find(filter) == std::string::npos) {
-				continue;
-			}
-
-			if (s.category != last_cat) {
-				if (!last_cat.empty())
-					ImGui::Spacing();
-				ImGui::Text("%s", s.category.c_str());
-				ImGui::Separator();
-				last_cat = s.category;
-			}
-
-			ImGui::PushID(s.id.c_str());
-			bool mod = ShortcutManager::is_modified(s.action);
-			if (mod) {
-				ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "*");
-				ImGui::SameLine();
-			}
-			ImGui::Text("%s:", s.display_name.c_str());
-			ImGui::SameLine(240);
-
-			char key_buf[32];
-			std::snprintf(key_buf, sizeof(key_buf), "%s", s.current_key.c_str());
-			ImGui::SetNextItemWidth(120);
-			if (ImGui::InputText("##key", key_buf, sizeof(key_buf))) {
-				if (ShortcutManager::set_key_string(s.action, key_buf)) {
-					ConfigManager::save();
-				}
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip(
-					"Key combo (e.g. Space, F, Ctrl+Z, Shift+A, PageUp). Press Enter to apply.\nDefault: %s",
-					s.default_key.c_str());
-			}
-
-			if (mod) {
-				ImGui::SameLine();
-				if (ImGui::SmallButton("Reset##key")) {
-					ShortcutManager::reset_to_default(s.action);
-					ConfigManager::save();
-				}
-			}
-			ImGui::PopID();
-		}
-
-		bool mouse_header_shown = false;
-		for (const auto& entry : MOUSE_SHORTCUTS) {
-			std::string a_lower = entry.action;
-			std::transform(a_lower.begin(), a_lower.end(), a_lower.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string c_lower = entry.control;
-			std::transform(c_lower.begin(), c_lower.end(), c_lower.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string d_lower = entry.description;
-			std::transform(d_lower.begin(), d_lower.end(), d_lower.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-			if (!filter.empty() && a_lower.find(filter) == std::string::npos &&
-				c_lower.find(filter) == std::string::npos && d_lower.find(filter) == std::string::npos &&
-				filter != "mouse") {
-				continue;
-			}
-
-			if (!mouse_header_shown) {
-				ImGui::Spacing();
-				ImGui::Text("Canvas & Mouse Controls");
-				ImGui::Separator();
-				mouse_header_shown = true;
-			}
-
-			ImGui::Text("%s:", entry.action.c_str());
-			ImGui::SameLine(240);
-			ImGui::TextColored(ImVec4(0.45f, 0.75f, 1.0f, 1.0f), "%s", entry.control.c_str());
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", entry.description.c_str());
-			}
-		}
-
-		ImGui::Spacing();
-		ImGui::Text("Material Shortcuts (Set: %s)", SetManager::get_current_set().c_str());
-		ImGui::Separator();
-		ImGui::TextDisabled("Stored in set_config.ini under [Shortcuts]. If a material is assigned a custom shortcut, "
-							"next materials follow the order.");
-		if (ImGui::SmallButton("Reset Set Material Shortcuts to Default")) {
-			SetManager::clear_current_material_shortcuts();
-		}
-		ImGui::Spacing();
-
-		auto mat_items = get_all_material_shortcuts();
-		for (const auto& item : mat_items) {
-			std::string name_l = item.name;
-			std::transform(name_l.begin(), name_l.end(), name_l.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string eff_l = item.effective_shortcut;
-			std::transform(eff_l.begin(), eff_l.end(), eff_l.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-			if (!filter.empty() && name_l.find(filter) == std::string::npos &&
-				eff_l.find(filter) == std::string::npos && filter != "material" && filter != "materials") {
-				continue;
-			}
-
-			ImGui::PushID(("mat_sc_" + item.name + "_" + std::to_string(item.id)).c_str());
-
-			const auto& mat = MaterialManager::get_material(item.id);
-			ImVec4 col(mat.color[0] / 255.f, mat.color[1] / 255.f, mat.color[2] / 255.f, 1.0f);
-			ImGui::ColorButton("##swatch", col, ImGuiColorEditFlags_NoTooltip, ImVec2(15, 15));
-			ImGui::SameLine();
-
-			if (item.is_custom) {
-				ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "*");
-				ImGui::SameLine();
-			}
-			ImGui::Text("%s:", item.name.c_str());
-			ImGui::SameLine(180);
-
-			if (item.is_custom) {
-				ImGui::TextColored(ImVec4(0.35f, 0.85f, 1.0f, 1.0f), "[Custom]");
-			} else {
-				ImGui::TextDisabled("[Auto]");
-			}
-			ImGui::SameLine(240);
-
-			char mat_buf[32];
-			std::snprintf(mat_buf, sizeof(mat_buf), "%s", item.effective_shortcut.c_str());
-			ImGui::SetNextItemWidth(120);
-			if (ImGui::InputTextWithHint("##mat_input", "-", mat_buf, sizeof(mat_buf))) {
-				std::string new_str = trim_string(mat_buf);
-				if (new_str.empty() || new_str == "-") {
-					SetManager::remove_current_material_shortcut(item.name);
-				} else {
-					ImGuiKey k;
-					bool c, s, a;
-					if (ShortcutManager::parse_key_combo(new_str, k, c, s, a)) {
-						std::string formatted = ShortcutManager::format_key_combo(k, c, s, a);
-						SetManager::set_current_material_shortcut(item.name, formatted);
-					}
-				}
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("Custom shortcut for '%s' (e.g. 1, 2, G, Shift+1). Press Enter to apply.\nStored in "
-								  "set_config.ini under [Shortcuts].",
-								  item.name.c_str());
-			}
-
-			if (item.is_custom) {
-				ImGui::SameLine();
-				if (ImGui::SmallButton("Reset##mat_reset")) {
-					SetManager::remove_current_material_shortcut(item.name);
-				}
-			}
-
-			ImGui::PopID();
-		}
-
-		ImGui::EndChild();
-		ImGui::EndTabItem();
-	}
-}
-
-void UI::render_theme_editor() {
-	if (ImGui::BeginTabItem("Theme")) {
-		ImGui::Spacing();
-
-		auto& cfg = ConfigManager::get_config();
-		const auto& def_cfg = ConfigManager::get_default_config();
-		ImGuiStyle& style = ImGui::GetStyle();
-
-		ImGui::Spacing();
-		if (button_with_icon("Share Custom Theme to Workshop", IconManager::get(IconID::Transmit), ImVec2(-1, 20))) {
-			open_share_for_theme();
-		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip("Publish your current UI styling and color palette to the Community Workshop.");
-		}
-		ImGui::Spacing();
-
-		if (ImGui::Button("Reset Style to Defaults", ImVec2(220, 26))) {
-			cfg.ui.base_spacing = def_cfg.ui.base_spacing;
-			cfg.ui.window_padding_x = def_cfg.ui.window_padding_x;
-			cfg.ui.window_padding_y = def_cfg.ui.window_padding_y;
-			cfg.ui.frame_padding_x = def_cfg.ui.frame_padding_x;
-			cfg.ui.frame_padding_y = def_cfg.ui.frame_padding_y;
-			cfg.ui.item_spacing_x = def_cfg.ui.item_spacing_x;
-			cfg.ui.item_spacing_y = def_cfg.ui.item_spacing_y;
-			cfg.ui.item_inner_spacing_x = def_cfg.ui.item_inner_spacing_x;
-			cfg.ui.item_inner_spacing_y = def_cfg.ui.item_inner_spacing_y;
-			cfg.ui.cell_padding_x = def_cfg.ui.cell_padding_x;
-			cfg.ui.cell_padding_y = def_cfg.ui.cell_padding_y;
-			cfg.ui.indent_spacing = def_cfg.ui.indent_spacing;
-			cfg.ui.scrollbar_size = def_cfg.ui.scrollbar_size;
-			cfg.ui.grab_min_size = def_cfg.ui.grab_min_size;
-
-			cfg.ui.window_rounding = def_cfg.ui.window_rounding;
-			cfg.ui.child_rounding = def_cfg.ui.child_rounding;
-			cfg.ui.frame_rounding = def_cfg.ui.frame_rounding;
-			cfg.ui.popup_rounding = def_cfg.ui.popup_rounding;
-			cfg.ui.scrollbar_rounding = def_cfg.ui.scrollbar_rounding;
-			cfg.ui.grab_rounding = def_cfg.ui.grab_rounding;
-			cfg.ui.tab_rounding = def_cfg.ui.tab_rounding;
-
-			cfg.ui.window_border_size = def_cfg.ui.window_border_size;
-			cfg.ui.child_border_size = def_cfg.ui.child_border_size;
-			cfg.ui.popup_border_size = def_cfg.ui.popup_border_size;
-			cfg.ui.frame_border_size = def_cfg.ui.frame_border_size;
-			cfg.ui.tab_border_size = def_cfg.ui.tab_border_size;
-
-			cfg.ui.button_size = def_cfg.ui.button_size;
-			cfg.ui.icon_size = def_cfg.ui.icon_size;
-			cfg.ui.material_list_height = def_cfg.ui.material_list_height;
-			cfg.ui.set_list_height = def_cfg.ui.set_list_height;
-			cfg.ui.save_list_height = def_cfg.ui.save_list_height;
-			cfg.ui.stamp_list_height = def_cfg.ui.stamp_list_height;
-			cfg.ui.sidebar_width = def_cfg.ui.sidebar_width;
-			cfg.ui.font_size = def_cfg.ui.font_size;
-			cfg.ui.show_fps = def_cfg.ui.show_fps;
-			cfg.ui.show_active_cells = def_cfg.ui.show_active_cells;
-			cfg.ui.show_simulation_status = def_cfg.ui.show_simulation_status;
-			cfg.ui.background_color = def_cfg.ui.background_color;
-
-			UI::apply_theme_style(style, cfg.ui);
-
-			ConfigManager::save();
-			Window::set_background_color(cfg.ui.background_color);
-		}
-		ImGui::Spacing();
-
-		if (ImGui::CollapsingHeader("Layout & Dimensions", ImGuiTreeNodeFlags_DefaultOpen)) {
-			int btn_size = cfg.ui.button_size;
-			if (ImGui::InputInt("Button Size", &btn_size, 1, 5)) {
-				btn_size = std::clamp(btn_size, 20, 50);
-				cfg.ui.button_size = btn_size;
-				ConfigManager::save();
-			}
-
-			int icon_sz = cfg.ui.icon_size;
-			if (ImGui::InputInt("Icon Size", &icon_sz, 1, 5)) {
-				icon_sz = std::clamp(icon_sz, 10, 36);
-				cfg.ui.icon_size = icon_sz;
-				ConfigManager::save();
-			}
-
-			int sb_w = cfg.ui.sidebar_width;
-			if (ImGui::InputInt("Sidebar Width", &sb_w, 10, 50)) {
-				sb_w = std::clamp(sb_w, 260, 800);
-				cfg.ui.sidebar_width = sb_w;
-				ConfigManager::save();
-			}
-
-			float f_sz = cfg.ui.font_size;
-			if (ImGui::InputFloat("Font Size*", &f_sz, 0.5f, 2.0f, "%.1f px")) {
-				f_sz = std::clamp(f_sz, 10.0f, 32.0f);
-				cfg.ui.font_size = f_sz;
-				ConfigManager::save();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("*Requires application restart to reload font atlas.");
-			}
-
-			bool show_fps = cfg.ui.show_fps;
-			if (custom_checkbox("FPS##show_fps", &show_fps, IconID::Clock, "Display FPS in header")) {
-				cfg.ui.show_fps = show_fps;
-				ConfigManager::save();
-			}
-			ImGui::SameLine(0.0f, get_spacing(0.0f));
-			bool show_cells = cfg.ui.show_active_cells;
-			if (custom_checkbox("Cells##show_cells", &show_cells, IconID::Brick,
-								"Display count of active cells in header")) {
-				cfg.ui.show_active_cells = show_cells;
-				ConfigManager::save();
-			}
-			ImGui::SameLine(0.0f, get_spacing(0.0f));
-			bool show_status = cfg.ui.show_simulation_status;
-			if (custom_checkbox("Status##show_status", &show_status, IconID::Play,
-								"Display PAUSED or RUNNING status indicator in header")) {
-				cfg.ui.show_simulation_status = show_status;
-				ConfigManager::save();
-			}
-		}
-
-		if (ImGui::CollapsingHeader("Spacing & Padding System", ImGuiTreeNodeFlags_DefaultOpen)) {
-			float base_sp = cfg.ui.base_spacing;
-			if (ImGui::InputFloat("Base Spacing", &base_sp, 0.5f, 1.0f, "%.1f px")) {
-				base_sp = std::clamp(base_sp, 0.0f, 32.0f);
-				float delta = base_sp - cfg.ui.base_spacing;
-				cfg.ui.base_spacing = base_sp;
-				cfg.ui.window_padding_x = std::max(0.0f, cfg.ui.window_padding_x + delta);
-				cfg.ui.window_padding_y = std::max(0.0f, cfg.ui.window_padding_y + delta);
-				cfg.ui.frame_padding_x = std::max(0.0f, cfg.ui.frame_padding_x + delta);
-				cfg.ui.frame_padding_y = std::max(0.0f, cfg.ui.frame_padding_y + delta);
-				cfg.ui.item_spacing_x = std::max(0.0f, cfg.ui.item_spacing_x + delta);
-				cfg.ui.item_spacing_y = std::max(0.0f, cfg.ui.item_spacing_y + delta);
-				cfg.ui.item_inner_spacing_x = std::max(0.0f, cfg.ui.item_inner_spacing_x + delta);
-				cfg.ui.item_inner_spacing_y = std::max(0.0f, cfg.ui.item_inner_spacing_y + delta);
-				cfg.ui.cell_padding_x = std::max(0.0f, cfg.ui.cell_padding_x + delta);
-				cfg.ui.cell_padding_y = std::max(0.0f, cfg.ui.cell_padding_y + delta);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip(
-					"Master base spacing constant. Modifying shifts all derived spacings proportionally.");
-			}
-
-			if (ImGui::Button("Reset Offsets to Default")) {
-				cfg.ui.window_padding_x = cfg.ui.base_spacing + 6.0f;
-				cfg.ui.window_padding_y = cfg.ui.base_spacing + 6.0f;
-				cfg.ui.frame_padding_x = cfg.ui.base_spacing + 2.0f;
-				cfg.ui.frame_padding_y = std::max(0.0f, cfg.ui.base_spacing - 1.0f);
-				cfg.ui.item_spacing_x = cfg.ui.base_spacing + 2.0f;
-				cfg.ui.item_spacing_y = cfg.ui.base_spacing;
-				cfg.ui.item_inner_spacing_x = cfg.ui.base_spacing;
-				cfg.ui.item_inner_spacing_y = cfg.ui.base_spacing;
-				cfg.ui.cell_padding_x = std::max(0.0f, cfg.ui.base_spacing - 2.0f);
-				cfg.ui.cell_padding_y = std::max(0.0f, cfg.ui.base_spacing - 4.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip(
-					"Recalculate all padding and spacing values using default offsets from Base Spacing.");
-			}
-
-			auto render_spacing_item = [&](const char* name, float& val, const char* id) {
-				float offset = val - cfg.ui.base_spacing;
-				std::string label = fmt::format("{} (Base {:+.1f})##{}", name, offset, id);
-				float v = val;
-				if (ImGui::InputFloat(label.c_str(), &v, 0.5f, 1.0f, "%.1f px")) {
-					val = std::max(0.0f, v);
-					UI::apply_theme_style(style, cfg.ui);
-					ConfigManager::save();
-				}
-			};
-
-			render_spacing_item("Window Padding X", cfg.ui.window_padding_x, "wp_x");
-			render_spacing_item("Window Padding Y", cfg.ui.window_padding_y, "wp_y");
-			render_spacing_item("Frame Padding X", cfg.ui.frame_padding_x, "fp_x");
-			render_spacing_item("Frame Padding Y", cfg.ui.frame_padding_y, "fp_y");
-			render_spacing_item("Item Spacing X", cfg.ui.item_spacing_x, "is_x");
-			render_spacing_item("Item Spacing Y", cfg.ui.item_spacing_y, "is_y");
-			render_spacing_item("Item Inner Spacing X", cfg.ui.item_inner_spacing_x, "iis_x");
-			render_spacing_item("Item Inner Spacing Y", cfg.ui.item_inner_spacing_y, "iis_y");
-			render_spacing_item("Cell Padding X", cfg.ui.cell_padding_x, "cp_x");
-			render_spacing_item("Cell Padding Y", cfg.ui.cell_padding_y, "cp_y");
-
-			float ind = cfg.ui.indent_spacing;
-			if (ImGui::InputFloat("Indent Spacing", &ind, 1.0f, 5.0f, "%.1f px")) {
-				cfg.ui.indent_spacing = std::max(0.0f, ind);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float scr_sz = cfg.ui.scrollbar_size;
-			if (ImGui::InputFloat("Scrollbar Size", &scr_sz, 1.0f, 2.0f, "%.1f px")) {
-				cfg.ui.scrollbar_size = std::clamp(scr_sz, 6.0f, 32.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float g_min = cfg.ui.grab_min_size;
-			if (ImGui::InputFloat("Grab Min Size", &g_min, 1.0f, 2.0f, "%.1f px")) {
-				cfg.ui.grab_min_size = std::clamp(g_min, 4.0f, 32.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-		}
-
-		if (ImGui::CollapsingHeader("Rounding", ImGuiTreeNodeFlags_DefaultOpen)) {
-			float win_r = cfg.ui.window_rounding;
-			if (ImGui::InputFloat("Window Rounding", &win_r, 0.5f, 2.0f, "%.1f px")) {
-				cfg.ui.window_rounding = std::clamp(win_r, 0.0f, 24.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float child_r = cfg.ui.child_rounding;
-			if (ImGui::InputFloat("Child Rounding", &child_r, 0.5f, 2.0f, "%.1f px")) {
-				cfg.ui.child_rounding = std::clamp(child_r, 0.0f, 20.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float frame_r = cfg.ui.frame_rounding;
-			if (ImGui::InputFloat("Frame Rounding", &frame_r, 0.5f, 2.0f, "%.1f px")) {
-				cfg.ui.frame_rounding = std::clamp(frame_r, 0.0f, 20.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float popup_r = cfg.ui.popup_rounding;
-			if (ImGui::InputFloat("Popup Rounding", &popup_r, 0.5f, 2.0f, "%.1f px")) {
-				cfg.ui.popup_rounding = std::clamp(popup_r, 0.0f, 20.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float scrl_r = cfg.ui.scrollbar_rounding;
-			if (ImGui::InputFloat("Scrollbar Rounding", &scrl_r, 0.5f, 2.0f, "%.1f px")) {
-				cfg.ui.scrollbar_rounding = std::clamp(scrl_r, 0.0f, 20.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float grab_r = cfg.ui.grab_rounding;
-			if (ImGui::InputFloat("Grab Rounding", &grab_r, 0.5f, 2.0f, "%.1f px")) {
-				cfg.ui.grab_rounding = std::clamp(grab_r, 0.0f, 20.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float tab_r = cfg.ui.tab_rounding;
-			if (ImGui::InputFloat("Tab Rounding", &tab_r, 0.5f, 2.0f, "%.1f px")) {
-				cfg.ui.tab_rounding = std::clamp(tab_r, 0.0f, 20.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-		}
-
-		if (ImGui::CollapsingHeader("Borders", ImGuiTreeNodeFlags_DefaultOpen)) {
-			float win_b = cfg.ui.window_border_size;
-			if (ImGui::InputFloat("Window Border Size", &win_b, 0.5f, 1.0f, "%.1f px")) {
-				cfg.ui.window_border_size = std::clamp(win_b, 0.0f, 10.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float child_b = cfg.ui.child_border_size;
-			if (ImGui::InputFloat("Child Border Size", &child_b, 0.5f, 1.0f, "%.1f px")) {
-				cfg.ui.child_border_size = std::clamp(child_b, 0.0f, 10.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float popup_b = cfg.ui.popup_border_size;
-			if (ImGui::InputFloat("Popup Border Size", &popup_b, 0.5f, 1.0f, "%.1f px")) {
-				cfg.ui.popup_border_size = std::clamp(popup_b, 0.0f, 10.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float frame_b = cfg.ui.frame_border_size;
-			if (ImGui::InputFloat("Frame Border Size", &frame_b, 0.5f, 1.0f, "%.1f px")) {
-				cfg.ui.frame_border_size = std::clamp(frame_b, 0.0f, 10.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-
-			float tab_b = cfg.ui.tab_border_size;
-			if (ImGui::InputFloat("Tab Border Size", &tab_b, 0.5f, 1.0f, "%.1f px")) {
-				cfg.ui.tab_border_size = std::clamp(tab_b, 0.0f, 10.0f);
-				UI::apply_theme_style(style, cfg.ui);
-				ConfigManager::save();
-			}
-		}
-
-		ImGui::Spacing();
-
-		if (ImGui::Button("Reset All Colors to Default", ImVec2(220, 26))) {
-			UI::reset_theme_colors();
-		}
-		ImGui::SameLine();
-		static char color_filter_buf[64] = "";
-		ImGui::SetNextItemWidth(180);
-		ImGui::InputTextWithHint("##col_filter", "Filter colors...", color_filter_buf, sizeof(color_filter_buf));
-
-		ImGui::Spacing();
-		ImGui::BeginChild("ColorEditorScroll", ImVec2(0, 720), true);
-		const ImVec4* defs = UI::get_default_colors();
-		std::string filter = color_filter_buf;
-		std::transform(filter.begin(), filter.end(), filter.begin(),
-					   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-		std::string last_col_cat;
-		for (const auto& item : CURATED_THEME_COLORS) {
-			const char* col_name = "";
-			ImVec4* col_ptr = nullptr;
-			const ImVec4* def_ptr = nullptr;
-
-			if (item.col >= 0) {
-				col_name = ImGui::GetStyleColorName(item.col);
-				col_ptr = &style.Colors[item.col];
-				if (defs)
-					def_ptr = &defs[item.col];
-			} else if (item.col == CustomCol_CanvasBackground) {
-				col_name = "CanvasBackground";
-				col_ptr = &cfg.ui.background_color;
-				def_ptr = &ConfigManager::get_default_config().ui.background_color;
-			} else if (item.col == CustomCol_SelectionBoxBorder) {
-				col_name = "SelectionBoxBorder";
-				col_ptr = &cfg.ui.selection_box_color;
-				def_ptr = &ConfigManager::get_default_config().ui.selection_box_color;
-			} else if (item.col == CustomCol_SelectionBoxFill) {
-				col_name = "SelectionBoxFill";
-				col_ptr = &cfg.ui.selection_box_fill;
-				def_ptr = &ConfigManager::get_default_config().ui.selection_box_fill;
-			}
-
-			if (!col_ptr)
-				continue;
-
-			std::string lname = col_name;
-			std::transform(lname.begin(), lname.end(), lname.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string llabel = item.label;
-			std::transform(llabel.begin(), llabel.end(), llabel.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			std::string lcat = item.category;
-			std::transform(lcat.begin(), lcat.end(), lcat.begin(),
-						   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-			if (!filter.empty() && lname.find(filter) == std::string::npos &&
-				llabel.find(filter) == std::string::npos && lcat.find(filter) == std::string::npos) {
-				continue;
-			}
-
-			if (item.category != last_col_cat) {
-				if (!last_col_cat.empty())
-					ImGui::Spacing();
-				ImGui::Text("%s", item.category);
-				ImGui::Separator();
-				last_col_cat = item.category;
-			}
-
-			ImGui::PushID(item.col);
-			bool modified = def_ptr && ConfigManager::color_differs(*col_ptr, *def_ptr);
-			if (modified) {
-				ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "*");
-				ImGui::SameLine();
-			}
-			ImGuiColorEditFlags flags = (item.col == CustomCol_CanvasBackground)
-											? ImGuiColorEditFlags_NoAlpha
-											: (ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf);
-			if (ImGui::ColorEdit4(item.label, (float*)col_ptr, flags)) {
-				if (item.col >= 0) {
-					ConfigManager::get_color_overrides()[col_name] = ConfigManager::color_to_hex(*col_ptr);
-				} else if (item.col == CustomCol_CanvasBackground) {
-					Window::set_background_color(cfg.ui.background_color);
-				}
-				ConfigManager::save();
-			}
-			if (modified) {
-				ImGui::SameLine();
-				if (ImGui::SmallButton("Reset##col")) {
-					*col_ptr = *def_ptr;
-					if (item.col >= 0) {
-						ConfigManager::get_color_overrides().erase(col_name);
-					} else if (item.col == CustomCol_CanvasBackground) {
-						Window::set_background_color(cfg.ui.background_color);
-					}
-					ConfigManager::save();
-				}
-			}
-			ImGui::PopID();
-		}
-		ImGui::EndChild();
-		ImGui::EndTabItem();
-	}
-}
-
-void UI::render_modals() {
-	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-	const std::string& current_set = SetManager::get_current_set();
-
-	if (open_empty_rule_warning_popup) {
-		ImGui::OpenPopup("Performance Warning##EmptyRule");
-		open_empty_rule_warning_popup = false;
-	}
-
-	if (open_large_neighborhood_warning_popup) {
-		ImGui::OpenPopup("Performance Warning##LargeNeighborhood");
-		open_large_neighborhood_warning_popup = false;
-	}
-
-	if (open_switch_popup) {
-		ImGui::OpenPopup("Unsaved Changes Switch");
-		open_switch_popup = false;
-	}
-
-	if (open_create_set_popup) {
-		ImGui::OpenPopup("Create Set...");
-		save_as_buf[0] = '\0';
-		open_create_set_popup = false;
-	}
-
-	if (open_delete_set_popup) {
-		ImGui::OpenPopup("Delete Set Confirmation");
-		open_delete_set_popup = false;
-	}
-
-	if (s_show_set_override_warning) {
-		ImGui::OpenPopup("Item Warning##OverrideModal");
-		s_show_set_override_warning = false;
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(460.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	if (ImGui::BeginPopupModal("Item Warning##OverrideModal", nullptr,
-							   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::Spacing();
-		if (s_pending_is_version_load) {
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "WARNING: LOCAL MODIFICATIONS DETECTED");
-			ImGui::Separator();
-			ImGui::Spacing();
-			ImGui::TextWrapped("You have made local modifications to the %s '%s'.",
-							   s_pending_override_item.type.c_str(), s_pending_override_item.title.c_str());
-			ImGui::Spacing();
-			ImGui::BulletText("Installed Local Version: v%u (Modified)", s_pending_local_version);
-			ImGui::BulletText("Target Version to Load: v%u", s_pending_target_version);
-			ImGui::Spacing();
-			ImGui::TextWrapped("Loading version v%u from the Workshop will overwrite your local changes.\n"
-							   "Are you sure you want to proceed?",
-							   s_pending_target_version);
-		} else if (s_pending_is_switch) {
-			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "WARNING: LOCAL MODIFICATIONS DETECTED");
-			ImGui::Separator();
-			ImGui::Spacing();
-			ImGui::TextWrapped("You have made local modifications to the %s '%s'.",
-							   s_pending_override_item.type.c_str(), s_pending_override_item.title.c_str());
-			ImGui::Spacing();
-			ImGui::BulletText("Installed Local Version: v%u (Modified)", s_pending_local_version);
-			ImGui::BulletText("Workshop Latest Version: v%u", s_pending_target_version);
-			ImGui::Spacing();
-			ImGui::TextWrapped("Loading the latest version from the Workshop will overwrite your local changes.\n"
-							   "You can choose to overwrite and load the Workshop version, or keep your local "
-							   "modifications and switch.");
-		} else if (s_pending_is_update) {
-			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "SET UPDATE AVAILABLE");
-			ImGui::Separator();
-			ImGui::Spacing();
-			ImGui::TextWrapped("An updated version of set '%s' is available on the Workshop.",
-							   s_pending_override_item.title.c_str());
-			ImGui::Spacing();
-			ImGui::BulletText("Installed Local Version: v%u", s_pending_local_version);
-			ImGui::BulletText("Workshop Online Version: v%d", s_pending_override_item.version);
-			ImGui::Spacing();
-			ImGui::TextWrapped(
-				"Proceeding will replace your local set files with the online version.\n"
-				"Any local modifications made to this set's materials or configuration will be overwritten.");
-		} else {
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "WARNING: OVERWRITING LOCAL ITEM");
-			ImGui::Separator();
-			ImGui::Spacing();
-			ImGui::TextWrapped("A local %s named '%s' (v%u) already exists on disk.",
-							   s_pending_override_item.type.c_str(), s_pending_override_item.title.c_str(),
-							   s_pending_local_version);
-			ImGui::Spacing();
-			ImGui::BulletText("Workshop Online Version: v%d", s_pending_override_item.version);
-			ImGui::Spacing();
-			ImGui::TextWrapped("Proceeding will replace your local files with the online version.\n"
-							   "Any local modifications will be overwritten.");
-		}
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		std::string confirm_lbl = s_pending_is_version_load
-									  ? ("Overwrite & Load v" + std::to_string(s_pending_target_version))
-									  : (s_pending_is_update ? "Overwrite & Update" : "Overwrite & Load");
-		if (ImGui::Button(confirm_lbl.c_str(), ImVec2(160, 30))) {
-			if (s_pending_override_confirm) {
-				s_pending_override_confirm();
-			}
-			s_items_activating.erase(s_pending_override_item.id);
-			ImGui::CloseCurrentPopup();
-		}
-
-		if (s_pending_is_switch && s_pending_override_keep_local) {
-			ImGui::SameLine();
-			if (ImGui::Button("Keep Local & Switch", ImVec2(160, 30))) {
-				if (s_pending_override_keep_local) {
-					s_pending_override_keep_local();
-				}
-				s_items_activating.erase(s_pending_override_item.id);
-				ImGui::CloseCurrentPopup();
-			}
-		}
-
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(90, 30))) {
-			s_items_activating.erase(s_pending_override_item.id);
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(440.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	if (ImGui::BeginPopupModal("Performance Warning##EmptyRule", nullptr,
-							   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(1.00f, 0.70f, 0.20f, 1.00f), "PERFORMANCE WARNING");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		if (s_pending_empty_inherit_id != 255) {
-			ImGui::TextWrapped("Inheriting rules onto the 'empty' material means every empty cell on the grid will be "
-							   "evaluated every frame.");
-			ImGui::TextWrapped(
-				"This can significantly lower simulation performance when large areas of the grid are empty.");
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Inherit Anyway", ImVec2(150, 30))) {
-				UndoManager::push_snapshot("Set Inheritance");
-				MaterialManager::set_material_inheritance(0, s_pending_empty_inherit_id);
-				unsaved_changes = true;
-				s_pending_empty_inherit_id = 255;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(120, 30))) {
-				s_pending_empty_inherit_id = 255;
-				ImGui::CloseCurrentPopup();
-			}
-		} else {
-			ImGui::TextWrapped("Adding rules to the 'empty' material means every empty cell on the grid will be "
-							   "evaluated every frame.");
-			ImGui::TextWrapped(
-				"This can significantly lower simulation performance when large areas of the grid are empty.");
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Add Rule Anyway", ImVec2(150, 30))) {
-				auto& mats = MaterialManager::get_materials();
-				for (auto& m : mats) {
-					if (m.id == 0) {
-						UndoManager::push_snapshot("Add Rule");
-						RuleDefinition new_rule;
-						new_rule.init_default(m.id);
-						m.rules.push_back(new_rule);
-						m.rule_order.push_back({false, m.rules.size() - 1});
-						MaterialManager::rebuild_compiled_rules();
-						unsaved_changes = true;
-						break;
-					}
-				}
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(120, 30))) {
-				ImGui::CloseCurrentPopup();
-			}
-		}
-		ImGui::EndPopup();
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	if (ImGui::BeginPopupModal("Performance Warning##LargeNeighborhood", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		ImGui::Text("Warning: Expanding to Large Rule Neighborhood (>100 cells)");
-		ImGui::Spacing();
-		ImGui::TextWrapped(
-			"You are expanding the rule neighborhood beyond 100 cells.\n\n"
-			"Very large neighborhoods significantly increase the computational area checked per cell, "
-			"which can noticeably impact simulation performance.\n\n"
-			"Would you like to enable 'Allow Large Rule Neighborhoods' in Advanced Settings and expand this rule?");
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		if (ImGui::Button("Enable & Expand", ImVec2(150, 30))) {
-			ConfigManager::get_config().allow_large_neighborhoods = true;
-			ConfigManager::save();
-			if (s_pending_expand_rule_idx >= 0) {
-				auto& mats = MaterialManager::get_materials();
-				for (auto& m : mats) {
-					if (m.id == s_pending_expand_mat_id) {
-						if (s_pending_expand_rule_idx < static_cast<int>(m.rules.size())) {
-							UndoManager::push_snapshot("Expand Rule Neighborhood");
-							auto& rule = m.rules[s_pending_expand_rule_idx];
-							if (s_pending_expand_side == ExpandSide::Top)
-								rule.expand_top();
-							else if (s_pending_expand_side == ExpandSide::Bottom)
-								rule.expand_bottom();
-							else if (s_pending_expand_side == ExpandSide::Left)
-								rule.expand_left();
-							else if (s_pending_expand_side == ExpandSide::Right)
-								rule.expand_right();
-							MaterialManager::rebuild_compiled_rules();
-							unsaved_changes = true;
-						}
-						break;
-					}
-				}
-			}
-			s_pending_expand_rule_idx = -1;
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(100, 30))) {
-			s_pending_expand_rule_idx = -1;
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
-	}
-
-	if (open_fork_set_popup) {
-		ImGui::OpenPopup("Fork Set...");
-		open_fork_set_popup = false;
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(400.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	if (ImGui::BeginPopupModal("Fork Set...", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::Spacing();
-		ImGui::Text("FORK CURRENT SET");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::Text("Enter name for your forked set:");
-		ImGui::SetNextItemWidth(-1.0f);
-		if (ImGui::InputText("##fork_set_name_input", save_as_buf, sizeof(save_as_buf),
-							 ImGuiInputTextFlags_EnterReturnsTrue)) {
-			std::string name = save_as_buf;
-			name = sanitize_name(name);
-			if (!name.empty()) {
-				SetManager::fork_set(current_set, name);
-				SetManager::set_current_set(name);
-				unsaved_changes = false;
-				ToastManager::success("Forked set created: '" + name + "'!");
-				ImGui::CloseCurrentPopup();
-			}
-		}
-
-		if (ImGui::IsWindowAppearing()) {
-			ImGui::SetKeyboardFocusHere();
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		if (ImGui::Button("Confirm Fork", ImVec2(120, 30))) {
-			std::string name = save_as_buf;
-			name = sanitize_name(name);
-			if (!name.empty()) {
-				SetManager::fork_set(current_set, name);
-				SetManager::set_current_set(name);
-				unsaved_changes = false;
-				ToastManager::success("Forked set created: '" + name + "'!");
-				ImGui::CloseCurrentPopup();
-			}
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(120, 30))) {
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(400.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	if (ImGui::BeginPopupModal("Create Set...", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::Spacing();
-		if (duplicate_set_checkbox) {
-			ImGui::Text("DUPLICATE CURRENT SET");
-		} else {
-			ImGui::Text("CREATE NEW EMPTY SET");
-		}
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::Text("Enter name for the new set:");
-		ImGui::SetNextItemWidth(-1.0f);
-		if (ImGui::InputText("##new_set_name_input", save_as_buf, sizeof(save_as_buf),
-							 ImGuiInputTextFlags_EnterReturnsTrue)) {
-			std::string name = save_as_buf;
-			name = sanitize_name(name);
-			if (!name.empty()) {
-				if (duplicate_set_checkbox) {
-					SetManager::copy_set(current_set, name);
-				} else {
-					SetManager::create_new_empty_set(name);
-					SetManager::set_current_set(name);
-				}
-				unsaved_changes = false;
-				ImGui::CloseCurrentPopup();
-			}
-		}
-
-		if (ImGui::IsWindowAppearing()) {
-			ImGui::SetKeyboardFocusHere();
-		}
-
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		if (ImGui::Button("Confirm", ImVec2(120, 30))) {
-			std::string name = save_as_buf;
-			if (!name.empty()) {
-				if (duplicate_set_checkbox) {
-					SetManager::copy_set(current_set, name);
-				} else {
-					SetManager::create_new_empty_set(name);
-					SetManager::set_current_set(name);
-				}
-				unsaved_changes = false;
-				ImGui::CloseCurrentPopup();
-			}
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(120, 30))) {
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(400.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	if (ImGui::BeginPopupModal("Delete Set Confirmation", nullptr,
-							   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.00f), "DELETE MATERIAL SET");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::TextWrapped("Are you sure you want to delete the set '%s'?", current_set.c_str());
-		ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.00f), "This will delete all its materials, rules, and saves.");
-		ImGui::Text("This action cannot be undone.");
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
-		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.15f, 0.15f, 1.0f));
-		if (ImGui::Button("Delete Permanently", ImVec2(180, 30))) {
-			SetManager::delete_set(current_set);
-			unsaved_changes = false;
-			selected_id = 0;
-			ImGui::PopStyleColor(3);
-			ImGui::CloseCurrentPopup();
-		} else {
-			ImGui::PopStyleColor(3);
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(120, 30))) {
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
-	}
-
-	if (show_exit_popup) {
-		if (unsaved_changes) {
-			ImGui::OpenPopup("Exit Confirmation");
-			exit_save_as_new_set = false;
-			new_set_name_buf[0] = '\0';
-		} else {
-			ConfigManager::save();
-			UI::shutdown();
-			Grid::shutdown();
-			Window::shutdown();
-			exit(0);
-		}
-		show_exit_popup = false;
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(400.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	if (ImGui::BeginPopupModal("Exit Confirmation", nullptr,
-							   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(1.00f, 0.40f, 0.40f, 1.00f), "WARNING: UNSAVED CHANGES");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		if (!exit_save_as_new_set) {
-			ImGui::TextWrapped("You have unsaved changes in %s. What would you like to do?", current_set.c_str());
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			std::string save_btn_lbl = "Save & Exit (" + current_set + ")";
-			if (ImGui::Button(save_btn_lbl.c_str(), ImVec2(190, 30))) {
-				MaterialManager::save_all_materials(SETS_DIRECTORY + current_set);
-				ConfigManager::save();
-				UI::shutdown();
-				Grid::shutdown();
-				Window::shutdown();
-				exit(0);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Save as New Set...", ImVec2(190, 30))) {
-				exit_save_as_new_set = true;
-			}
-
-			if (ImGui::Button("Exit Without Saving", ImVec2(190, 30))) {
-				ConfigManager::save();
-				UI::shutdown();
-				Grid::shutdown();
-				Window::shutdown();
-				exit(0);
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(190, 30))) {
-				ImGui::CloseCurrentPopup();
-			}
-		} else {
-			ImGui::Text("Enter name for the new set:");
-			ImGui::SetNextItemWidth(-1.0f);
-			if (ImGui::InputText("##exit_new_set_name", new_set_name_buf, sizeof(new_set_name_buf),
-								 ImGuiInputTextFlags_EnterReturnsTrue)) {
-				std::string new_set_name = new_set_name_buf;
-				new_set_name = sanitize_name(new_set_name);
-				if (!new_set_name.empty()) {
-					SetManager::copy_set(current_set, new_set_name);
-					ConfigManager::save();
-					UI::shutdown();
-					Grid::shutdown();
-					Window::shutdown();
-					exit(0);
-				}
-			}
-
-			if (ImGui::IsWindowAppearing()) {
-				ImGui::SetKeyboardFocusHere();
-			}
-
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Save & Exit", ImVec2(120, 30))) {
-				std::string new_set_name = new_set_name_buf;
-				new_set_name = sanitize_name(new_set_name);
-				if (!new_set_name.empty()) {
-					SetManager::copy_set(current_set, new_set_name);
-					ConfigManager::save();
-					UI::shutdown();
-					Grid::shutdown();
-					Window::shutdown();
-					exit(0);
-				}
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Back", ImVec2(120, 30))) {
-				exit_save_as_new_set = false;
-			}
-		}
-
-		ImGui::EndPopup();
-	}
-
-	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSizeConstraints(ImVec2(400.0f, -1.0f), ImVec2(FLT_MAX, -1.0f));
-	bool should_proceed_switch = false;
-	if (ImGui::BeginPopupModal("Unsaved Changes Switch", nullptr,
-							   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
-		ImGui::Spacing();
-		ImGui::TextColored(ImVec4(1.00f, 0.70f, 0.20f, 1.00f), "WARNING: UNSAVED CHANGES");
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		ImGui::TextWrapped("You have unsaved changes in the current set. Do you "
-						   "want to save them before switching?");
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::Spacing();
-
-		if (ImGui::Button("Save & Switch", ImVec2(120, 30))) {
-			MaterialManager::save_all_materials(SETS_DIRECTORY + current_set);
-			should_proceed_switch = true;
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Discard & Switch", ImVec2(120, 30))) {
-			should_proceed_switch = true;
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::SameLine();
-		if (ImGui::Button("Cancel", ImVec2(120, 30))) {
-			pending_set_switch = "";
-			pending_save_load = "";
-			ImGui::CloseCurrentPopup();
-		}
-		ImGui::EndPopup();
-	}
-
-	if (should_proceed_switch) {
-		if (!pending_set_switch.empty()) {
-			SetManager::set_current_set(pending_set_switch);
-			selected_id = 0;
-			unsaved_changes = false;
-			pending_set_switch = "";
-		} else if (!pending_save_load.empty()) {
-			SaveManager::load_from_file_async(pending_save_load, current_set, LoadPlacement::Center,
-											  [](bool success, const std::string&) {
-												  if (success) {
-													  selected_id = 0;
-													  unsaved_changes = false;
-												  }
-											  });
-			pending_save_load = "";
-		}
-	}
-
-	if (s_show_auth_modal) {
-		render_workshop_auth_modal();
-	}
-	check_and_render_report_modal();
-	check_and_render_publish_modal();
-	check_and_render_versions_modal();
-	check_and_render_migrate_modal();
-	check_and_render_fork_item_modal();
-	WorkshopItemEditor::render();
-	ToastManager::render();
+	return UIThumbnails::generate_thumbnail_base64(type_idx, target_set, target_file);
 }

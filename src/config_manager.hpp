@@ -30,7 +30,6 @@ struct UIConfig {
 	ImVec4 selection_box_color = ImVec4(80.0f / 255.0f, 200.0f / 255.0f, 1.0f, 1.0f);
 	ImVec4 selection_box_fill = ImVec4(50.0f / 255.0f, 150.0f / 255.0f, 1.0f, 30.0f / 255.0f);
 
-	// Unified spacing system (base spacing +/- offsets)
 	float base_spacing = 6.0f;
 	float window_padding_x = 12.0f;
 	float window_padding_y = 12.0f;
@@ -46,7 +45,6 @@ struct UIConfig {
 	float scrollbar_size = 14.0f;
 	float grab_min_size = 10.0f;
 
-	// Rounding constants
 	float window_rounding = 6.0f;
 	float child_rounding = 4.0f;
 	float frame_rounding = 4.0f;
@@ -55,7 +53,6 @@ struct UIConfig {
 	float grab_rounding = 4.0f;
 	float tab_rounding = 4.0f;
 
-	// Border constants
 	float window_border_size = 1.0f;
 	float child_border_size = 1.0f;
 	float popup_border_size = 1.0f;
@@ -74,9 +71,10 @@ struct Config {
 	bool vsync = false;
 	uint32_t target_fps = 500;
 	uint32_t processing_mode = 0;
-	uint32_t thread_count = (DEFAULT_SIM_HEIGHT + STRIP_HEIGHT - 1) / STRIP_HEIGHT / 2;
+	uint32_t thread_count = (1024 + STRIP_HEIGHT - 1) / STRIP_HEIGHT / 2;
 	bool prevent_downclock = true;
 	bool allow_large_neighborhoods = false;
+	uint32_t compression_quality = 2;
 
 	UIConfig ui;
 

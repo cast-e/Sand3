@@ -133,6 +133,8 @@ void ConfigManager::load() {
 						config.prevent_downclock = (val == "true" || val == "1");
 					else if (key == "allow_large_neighborhoods")
 						config.allow_large_neighborhoods = (val == "true" || val == "1");
+					else if (key == "compression_quality")
+						config.compression_quality = static_cast<uint32_t>(std::clamp(std::stoi(val), 0, 2));
 				} catch (...) {}
 			} else if (section == "UI") {
 				try {
@@ -349,6 +351,8 @@ void ConfigManager::save() {
 	if (config.allow_large_neighborhoods != default_config.allow_large_neighborhoods)
 		adv_lines.push_back(std::string("allow_large_neighborhoods = ") +
 							(config.allow_large_neighborhoods ? "true" : "false"));
+	if (config.compression_quality != default_config.compression_quality)
+		adv_lines.push_back("compression_quality = " + std::to_string(config.compression_quality));
 
 	if (!adv_lines.empty()) {
 		out << "[Advanced]\n";

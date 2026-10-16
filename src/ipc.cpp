@@ -36,7 +36,7 @@ bool IPC::send_to_existing_instance(const std::string& uri) {
 	if (fd < 0)
 		return false;
 
-	struct sockaddr_un addr;
+	struct sockaddr_un addr{};
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path) - 1);
@@ -94,7 +94,7 @@ void IPC::start_server() {
 	int flags = fcntl(s_server_fd, F_GETFL, 0);
 	fcntl(s_server_fd, F_SETFL, flags | O_NONBLOCK);
 
-	struct sockaddr_un addr;
+	struct sockaddr_un addr{};
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
 	strncpy(addr.sun_path, sock_path.c_str(), sizeof(addr.sun_path) - 1);

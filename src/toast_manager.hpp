@@ -5,12 +5,7 @@
 #include <string>
 #include <vector>
 
-enum class ToastType {
-	Info,
-	Success,
-	Warning,
-	Error
-};
+enum class ToastType { Info, Success, Warning, Error };
 
 struct ToastNotification {
 	uint64_t id = 0;

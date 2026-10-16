@@ -6,11 +6,11 @@
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
 
+#include <atomic>
+
 #include "grid.hpp"
 #include "resources/sand3_png.h"
 #include "vulkan.hpp"
-
-#include <atomic>
 
 static SDL_Cursor* s_wait_cursor = nullptr;
 static SDL_Cursor* s_default_cursor = nullptr;
@@ -34,25 +34,25 @@ void Window::init(uint32_t t_width, uint32_t t_height) {
 		fmt::print("SDL_Init failed: {}\n", SDL_GetError());
 	}
 	window = SDL_CreateWindow("Sand3", t_width, t_height, SDL_WINDOW_RESIZABLE);
-	if (window == NULL) {
+	if (window == nullptr) {
 		fmt::print("SDL_CreateWindow failed: {}\n", SDL_GetError());
 	}
 	SDL_IOStream* io_stream = SDL_IOFromMem(sand3_png, sand3_png_len);
 	SDL_Surface* surface = SDL_LoadPNG_IO(io_stream, true);
-	if (surface == NULL) {
+	if (surface == nullptr) {
 		fmt::print("SDL_LoadPNG_IO failed: {}\n", SDL_GetError());
 	}
 	SDL_SetWindowIcon(window, surface);
 	SDL_DestroySurface(surface);
 
 	renderer = SDL_CreateRenderer(window, nullptr);
-	if (renderer == NULL) {
+	if (renderer == nullptr) {
 		fmt::print("SDL_CreateRenderer failed: {}\n", SDL_GetError());
 	}
 
 	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, Grid::get_width(),
 								Grid::get_height());
-	if (texture == NULL) {
+	if (texture == nullptr) {
 		fmt::print("SDL_CreateTexture failed: {}\n", SDL_GetError());
 	}
 	SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
@@ -96,7 +96,7 @@ void Window::resize_texture_and_buffer(uint32_t new_width, uint32_t new_height) 
 		texture = nullptr;
 	}
 	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, new_width, new_height);
-	if (texture == NULL) {
+	if (texture == nullptr) {
 		fmt::print("SDL_CreateTexture failed: {}\n", SDL_GetError());
 	}
 	SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_PIXELART);
@@ -113,7 +113,8 @@ void Window::present() {
 	}
 
 	SDL_UpdateTexture(texture, nullptr, pixels, Grid::get_width() * 4);
-	SDL_SetRenderDrawColorFloat(renderer, background_color.x, background_color.y, background_color.z, background_color.w);
+	SDL_SetRenderDrawColorFloat(renderer, background_color.x, background_color.y, background_color.z,
+								background_color.w);
 	SDL_RenderClear(renderer);
 	SDL_RenderTexture(renderer, texture, nullptr, &dst_rect);
 
@@ -195,9 +196,7 @@ SDL_FRect Window::get_dst_rect() { return dst_rect; }
 void Window::set_background_color(const ImVec4& color) { background_color = color; }
 ImVec4 Window::get_background_color() { return background_color; }
 
-void Window::increment_busy() {
-	s_busy_count.fetch_add(1);
-}
+void Window::increment_busy() { s_busy_count.fetch_add(1); }
 
 void Window::decrement_busy() {
 	int prev = s_busy_count.fetch_sub(1);
@@ -206,9 +205,7 @@ void Window::decrement_busy() {
 	}
 }
 
-bool Window::is_busy() {
-	return s_busy_count.load() > 0;
-}
+bool Window::is_busy() { return s_busy_count.load() > 0; }
 
 void Window::set_cursor_wait(bool wait) {
 	if (wait == s_is_wait_cursor) {

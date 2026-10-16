@@ -1053,8 +1053,19 @@ void Vulkan::clear() {
 		staging_mapped[i] = empty_cell;
 	}
 
-	const auto& rm = MaterialManager::get_runtime_material(0);
-	const uint32_t bg_color = compute_cell_color(rm, empty_cell);
+	uint32_t bg_color;
+	const auto& meta = SetManager::get_current_metadata();
+	if (heatmap_attr_index >= 0 && heatmap_attr_index < static_cast<int>(meta.attributes.size())) {
+		float val = empty_cell.get_attr_f(heatmap_attr_index);
+		auto col = meta.heatmap_gradient.sample(val);
+		uint8_t r = static_cast<uint8_t>(std::clamp(col[0] * 255.0f, 0.0f, 255.0f));
+		uint8_t g = static_cast<uint8_t>(std::clamp(col[1] * 255.0f, 0.0f, 255.0f));
+		uint8_t b = static_cast<uint8_t>(std::clamp(col[2] * 255.0f, 0.0f, 255.0f));
+		bg_color = (255u << 24) | (b << 16) | (g << 8) | r;
+	} else {
+		const auto& rm = MaterialManager::get_runtime_material(0);
+		bg_color = compute_cell_color(rm, empty_cell);
+	}
 	for (size_t i = 0; i < width * height; ++i) {
 		display_mapped[i] = bg_color;
 	}

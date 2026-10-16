@@ -5,10 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-enum class AttributeType : uint8_t {
-	Int = 0,
-	Float = 1
-};
+enum class AttributeType : uint8_t { Int = 0, Float = 1 };
 
 struct AttributeDefinition {
 	std::string name;
